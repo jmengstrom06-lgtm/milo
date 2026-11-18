@@ -96,6 +96,8 @@ export default function App() {
   const [heard, setHeard] = useState<string | null>(null);
   const [pause, setPause] = useState(0); // "sending…" bar while you finish talking
   const [working, setWorking] = useState(false); // Milo is using the computer
+  const workingRef = useRef(false);
+  workingRef.current = working;
   const [researchQ, setResearchQ] = useState<{ q: string; id: number } | null>(null);
   const [rpSize, setRpSize] = useState<PanelSize>("compact");
   const [sweep, setSweep] = useState<SweepState | null>(null);
@@ -151,7 +153,10 @@ export default function App() {
   const lastCommandAt = useRef(0);
   // The "Got it" card: what Milo heard, waiting for go / cancel / more.
   const [pending, setPending] = useState<{ text: string; progress: number; unfinished: boolean } | null>(null);
-  const pendingRef = useRef<{ text: string; started: number; unfinished: boolean } | null>(null);
+  const pendingRef = useRef<{ text: string; started: number; unfinished: boolean; first?: number } | null>(null);
+  const levelRef = useRef(0); // live mic loudness (0..1)
+  const lastRun = useRef<{ text: string; at: number } | null>(null); // the command that just started
+  const quietStop = useRef(false); // stopping a task to restart it with more words: don't say "Stopped!"
   const earStateRef = useRef<string>("off"); // last thing you asked for (so a bare "go" can redo it)
   const restoreHandsFree = useRef(false);
   const interrupted = useRef(false); // you talked over Milo / stopped him
@@ -513,6 +518,10 @@ export default function App() {
         return false;
       }
       if (r.status === "stopped") {
+        if (quietStop.current) {
+          quietStop.current = false;
+          return false;
+        }
         setMood("idle");
         await say("Stopped!");
         setBubble(null);
@@ -1195,7 +1204,10 @@ export default function App() {
   // Wire up the microphone once.
   useEffect(() => {
     const e = ears.current!;
-    e.onLevel = (l) => setLevel(l);
+    e.onLevel = (l) => {
+      levelRef.current = l;
+      setLevel(l);
+    };
     e.onState = (st) => {
       // A push-to-talk turn just ended: switch hands-free back on.
       if (st === "off" && restoreHandsFree.current) {
@@ -1308,6 +1320,25 @@ export default function App() {
         return;
       }
 
+      // ---- You kept talking right after a command started: it was one long command. Stop, merge, restart.
+      const LR = lastRun.current;
+      if (!pendingRef.current && LR && Date.now() - LR.at < 15000) {
+        const tt = text.trim().toLowerCase().replace(/[.!?]+$/, "");
+        const isStop = /^(stop|cancel|never ?mind|forget it|wait|hold on|pause)\b/.test(tt) && tt.split(/\s+/).length <= 4;
+        const connects = /^(and|then|also|plus|after that|so|but|with|to|in|on|about|that|which|where|make|write|type|put|have it|and then)\b/.test(tt);
+        if (!isStop && !isBareGo(tt) && (connects || soundsUnfinished(LR.text) || Date.now() - LR.at < 7000)) {
+          lastRun.current = null;
+          if (workingRef.current) {
+            quietStop.current = true;
+            window.milo.stopTask();
+          }
+          runId.current++; // cancels a lesson/look that was starting
+          hush();
+          setPendingCmd(`${LR.text.replace(/[.!?]+$/, "")} ${stripGo(text)}`.trim(), stripGo(text) !== text.trim());
+          return;
+        }
+      }
+
       // ---- A command is waiting on the "Got it" card: go / cancel / keep adding.
       const P = pendingRef.current;
       if (P) {
@@ -1362,13 +1393,14 @@ export default function App() {
   }, [say, listen]);
 
   // ---- "Got it" card --------------------------------------------------------------
-  const AUTO_GO_MS = 3000;
+  const AUTO_GO_MS = 4000;
   const runPending = (text: string) => {
     pendingRef.current = null;
     setPending(null);
     followUntil.current = Date.now() + 8000; // if you keep talking, the rest still counts (no "Milo" needed)
     lastCommand.current = text;
     lastCommandAt.current = Date.now();
+    lastRun.current = { text, at: Date.now() };
     setHeard(text);
     setBubble(null);
     routeRef.current(text);
@@ -1402,7 +1434,9 @@ export default function App() {
     const t = window.setInterval(() => {
       const P = pendingRef.current;
       if (!P) return;
-      if (earStateRef.current === "hearing" || earStateRef.current === "thinking") {
+      P.first = P.first ?? Date.now();
+      const stillTalking = earStateRef.current === "hearing" || earStateRef.current === "thinking" || levelRef.current > 0.3;
+      if (stillTalking && Date.now() - P.first < 30000) {
         P.started = Date.now(); // you're still talking: hold
         setPending((p) => (p ? { ...p, progress: 0 } : p));
         return;
