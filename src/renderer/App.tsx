@@ -90,7 +90,8 @@ export default function App() {
   const followUntil = useRef(0); // hands-free: no need to say "Milo" until this time
   const voiceSession = useRef(false); // the current lesson was started by voice
   const routeRef = useRef<(text: string, spoken?: boolean) => void>(() => {});
-  const pendingTask = useRef<string | null>(null); // a task waiting on the student's yes/no
+  const pendingTask = useRef<string | null>(null);
+  const restoreHandsFree = useRef(false); // a task waiting on the student's yes/no
   const voiceRef = useRef(voice);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -195,8 +196,14 @@ export default function App() {
 
   // ---- ears ---------------------------------------------------------------------
   /** Listen for one thing (push-to-talk / follow-up). In hands-free mode, just open a no-wake-word window. */
-  const listen = useCallback(async () => {
+  const listen = useCallback(async (pushToTalk = false) => {
     const e = ears.current!;
+    if (e.mode === "always" && pushToTalk) {
+      // Push-to-talk beats hands-free: listen to just you right now, then go back to hands-free.
+      restoreHandsFree.current = true;
+      await e.setMode("once");
+      return;
+    }
     if (e.mode === "always") {
       followUntil.current = Date.now() + 12000;
       setEarState("waiting");
@@ -518,6 +525,12 @@ export default function App() {
     const e = ears.current!;
     e.onLevel = (l) => setLevel(l);
     e.onState = (st) => {
+      // A push-to-talk turn just ended: switch hands-free back on.
+      if (st === "off" && restoreHandsFree.current) {
+        restoreHandsFree.current = false;
+        e.setMode("always");
+        return;
+      }
       setEarState(st);
       if (st === "hearing" && (e.mode !== "always" || Date.now() < followUntil.current)) setMood("listening");
       if (st === "timeout") {
@@ -547,7 +560,7 @@ export default function App() {
       let text = r.text;
       if (e.mode === "always" && Date.now() > followUntil.current) {
         // Hands-free: only act when you start with "Milo".
-        const w = stripWake(text);
+        const w = stripWake(text, true);
         if (!w.woke) {
           setMood((m) => (m === "thinking" || m === "listening" ? "idle" : m));
           return;
@@ -576,11 +589,17 @@ export default function App() {
   }, [say, listen]);
 
   const talk = useCallback(() => {
+    const e = ears.current!;
+    // Pressed again while listening: send what you said right now (push-to-talk in loud rooms).
+    if (e.mode === "once") {
+      e.flush();
+      return;
+    }
     hush();
     setHeard(null);
-    setBubble("I'm listening…");
+    setBubble("I'm listening… (press again to send)");
     setMood("listening");
-    listen();
+    listen(true);
   }, [listen]);
 
   // "Hey Milo" is on by default (and remembered).

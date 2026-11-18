@@ -16,7 +16,8 @@ const START_FRAMES = 4; // ~256 ms of voice to count as speech
 const MIN_VOICED_S = 0.5; // shorter than this is a cough/click, not words
 const VOICE_RATIO = 0.45; // share of energy that must sit in the human-voice band (300-3400 Hz)
 const END_SILENCE = 14; // ~900 ms of quiet ends the utterance
-const MAX_FRAMES = Math.round((15 * RATE) / FRAME); // 15 s cap
+const MAX_FRAMES = Math.round((15 * RATE) / FRAME); // 15 s cap (push-to-talk)
+const MAX_FRAMES_HF = Math.round((8 * RATE) / FRAME); // 8 s cap in hands-free so background chatter can't hang him
 const ONCE_TIMEOUT = Math.round((7 * RATE) / FRAME); // give up after 7 s of nothing
 
 export class Ears {
@@ -34,6 +35,7 @@ export class Ears {
   private idleFrames = 0;
   private floor = 0.008;
   private uttEnergy: number[] = []; // per-frame loudness of the current utterance
+  private uttPeak = 0; // how loud the current speaker is (slowly decaying peak)
   private lastLevel = 0; // loudness of the last finished utterance
   /** How loud YOU are when you talk to Milo (learned). Quieter, farther voices are ignored in hands-free. */
   private userLevel = Number(localStorage.getItem("milo.userLevel") || 0);
@@ -104,7 +106,14 @@ export class Ears {
     }
   }
 
+  /** Push-to-talk: "I'm done talking", send what we have now. */
+  flush() {
+    if (this.speaking && this.speech.length > 4) this.finish();
+    else if (this.mode === "once") this.setMode("off");
+  }
+
   private resetUtterance() {
+    this.uttPeak = 0;
     this.uttEnergy = [];
     this.speech = [];
     this.speaking = false;
@@ -135,8 +144,11 @@ export class Ears {
 
     // Hands-free is stricter: you have to be clearly louder than the room (close to the mic).
     const strict = this.mode === "always";
-    const on = Math.max(strict ? 0.028 : 0.018, this.floor * (strict ? 4 : 3));
-    const off = Math.max(0.011, this.floor * 1.8);
+    let on = Math.max(strict ? 0.028 : 0.018, this.floor * (strict ? 4 : 3));
+    // Once Milo knows how loud you are, quieter voices (other people, the TV) can't start a recording.
+    if (strict && this.userLevel > 0) on = Math.max(on, this.userLevel * 0.5);
+    // End of your sentence = when it drops well below YOUR level, even if others keep talking.
+    const off = Math.max(0.011, this.floor * 1.8, this.uttPeak * 0.35);
 
     if (!this.speaking) {
       this.ring.push(data);
@@ -161,8 +173,10 @@ export class Ears {
 
     this.speech.push(data);
     this.uttEnergy.push(rms);
+    this.uttPeak = Math.max(this.uttPeak * 0.985, rms);
     this.quietRun = rms < off ? this.quietRun + 1 : 0;
-    if (this.quietRun >= END_SILENCE || this.speech.length >= MAX_FRAMES) this.finish();
+    const cap = this.mode === "always" ? MAX_FRAMES_HF : MAX_FRAMES;
+    if (this.quietRun >= END_SILENCE || this.speech.length >= cap) this.finish();
   }
 
   private finish() {

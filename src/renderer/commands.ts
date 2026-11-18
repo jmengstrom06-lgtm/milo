@@ -20,10 +20,18 @@ export type Intent =
 
 const WAKE = /^\s*(?:(?:hey|hi|okay|ok|yo|so)\s*,?\s+)?(?:milo|mylo|my low|mila|miilo)\b[\s,.!?:-]*/i;
 
-/** Does this line start with "Milo"? Returns the rest of the line. */
-export function stripWake(text: string): { woke: boolean; rest: string } {
+const WAKE_ANYWHERE = /\b(?:(?:hey|hi|okay|ok|yo)\s*,?\s+)?(?:milo|mylo|my low|mila|miilo)\b[\s,.!?:-]*/i;
+
+/** Does this line start with "Milo"? Returns the rest of the line.
+ *  anywhere=true (hands-free in a noisy room): find "Milo" anywhere and keep what comes after it. */
+export function stripWake(text: string, anywhere = false): { woke: boolean; rest: string } {
   const m = text.match(WAKE);
-  return m ? { woke: true, rest: text.slice(m[0].length).trim() } : { woke: false, rest: text.trim() };
+  if (m) return { woke: true, rest: text.slice(m[0].length).trim() };
+  if (anywhere) {
+    const a = WAKE_ANYWHERE.exec(text);
+    if (a) return { woke: true, rest: text.slice(a.index + a[0].length).trim() };
+  }
+  return { woke: false, rest: text.trim() };
 }
 
 export function modeFrom(t: string): MiloMode | undefined {
