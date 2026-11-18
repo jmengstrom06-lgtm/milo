@@ -1,14 +1,14 @@
 import { useMemo } from "react";
 
 // Glowing marker ring that draws itself around the target, plus a soft spotlight.
-export function Highlight({ box, dim }: { box: MiloBox; dim: boolean }) {
-  const pad = 10;
+export function Highlight({ box, dim, locked }: { box: MiloBox; dim: boolean; locked?: boolean }) {
+  const pad = locked ? 6 : 10;
   const w = box.width + pad * 2;
   const h = box.height + pad * 2;
   const perim = 2 * (w + h);
   return (
     <div
-      className={`hl ${dim ? "hl--dim" : ""}`}
+      className={`hl ${dim ? "hl--dim" : ""} ${locked ? "hl--locked" : ""}`}
       style={{ left: box.x - pad, top: box.y - pad, width: w, height: h }}
     >
       <svg width={w} height={h} className="hl__svg">

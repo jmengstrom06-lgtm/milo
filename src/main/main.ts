@@ -11,7 +11,7 @@ import {
 import path from "node:path";
 import dotenv from "dotenv";
 import { speak } from "./voice";
-import { askMilo, ChatMessage, checkAnswer, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
+import { askMilo, ChatMessage, checkAnswer, locateInCrop, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
 dotenv.config({ path: path.join(app.getAppPath(), ".env") });
 
@@ -67,12 +67,17 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const SCREEN_PERMISSION_HELP =
   "I can't see your screen yet! Open System Settings > Privacy & Security > Screen & System Audio Recording, turn on Terminal (and Electron if it is listed), then quit me and start me again.";
 
-async function captureScreen(): Promise<
-  | { ok: true; jpegBase64: string; bounds: Electron.Rectangle; workArea: Electron.Rectangle }
-  | { ok: false; text: string }
-> {
+type Shot = {
+  full: Electron.NativeImage; // full-resolution screenshot
+  pxPerPt: number; // full-image pixels per screen point
+  bounds: Electron.Rectangle;
+  workArea: Electron.Rectangle;
+};
+let lastShot: Shot | null = null;
+
+async function captureScreen(): Promise<{ ok: true; shot: Shot } | { ok: false; text: string }> {
   const display = screen.getPrimaryDisplay();
-  const { bounds, workArea } = display;
+  const { bounds, workArea, scaleFactor } = display;
 
   if (process.platform === "darwin") {
     const status = systemPreferences.getMediaAccessStatus("screen");
@@ -83,23 +88,33 @@ async function captureScreen(): Promise<
   overlay?.setOpacity(0);
   await sleep(70);
   try {
-    // Capture at a size the vision model handles well (long edge ~1568px).
-    const scale = Math.min(1, 1568 / Math.max(bounds.width, bounds.height));
     const sources = await desktopCapturer.getSources({
       types: ["screen"],
-      thumbnailSize: { width: Math.round(bounds.width * scale), height: Math.round(bounds.height * scale) },
+      thumbnailSize: { width: Math.round(bounds.width * scaleFactor), height: Math.round(bounds.height * scaleFactor) },
     });
     const src = sources.find((s) => s.display_id === String(display.id)) ?? sources[0];
     if (!src || src.thumbnail.isEmpty()) return { ok: false, text: SCREEN_PERMISSION_HELP };
     if (process.platform === "darwin" && systemPreferences.getMediaAccessStatus("screen") !== "granted") {
       return { ok: false, text: SCREEN_PERMISSION_HELP };
     }
-    return { ok: true, jpegBase64: src.thumbnail.toJPEG(82).toString("base64"), bounds, workArea };
+    const full = src.thumbnail;
+    const shot: Shot = { full, pxPerPt: full.getSize().width / bounds.width, bounds, workArea };
+    lastShot = shot;
+    return { ok: true, shot };
   } catch (err) {
     return { ok: false, text: `I couldn't see your screen: ${(err as Error).message}` };
   } finally {
     overlay?.setOpacity(1);
   }
+}
+
+/** Downscale so the long edge is at most `max` pixels. Returns the jpeg and its size. */
+function toJpeg(img: Electron.NativeImage, max: number) {
+  const { width, height } = img.getSize();
+  const k = Math.min(1, max / Math.max(width, height));
+  const out = k < 1 ? img.resize({ width: Math.round(width * k), height: Math.round(height * k), quality: "best" }) : img;
+  const size = out.getSize();
+  return { b64: out.toJPEG(85).toString("base64"), size, k };
 }
 
 // ---------- IPC -------------------------------------------------------------
@@ -113,24 +128,67 @@ ipcMain.on("milo:set-clickable", (_e, clickable: boolean) => {
 ipcMain.handle("milo:ask", (_e, history: ChatMessage[]) => askMilo(history));
 
 ipcMain.handle("milo:look", async (_e, mode: Mode, request: string) => {
-  const shot = await captureScreen();
-  if (!shot.ok) return shot;
-  const lesson = await teachFromScreen(shot.jpegBase64, mode, request);
+  const cap = await captureScreen();
+  if (!cap.ok) return cap;
+  const { shot } = cap;
+  const small = toJpeg(shot.full, 1568);
+  const lesson = await teachFromScreen(small.b64, small.size, mode, request);
   if (!lesson.ok) return lesson;
 
-  // Convert the target box from screenshot fractions to overlay-window pixels.
+  // Screenshot pixels -> overlay-window points.
   const t = lesson.data.target;
-  const { bounds, workArea } = shot;
+  const ptPerPx = 1 / (small.k * shot.pxPerPt);
   const box =
     lesson.data.found && t
       ? {
-          x: bounds.x + t.x * bounds.width - workArea.x,
-          y: bounds.y + t.y * bounds.height - workArea.y,
-          width: t.width * bounds.width,
-          height: t.height * bounds.height,
+          x: shot.bounds.x + t.x * ptPerPx - shot.workArea.x,
+          y: shot.bounds.y + t.y * ptPerPx - shot.workArea.y,
+          width: t.width * ptPerPx,
+          height: t.height * ptPerPx,
         }
       : null;
   return { ok: true, lesson: lesson.data, box };
+});
+
+// Lock-on: zoom into a sharp crop around the first guess and find the exact edges.
+ipcMain.handle("milo:refine", async (_e, box: { x: number; y: number; width: number; height: number }, topic: string) => {
+  const shot = lastShot;
+  if (!shot) return { ok: false, text: "no-shot" };
+  const { full, pxPerPt, bounds, workArea } = shot;
+  const img = full.getSize();
+
+  // Box in full-image pixels, padded generously so the real edges are inside the crop.
+  const bx = (box.x + workArea.x - bounds.x) * pxPerPt;
+  const by = (box.y + workArea.y - bounds.y) * pxPerPt;
+  const bw = box.width * pxPerPt;
+  const bh = box.height * pxPerPt;
+  const padX = Math.max(80 * pxPerPt, bw * 0.35);
+  const padY = Math.max(60 * pxPerPt, bh * 0.5);
+  const cx = Math.max(0, Math.floor(bx - padX));
+  const cy = Math.max(0, Math.floor(by - padY));
+  const cw = Math.min(img.width - cx, Math.ceil(bw + padX * 2));
+  const ch = Math.min(img.height - cy, Math.ceil(bh + padY * 2));
+  if (cw < 20 || ch < 20) return { ok: false, text: "tiny" };
+
+  const crop = toJpeg(full.crop({ x: cx, y: cy, width: cw, height: ch }), 1400);
+  const r = await locateInCrop(crop.b64, crop.size, topic);
+  if (!r.ok) return r;
+  const L = r.data;
+  if (!L.found || L.width <= 4 || L.height <= 4) return { ok: false, text: "not-found" };
+
+  // Crop pixels -> full pixels -> overlay points.
+  const toFull = 1 / crop.k;
+  const fx = cx + L.x * toFull;
+  const fy = cy + L.y * toFull;
+  return {
+    ok: true,
+    box: {
+      x: bounds.x + fx / pxPerPt - workArea.x,
+      y: bounds.y + fy / pxPerPt - workArea.y,
+      width: (L.width * toFull) / pxPerPt,
+      height: (L.height * toFull) / pxPerPt,
+    },
+  };
 });
 
 ipcMain.handle("milo:check", (_e, lesson: TeachResult, answer: string) => checkAnswer(lesson, answer));

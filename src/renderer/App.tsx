@@ -25,6 +25,13 @@ function detectMode(text: string, fallback: MiloMode): MiloMode {
   if (/(teach|explain|how do|walk me|show me how)/.test(t)) return "teach";
   return fallback;
 }
+// Accept the lock-on result only if it overlaps the first guess (guards against jumping to a different question).
+function closeEnough(a: MiloBox, b: MiloBox) {
+  const ix = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
+  const iy = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
+  const inter = ix * iy;
+  return inter > 0.3 * Math.min(a.width * a.height, b.width * b.height);
+}
 const wantsScreen = (text: string) =>
   /\b(this|screen|on here|look at|this question|this problem|number \d+|question \d+|#\d+)\b/i.test(text);
 
@@ -45,6 +52,7 @@ export default function App() {
   const [lesson, setLesson] = useState<MiloLesson | null>(null);
   const [lessonMode, setLessonMode] = useState<MiloMode>("teach");
   const [box, setBox] = useState<MiloBox | null>(null);
+  const [locked, setLocked] = useState(false);
   const [revealed, setRevealed] = useState(0);
   const [finished, setFinished] = useState(false);
   const [confetti, setConfetti] = useState<{ x: number; y: number; seed: number } | null>(null);
@@ -181,9 +189,20 @@ export default function App() {
 
       // 1) Spotlight the problem and fly over to it.
       setBox(b);
+      setLocked(false);
       setLessonMode(m);
-      const perchY = b.y - MILO_H + 22 >= MARGIN ? b.y - MILO_H + 22 : b.y + b.height - 30;
-      const perch = { x: b.x + b.width - MILO_W * 0.55, y: perchY };
+      const perchFor = (bx: MiloBox) => ({
+        x: bx.x + bx.width - MILO_W * 0.55,
+        y: bx.y - MILO_H + 22 >= MARGIN ? bx.y - MILO_H + 22 : bx.y + bx.height - 30,
+      });
+      let perch = perchFor(b);
+
+      // Lock-on runs in the background while Milo flies over and talks.
+      const refined = window.milo
+        .refine(b, L.topic)
+        .then((rr) => (rr.ok && closeEnough(rr.box, b) ? rr.box : null))
+        .catch(() => null);
+
       setBubble(null);
       await moveTo(perch, "jump");
       if (id !== runId.current) return;
@@ -191,7 +210,22 @@ export default function App() {
 
       // 2) Point at it and say the intro.
       setMood("pointing");
-      await say(L.intro);
+      await Promise.all([say(L.intro), refined.then((rb) => {
+        if (rb && id === runId.current) {
+          setBox(rb);
+          setLocked(true);
+        }
+      })]);
+      if (id !== runId.current) return;
+      const rb = await Promise.race([refined, sleep(1500).then(() => null)]);
+      if (rb) {
+        const np = perchFor(rb);
+        if (Math.hypot(np.x - perch.x, np.y - perch.y) > 24) {
+          perch = np;
+          await moveTo(perch, "jump");
+          setMood("pointing");
+        }
+      }
       if (id !== runId.current) return;
 
       // 3) Open the notebook and write each step while explaining it.
@@ -319,7 +353,7 @@ export default function App() {
 
   return (
     <>
-      {box && <Highlight box={box} dim={!lesson} />}
+      {box && <Highlight key={locked ? "locked" : "guess"} box={box} dim={!lesson} locked={locked} />}
 
       {lesson && (
         <Notebook

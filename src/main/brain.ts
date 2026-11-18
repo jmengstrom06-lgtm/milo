@@ -7,7 +7,7 @@ export type Mode = "teach" | "help" | "do";
 export type TeachStep = { say: string; write: string };
 export type TeachResult = {
   found: boolean;
-  target: { x: number; y: number; width: number; height: number } | null; // 0..1 of the screenshot
+  target: { x: number; y: number; width: number; height: number } | null; // pixels in the screenshot
   topic: string;
   intro: string;
   steps: TeachStep[];
@@ -51,7 +51,7 @@ const TEACH_TOOL = {
       target: {
         type: "object",
         description:
-          "Bounding box of the single most relevant question/blank/area, as fractions (0 to 1) of the screenshot width and height. Be tight around the question text.",
+          "Bounding box of the single most relevant question block (its whole card/box if it has one), in PIXELS of the screenshot: x,y = top-left corner, then width and height.",
         properties: {
           x: { type: "number" },
           y: { type: "number" },
@@ -117,6 +117,22 @@ const PRACTICE_TOOL = {
       },
     },
     required: ["problems"],
+  },
+};
+
+const LOCATE_TOOL = {
+  name: "locate",
+  description: "Return the exact bounding box of the target in this image.",
+  input_schema: {
+    type: "object",
+    properties: {
+      found: { type: "boolean" },
+      x: { type: "number", description: "Left edge in pixels of this image." },
+      y: { type: "number", description: "Top edge in pixels of this image." },
+      width: { type: "number" },
+      height: { type: "number" },
+    },
+    required: ["found", "x", "y", "width", "height"],
   },
 };
 
@@ -197,6 +213,7 @@ export async function askMilo(history: ChatMessage[]): Promise<{ ok: boolean; te
 
 export async function teachFromScreen(
   jpegBase64: string,
+  size: { width: number; height: number },
   mode: Mode,
   request: string
 ): Promise<ApiOk<TeachResult> | ApiErr> {
@@ -216,7 +233,11 @@ If there is nothing to help with, set found=false and use intro to say so playfu
         role: "user",
         content: [
           { type: "image", source: { type: "base64", media_type: "image/jpeg", data: jpegBase64 } },
-          { type: "text", text: request?.trim() ? `Student says: "${request.trim()}"` : "Student says: \"Milo, help me with this.\"" },
+          {
+            type: "text",
+            text: `The screenshot is ${size.width}x${size.height} pixels.\n` +
+              (request?.trim() ? `Student says: "${request.trim()}"` : 'Student says: "Milo, help me with this."'),
+          },
         ],
       },
     ],
@@ -260,4 +281,34 @@ export async function makePractice(lesson: TeachResult): Promise<ApiOk<Practice>
       },
     ],
   }, PRACTICE_TOOL.name);
+}
+
+// Lock-on: given a sharp crop around Milo's first guess, find the exact edges of the question.
+export async function locateInCrop(
+  jpegBase64: string,
+  size: { width: number; height: number },
+  topic: string
+): Promise<ApiOk<{ found: boolean; x: number; y: number; width: number; height: number }> | ApiErr> {
+  return callTool(
+    {
+      max_tokens: 800,
+      system:
+        "You find exact pixel bounding boxes in screenshots. If the question sits inside a visible card, box, or bordered area, return that container's exact edges. Otherwise return a tight box around the question text and its answer blank.",
+      tools: [LOCATE_TOOL],
+      tool_choice: { type: "auto" },
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: jpegBase64 } },
+            {
+              type: "text",
+              text: `This image is ${size.width}x${size.height} pixels, cropped from a student's screen. Find the homework question about: "${topic}". Return its exact bounding box in pixels of this image.`,
+            },
+          ],
+        },
+      ],
+    },
+    LOCATE_TOOL.name
+  );
 }

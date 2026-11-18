@@ -487,3 +487,11 @@ body,
 .look-btn:active { transform: translateY(2px); box-shadow: 0 1px 0 #c98f00; }
 .look-btn:disabled { opacity: 0.6; }
 .hint { font-size: 11px; color: #a08670; text-align: center; }
+
+/* lock-on: ring snaps tight onto the exact edges */
+.hl--locked { animation: lockIn 0.35s cubic-bezier(0.2, 1.4, 0.4, 1), hlPulse 1.6s ease-in-out 0.35s infinite; }
+.hl--locked .hl__ring { animation: none; stroke-dashoffset: 0 !important; stroke: #ffd400; }
+@keyframes lockIn {
+  from { transform: scale(1.12); opacity: 0.4; }
+  to { transform: scale(1); opacity: 1; }
+}
