@@ -13,7 +13,8 @@ import path from "node:path";
 import dotenv from "dotenv";
 import { speak } from "./voice";
 import { transcribe } from "./ears";
-import { askMilo, ChatMessage, checkAnswer, locateInCrop, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
+import { click, openApp, openUrl, pressKeys, typeText } from "./hands";
+import { Action, askMilo, ChatMessage, checkAnswer, locateInCrop, nextAction, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
 dotenv.config({ path: path.join(app.getAppPath(), ".env") });
 
@@ -215,9 +216,103 @@ ipcMain.handle("milo:refine", async (_e, box: { x: number; y: number; width: num
   };
 });
 
+
+// ---------- computer control (Milo's hands) ---------------------------------------
+let taskRunning = false;
+let taskAbort = false;
+
+function sendStep(step: { say: string; action: string; point?: { x: number; y: number } | null; status?: string }) {
+  overlay?.webContents.send("milo:task-step", step);
+}
+
+ipcMain.on("milo:task-stop", () => {
+  taskAbort = true;
+});
+
+ipcMain.handle("milo:task", async (_e, task: string) => {
+  if (taskRunning) return { ok: false, text: "I'm already doing something. Say stop first." };
+  taskRunning = true;
+  taskAbort = false;
+  globalShortcut.register("Escape", () => (taskAbort = true));
+  const history: string[] = [];
+  try {
+    for (let step = 0; step < 14; step++) {
+      if (taskAbort) return { ok: true, status: "stopped", text: "Stopped!" };
+      const cap = await captureScreen();
+      if (!cap.ok) return cap;
+      const { shot } = cap;
+      const small = toJpeg(shot.full, 1568);
+      const k = small.k * shot.pxPerPt; // screenshot px per screen point
+      const r = await nextAction(small.b64, small.size, task, history);
+      if (taskAbort) return { ok: true, status: "stopped", text: "Stopped!" };
+      if (!r.ok) return r;
+      const a: Action = r.data;
+
+      // Screen point (for the click) and overlay point (for Milo to hop to).
+      const screenPt =
+        a.x !== undefined && a.y !== undefined ? { x: shot.bounds.x + a.x / k, y: shot.bounds.y + a.y / k } : null;
+      const overlayPt = screenPt ? { x: screenPt.x - shot.workArea.x, y: screenPt.y - shot.workArea.y } : null;
+
+      if (a.action === "done") return { ok: true, status: "done", text: a.text || a.say || "All done!" };
+      if (a.action === "ask") return { ok: true, status: "ask", text: a.text || a.say || "Should I go ahead?" };
+
+      sendStep({ say: a.say, action: a.action, point: overlayPt });
+      await sleep(650); // let Milo hop over before acting
+      if (taskAbort) return { ok: true, status: "stopped", text: "Stopped!" };
+
+      overlay?.setIgnoreMouseEvents(true, { forward: true }); // never click on Milo himself
+      switch (a.action) {
+        case "open_app":
+          if (!a.app) throw new Error("No app name");
+          await openApp(a.app);
+          history.push(`Opened ${a.app}`);
+          break;
+        case "open_url":
+          if (!a.url || !/^https?:\/\//.test(a.url)) throw new Error("Bad URL");
+          await openUrl(a.url);
+          history.push(`Opened ${a.url}`);
+          break;
+        case "click":
+        case "double_click":
+          if (!screenPt) throw new Error("Click without a point");
+          await click(screenPt.x, screenPt.y, a.action === "double_click" ? 2 : 1);
+          history.push(`${a.action === "click" ? "Clicked" : "Double-clicked"} at (${a.x}, ${a.y}): ${a.say}`);
+          break;
+        case "type":
+          sendStep({ say: a.say, action: "typing", point: null });
+          await typeText(a.text ?? "");
+          history.push(`Typed "${(a.text ?? "").slice(0, 80)}"`);
+          break;
+        case "key":
+          await pressKeys(a.keys ?? "");
+          history.push(`Pressed ${a.keys}`);
+          break;
+        case "scroll":
+          await pressKeys(a.direction === "up" ? "pageup" : "pagedown");
+          history.push(`Scrolled ${a.direction ?? "down"}`);
+          break;
+        case "wait":
+          await sleep(1200);
+          history.push("Waited");
+          break;
+      }
+      await sleep(450); // let the screen update before the next look
+    }
+    return { ok: true, status: "done", text: "I took a bunch of steps. Check if that's what you wanted!" };
+  } catch (err) {
+    return { ok: false, text: (err as Error).message };
+  } finally {
+    taskRunning = false;
+    globalShortcut.unregister("Escape");
+  }
+});
+
 ipcMain.handle("milo:check", (_e, lesson: TeachResult, answer: string) => checkAnswer(lesson, answer));
 ipcMain.handle("milo:practice", (_e, lesson: TeachResult) => makePractice(lesson));
 ipcMain.handle("milo:stt", (_e, audio: ArrayBuffer) => transcribe(audio));
+ipcMain.handle("milo:hands-access", () =>
+  process.platform === "darwin" ? systemPreferences.isTrustedAccessibilityClient(true) : true
+);
 ipcMain.handle("milo:mic-access", async () => {
   if (process.platform !== "darwin") return true;
   if (systemPreferences.getMediaAccessStatus("microphone") === "granted") return true;

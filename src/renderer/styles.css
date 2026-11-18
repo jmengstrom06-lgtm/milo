@@ -595,3 +595,20 @@ body,
   from { opacity: 0; transform: translateY(6px) scale(0.8); }
   to { opacity: 0.92; transform: none; }
 }
+
+/* ======================= Hands: computer control ======================= */
+.stop-pill {
+  position: fixed;
+  z-index: 45;
+  width: 100px;
+  border: 0;
+  border-radius: 999px;
+  padding: 5px 0;
+  font-size: 12px;
+  font-weight: 800;
+  color: #fff;
+  background: #e03131;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  animation: pop 0.2s ease-out;
+}

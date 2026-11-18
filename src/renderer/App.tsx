@@ -73,6 +73,7 @@ export default function App() {
   const [handsFree, setHandsFree] = useState(false);
   const [level, setLevel] = useState(0);
   const [heard, setHeard] = useState<string | null>(null);
+  const [working, setWorking] = useState(false); // Milo is using the computer
 
   const posRef = useRef(pos);
   const animRef = useRef<number | null>(null);
@@ -88,7 +89,8 @@ export default function App() {
   const lastSaid = useRef("");
   const followUntil = useRef(0); // hands-free: no need to say "Milo" until this time
   const voiceSession = useRef(false); // the current lesson was started by voice
-  const routeRef = useRef<(text: string) => void>(() => {});
+  const routeRef = useRef<(text: string, spoken?: boolean) => void>(() => {});
+  const pendingTask = useRef<string | null>(null); // a task waiting on the student's yes/no
   const voiceRef = useRef(voice);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -155,7 +157,7 @@ export default function App() {
 
   // Wander along the bottom when nothing is going on.
   useEffect(() => {
-    if (chatOpen || lesson || busy) return;
+    if (chatOpen || lesson || busy || working) return;
     const t = window.setInterval(() => {
       if (animRef.current) return;
       const r = Math.random();
@@ -165,7 +167,7 @@ export default function App() {
       } else if (r < 0.65) setMood("sitting");
     }, 7000);
     return () => window.clearInterval(t);
-  }, [chatOpen, lesson, busy, moveTo]);
+  }, [chatOpen, lesson, busy, working, moveTo]);
 
   // ---- voice ------------------------------------------------------------------
   const say = useCallback(async (text: string, opts: { minMs?: number } = {}) => {
@@ -356,6 +358,71 @@ export default function App() {
     if (!correct && voiceSession.current) listen(); // let them try again out loud
   };
 
+  // ---- hands: do things on the computer -------------------------------------------
+  const runTask = useCallback(
+    async (task: string, byVoice = true) => {
+      if (!(await window.milo.handsAccess())) {
+        await say("I need permission to use your keyboard and mouse. Turn on Terminal in System Settings, Privacy and Security, Accessibility, then restart me.");
+        setBubble(null);
+        return;
+      }
+      runId.current++;
+      hush();
+      setChatOpen(false);
+      hover(false);
+      setWorking(true);
+      pendingTask.current = null;
+      setMood("looking");
+      setBubble("On it!");
+      const r = await window.milo.task(task);
+      setWorking(false);
+      if (!r.ok) {
+        setMood("thinking");
+        await say(r.text);
+      } else if (r.status === "ask") {
+        pendingTask.current = task;
+        setMood("happy");
+        await say(r.text);
+        setBubble(null);
+        listen();
+        return;
+      } else if (r.status === "stopped") {
+        setMood("idle");
+        await say("Stopped!");
+      } else {
+        setMood("celebrating");
+        setConfetti({ x: posRef.current.x + MILO_W / 2, y: posRef.current.y + 40, seed: Date.now() });
+        await say(r.text);
+      }
+      setBubble(null);
+      setMood("happy");
+      if (byVoice) listen();
+    },
+    [say, hover, listen]
+  );
+
+  // Follow Milo's hands: hop next to whatever he's about to click, show what he's doing.
+  useEffect(
+    () =>
+      window.milo.onTaskStep((st) => {
+        setBubble(st.say);
+        tts.play(st.say, () => setSpeaking(true)).then(() => setSpeaking(false));
+        if (st.action === "typing" || st.action === "type") setMood("writing");
+        if (st.point) {
+          // Stand just to the left of the spot (or right if no room) so he never covers it.
+          const left = st.point.x - MILO_W - 18;
+          const x = left > MARGIN ? left : st.point.x + 18;
+          moveTo({ x, y: st.point.y - MILO_H * 0.6 }, "jump").then(() => {
+            setFacing(x < st.point!.x ? "right" : "left");
+            setMood("pointing");
+          });
+        } else if (st.action === "open_app" || st.action === "open_url") {
+          setMood("jumping");
+        }
+      }),
+    [moveTo]
+  );
+
   // ---- chat (typed or spoken) ---------------------------------------------------
   const chat = async (text: string, spoken = false) => {
     const L = lessonRef.current;
@@ -375,29 +442,49 @@ export default function App() {
   };
 
   // ---- voice commands -------------------------------------------------------------
-  routeRef.current = (text: string) => {
+  routeRef.current = (text: string, spoken = true) => {
     const inLesson = !!lessonRef.current;
     const awaitingAnswer = inLesson && finishedRef.current && lessonModeRef.current !== "do" && !!lessonRef.current?.check_question;
-    const intent = parse(text, { inLesson, awaitingAnswer });
+    const intent = parse(text, { inLesson, awaitingAnswer, pendingAsk: !!pendingTask.current });
     const nb = notebookRef.current;
     switch (intent.kind) {
       case "hush":
         hush();
+        window.milo.stopTask();
         setBubble(null);
+        return;
+      case "task":
+        runTask(intent.task, spoken);
+        return;
+      case "fill": {
+        const L = lessonRef.current;
+        if (!L) return;
+        const ans = L.answer.replace(/\$([^$]+)\$/g, "$1");
+        runTask(
+          `On the screen, find the answer blank/box for the homework question about "${L.topic}" and type this answer into it (don't submit): ${ans}`
+        );
+        return;
+      }
+      case "yes":
+        if (pendingTask.current) runTask(`${pendingTask.current}\n(The student said yes, go ahead with what you asked about.)`);
+        return;
+      case "no":
+        pendingTask.current = null;
+        say("No problem, I won't.").then(() => setBubble(null));
         return;
       case "close":
         closeLesson();
         return;
       case "goto":
-        look(intent.mode ?? lessonModeRef.current, intent.request, null, true);
+        look(intent.mode ?? lessonModeRef.current, intent.request, null, spoken);
         return;
       case "mode":
         setMode(intent.mode);
-        look(intent.mode, lastRequest.current, boxRef.current, true);
+        look(intent.mode, lastRequest.current, boxRef.current, spoken);
         return;
       case "look":
         setMode(intent.mode);
-        look(intent.mode, intent.request, null, true);
+        look(intent.mode, intent.request, null, spoken);
         return;
       case "answer":
         nb?.check(intent.text);
@@ -421,7 +508,7 @@ export default function App() {
         if (lastSaid.current) say(lastSaid.current).then(() => setBubble(null));
         return;
       case "chat":
-        chat(intent.text, true);
+        chat(intent.text, spoken);
         return;
     }
   };
@@ -485,15 +572,40 @@ export default function App() {
     listen();
   }, [listen]);
 
+  // "Hey Milo" is on by default (and remembered).
+  useEffect(() => {
+    let wanted = true;
+    try {
+      wanted = localStorage.getItem("milo.handsFree") !== "off";
+    } catch {
+      /* ignore */
+    }
+    if (!wanted) return;
+    (async () => {
+      if (!(await window.milo.micAccess())) return;
+      try {
+        await ears.current!.setMode("always");
+        setHandsFree(true);
+      } catch {
+        /* mic unavailable */
+      }
+    })();
+  }, []);
+
   const toggleHandsFree = async () => {
     const on = !handsFree;
+    try {
+      localStorage.setItem("milo.handsFree", on ? "on" : "off");
+    } catch {
+      /* ignore */
+    }
     if (on && !(await window.milo.micAccess())) {
       say("I need microphone access first. Turn on Terminal under Privacy and Security, Microphone.");
       return;
     }
     setHandsFree(on);
     await ears.current!.setMode(on ? "always" : "off");
-    if (on) say('Hands-free is on. Just say "Milo" and tell me what you need.').then(() => setBubble(null));
+    if (on) say('Hands-free is on. Just say "Hey Milo" and tell me what you need.').then(() => setBubble(null));
   };
 
   // ---- chat panel -------------------------------------------------------------
@@ -531,13 +643,7 @@ export default function App() {
     setInput("");
     setMessages((m) => [...m, { role: "user", content: text }]);
 
-    if (wantsScreen(text)) {
-      const m = detectMode(text, mode);
-      setMode(m);
-      look(m, text);
-      return;
-    }
-    chat(text);
+    routeRef.current(text, false);
   };
 
   // ---- layout -----------------------------------------------------------------
@@ -634,10 +740,21 @@ export default function App() {
           <div className="ear-ring" style={{ transform: `scale(${1 + level * 0.6})` }} />
         )}
         <Milo mood={mood} facing={facing} speaking={speaking} character={character} />
-        {handsFree && <div className={`ears-on ${earState === "hearing" ? "ears-on--hot" : ""}`}>Say "Milo…"</div>}
+        {handsFree && !working && <div className={`ears-on ${earState === "hearing" ? "ears-on--hot" : ""}`}>Say "Hey Milo"</div>}
       </div>
 
       {bubble && <Bubble text={short(bubble)} style={bStyle} />}
+      {working && (
+        <button
+          className="stop-pill"
+          style={{ left: pos.x + MILO_W / 2 - 50, top: pos.y + MILO_H + 4 }}
+          onMouseEnter={() => hover(true)}
+          onMouseLeave={() => hover(false)}
+          onClick={() => window.milo.stopTask()}
+        >
+          Stop (Esc)
+        </button>
+      )}
       {!bubble && heard && <Bubble text={`“${short(heard)}”`} style={bStyle} heard />}
       {!bubble && !heard && earState === "thinking" && <Bubble text="…" style={bStyle} heard />}
       {confetti && <Confetti key={confetti.seed} {...confetti} />}

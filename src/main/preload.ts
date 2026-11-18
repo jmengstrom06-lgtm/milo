@@ -16,6 +16,14 @@ contextBridge.exposeInMainWorld("milo", {
   stt: (audio: ArrayBuffer) => ipcRenderer.invoke("milo:stt", audio),
   micAccess: () => ipcRenderer.invoke("milo:mic-access"),
   tts: (text: string) => ipcRenderer.invoke("milo:tts", text),
+  task: (task: string) => ipcRenderer.invoke("milo:task", task),
+  stopTask: () => ipcRenderer.send("milo:task-stop"),
+  handsAccess: () => ipcRenderer.invoke("milo:hands-access"),
+  onTaskStep: (cb: (step: unknown) => void) => {
+    const l = (_e: unknown, step: unknown) => cb(step);
+    ipcRenderer.on("milo:task-step", l);
+    return () => ipcRenderer.removeListener("milo:task-step", l);
+  },
   copy: (text: string) => ipcRenderer.send("milo:copy", text),
   onSummon: (cb: () => void) => on("milo:summon", cb),
   onTeachScreen: (cb: () => void) => on("milo:teach-screen", cb),

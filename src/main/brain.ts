@@ -345,3 +345,90 @@ export async function locateInCrop(
     LOCATE_TOOL.name
   );
 }
+
+// ---------------------------------------------------------------------------
+// Computer control: pick the next single action from a fresh screenshot.
+
+export type Action = {
+  action: "open_app" | "open_url" | "click" | "double_click" | "type" | "key" | "scroll" | "wait" | "ask" | "done";
+  x?: number;
+  y?: number;
+  text?: string;
+  keys?: string;
+  app?: string;
+  url?: string;
+  direction?: "up" | "down";
+  say: string;
+};
+
+const ACT_TOOL = {
+  name: "computer_action",
+  description: "Do exactly one action on the student's Mac.",
+  input_schema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["open_app", "open_url", "click", "double_click", "type", "key", "scroll", "wait", "ask", "done"],
+      },
+      x: { type: "number", description: "For click/double_click: pixel x in the screenshot." },
+      y: { type: "number", description: "For click/double_click: pixel y in the screenshot." },
+      text: {
+        type: "string",
+        description: "For type: the exact text to type. For ask: the question to ask the student. For done: a one-sentence summary of what you did.",
+      },
+      keys: { type: "string", description: 'For key: a combo like "cmd+a", "cmd+t", "enter", "tab", "escape", "cmd+l".' },
+      app: { type: "string", description: 'For open_app: exact macOS app name, e.g. "Claude", "Google Chrome", "Notes", "Safari".' },
+      url: { type: "string", description: "For open_url: a full https:// URL." },
+      direction: { type: "string", enum: ["up", "down"], description: "For scroll." },
+      say: { type: "string", description: "What Milo says while doing this. Under 8 words, playful. E.g. 'Opening Claude!', 'Clicking the message box'." },
+    },
+    required: ["action", "say"],
+  },
+};
+
+export async function nextAction(
+  jpegBase64: string,
+  size: { width: number; height: number },
+  task: string,
+  history: string[]
+): Promise<ApiOk<Action> | ApiErr> {
+  const system = `${persona()}
+You are controlling the student's Mac to finish their request. Each turn you get a fresh screenshot (Milo himself is hidden from it) and a log of what you've already done. Choose exactly ONE next action.
+
+How to work:
+- Coordinates are pixels in the screenshot. Aim for the center of the thing you click.
+- To switch to or launch an app, use open_app with its exact name (e.g. "Claude", "Google Chrome", "Notes", "Microsoft Word").
+- To type into something, click the text field first (unless the log shows you just clicked it), then use type.
+- For Google Docs or any document: click inside the page where the text should go (usually at the end of the existing text), then type.
+- Use key for shortcuts and Enter. Use scroll if what you need is off screen.
+- After an action, check the new screenshot to confirm it worked before moving on. If something didn't work, try a different way.
+- Do exactly what was asked, nothing extra. If asked to type something, type it but don't press Enter or send it unless they asked.
+- NEVER do anything that sends, submits, posts, publishes, buys, pays, deletes, or changes account settings without asking first: use action "ask" with the question instead.
+- Never type passwords or payment details. If a login is needed, use "ask".
+- When the request is complete, use "done" with a one-sentence summary in text.
+- If it's impossible, use "done" and explain in text.`;
+
+  const log = history.length ? history.map((h, i) => `${i + 1}. ${h}`).join("\n") : "(nothing yet)";
+  return callTool<Action>(
+    {
+      max_tokens: 1500,
+      system,
+      tools: [ACT_TOOL],
+      tool_choice: { type: "auto" },
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: jpegBase64 } },
+            {
+              type: "text",
+              text: `Request: "${task}"\nScreenshot size: ${size.width}x${size.height} pixels.\nWhat you've done so far:\n${log}\n\nWhat's the next action?`,
+            },
+          ],
+        },
+      ],
+    },
+    ACT_TOOL.name
+  );
+}

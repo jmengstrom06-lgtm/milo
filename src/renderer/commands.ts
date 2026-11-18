@@ -12,6 +12,10 @@ export type Intent =
   | { kind: "close" }
   | { kind: "hush" }
   | { kind: "look"; mode: MiloMode; request: string } // start helping with something on screen
+  | { kind: "task"; task: string } // do something on the computer: open, click, type…
+  | { kind: "fill" } // type the lesson's answer into the blank
+  | { kind: "yes" }
+  | { kind: "no" }
   | { kind: "chat"; text: string };
 
 const WAKE = /^\s*(?:(?:hey|hi|okay|ok|yo|so)\s*,?\s+)?(?:milo|mylo|my low|mila|miilo)\b[\s,.!?:-]*/i;
@@ -32,10 +36,19 @@ export function modeFrom(t: string): MiloMode | undefined {
 const GOTO =
   /(\b(number|question|problem|part|exercise|#|q)\s*(\d+|[a-z]\b|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b)|(\b(this|that|the other|the next|the previous|the last|the first|the second|the third|the bottom|the top) (one|question|problem)\b)|(\bthe one (about|with|on|at|where|that)\b)|(\b(go|jump|move|switch|skip) to\b)|(\bnext (question|problem)\b)|(\bthis one\b|\bthat one\b|\bover here\b|\bright here\b)/;
 
-export function parse(raw: string, ctx: { inLesson: boolean; awaitingAnswer: boolean }): Intent {
+// Things that mean "use the computer": open apps, click, type into something.
+const TASK =
+  /\b(type|typing|click|press|open( up)?|launch|paste|search (for|up)|google|fill (in|out)|enter (my|the|this|it|in)|go (in|on)to|navigate|scroll|select all)\b|\b(write|put|add) .*\b(in|into|on|inside) (my|the|a|this)\b|\b(in|into|on) (my|the) (google doc|doc|document|notes|word|chrome|safari|browser|email|gmail|claude|chatgpt|search bar|spreadsheet|sheet)\b/;
+
+export function parse(raw: string, ctx: { inLesson: boolean; awaitingAnswer: boolean; pendingAsk?: boolean }): Intent {
   const text = raw.trim().replace(/[.!?]+$/, "");
   const t = text.toLowerCase();
   if (!t) return { kind: "chat", text };
+
+  if (ctx.pendingAsk) {
+    if (/^(yes|yeah|yep|yup|sure|go ahead|do it|ok|okay|send it|please do|go for it|confirm)\b/.test(t)) return { kind: "yes" };
+    if (/^(no|nope|nah|don'?t|cancel|stop|never ?mind|wait)\b/.test(t)) return { kind: "no" };
+  }
 
   if (/^(stop|shh+|quiet|be quiet|pause|hold on|wait)\b/.test(t) && t.split(/\s+/).length <= 3) return { kind: "hush" };
 
@@ -43,7 +56,10 @@ export function parse(raw: string, ctx: { inLesson: boolean; awaitingAnswer: boo
     if (/^(close|done|that'?s (all|it)|thanks|thank you|go away|bye|never ?mind|i'?m good|all good|got it)\b/.test(t))
       return { kind: "close" };
 
-    if (GOTO.test(t)) return { kind: "goto", request: text, mode: modeFrom(t) };
+    if (/(type it|type the answer|fill (it|that|the blank) in|fill in the (blank|answer)|fill it out|put (it|that|the answer) in|enter (it|that|the answer)|write it in)/.test(t))
+      return { kind: "fill" };
+    if (GOTO.test(t) && !/\b(type|click|open|launch)\b/.test(t)) return { kind: "goto", request: text, mode: modeFrom(t) };
+    if (TASK.test(t)) return { kind: "task", task: text };
 
     if (/(more like (this|that)|practice|another one like|more problems|quiz me|give me (some )?more)/.test(t)) return { kind: "practice" };
     if (/\bcopy\b/.test(t)) return { kind: "copy" };
@@ -62,7 +78,8 @@ export function parse(raw: string, ctx: { inLesson: boolean; awaitingAnswer: boo
     return { kind: "chat", text };
   }
 
-  // Not in a lesson: anything about the screen / homework starts one.
+  // Not in a lesson: computer actions first, then anything about the screen / homework starts a lesson.
+  if (TASK.test(t)) return { kind: "task", task: text };
   const mode = modeFrom(t);
   if (mode || GOTO.test(t) || /\b(this|screen|homework|question|problem|help me|help with|look at|what'?s (this|on))\b/.test(t))
     return { kind: "look", mode: mode ?? "teach", request: text };

@@ -29,6 +29,10 @@ declare global {
       stt: (audio: ArrayBuffer) => Promise<{ ok: true; text: string } | Err>;
       micAccess: () => Promise<boolean>;
       tts: (text: string) => Promise<{ ok: true; audio: string } | Err>;
+      task: (task: string) => Promise<{ ok: true; status: "done" | "ask" | "stopped"; text: string } | Err>;
+      stopTask: () => void;
+      handsAccess: () => Promise<boolean>;
+      onTaskStep: (cb: (step: { say: string; action: string; point?: { x: number; y: number } | null }) => void) => () => void;
       copy: (text: string) => void;
       onSummon: (cb: () => void) => () => void;
       onTeachScreen: (cb: () => void) => () => void;

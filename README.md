@@ -27,6 +27,15 @@ An animated AI companion that lives on your screen.
 - First time: allow **Terminal** under System Settings > Privacy & Security > **Microphone**.
 - Speech-to-text uses ElevenLabs (the milo key needs Text to Speech + Speech to Text access).
 
+### Let him use your computer
+- "Hey Milo, open Claude and type your name", "type a paragraph about photosynthesis in my Google Doc", "search for TCU basketball"
+- In a lesson: "type it in" puts the answer in the blank
+- He hops to each spot, clicks and types, and says what he's doing. **Esc**, the Stop button, or "stop" halts him
+- He asks before anything that sends, submits, buys or deletes. Say "yes" or "no"
+- First time: allow **Terminal** under System Settings > Privacy & Security > **Accessibility**
+
+"Hey Milo" (hands-free) is on by default; turn it off with the Hands-free chip.
+
 ### Keys and clicks
 
 - **Cmd+Shift+Y** from any app: Milo looks at your screen, jumps to the question, spotlights it, and teaches it in his notebook
