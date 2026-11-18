@@ -1,0 +1,199 @@
+html,
+body,
+#root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  user-select: none;
+}
+
+/* ---------- Milo ---------- */
+.milo-wrap {
+  position: fixed;
+  cursor: pointer;
+  filter: drop-shadow(0 6px 8px rgba(0, 0, 0, 0.25));
+}
+.milo {
+  overflow: visible;
+  transform-origin: 50% 100%;
+}
+.milo * {
+  transform-box: fill-box;
+}
+
+/* idle: gentle breathing bob */
+.milo--idle,
+.milo--happy {
+  animation: bob 2.4s ease-in-out infinite;
+}
+@keyframes bob {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -3px; }
+}
+
+/* sitting: squash down a bit, legs tucked */
+.milo--sitting {
+  animation: none;
+  translate: 0 8px;
+}
+.milo--sitting .milo__leg {
+  transform: rotate(80deg);
+  transform-origin: 50% 0%;
+}
+
+/* walking: bounce + swinging legs and arms */
+.milo--walking {
+  animation: hop 0.36s ease-in-out infinite;
+}
+@keyframes hop {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -6px; }
+}
+.milo--walking .milo__leg--front,
+.milo--walking .milo__arm--left {
+  transform-origin: 50% 0%;
+  animation: swing 0.36s ease-in-out infinite;
+}
+.milo--walking .milo__leg--back,
+.milo--walking .milo__arm--right {
+  transform-origin: 50% 0%;
+  animation: swing 0.36s ease-in-out infinite reverse;
+}
+@keyframes swing {
+  0%, 100% { transform: rotate(-22deg); }
+  50% { transform: rotate(22deg); }
+}
+
+/* tail always wags a little */
+.milo__tail {
+  transform-origin: 0% 100%;
+  animation: wag 1.6s ease-in-out infinite;
+}
+@keyframes wag {
+  0%, 100% { transform: rotate(-6deg); }
+  50% { transform: rotate(8deg); }
+}
+
+/* blink */
+.milo__eyes {
+  transform-origin: 50% 50%;
+  animation: blink 4.5s infinite;
+}
+@keyframes blink {
+  0%, 94%, 100% { transform: scaleY(1); }
+  96% { transform: scaleY(0.1); }
+}
+
+/* thinking: head tilt, arm up, dots appear */
+.milo__dots { opacity: 0; transition: opacity 0.2s; }
+.milo--thinking .milo__dots { opacity: 1; animation: float 1.2s ease-in-out infinite; }
+.milo--thinking .milo__head { transform-origin: 50% 100%; transform: rotate(-8deg); }
+.milo--thinking .milo__arm--right { transform-origin: 50% 0%; transform: rotate(-150deg); }
+@keyframes float {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -4px; }
+}
+
+/* talking: mouth flaps */
+.milo__mouth { opacity: 0; }
+.milo--talking .milo__smile { opacity: 0; }
+.milo--talking .milo__mouth { opacity: 1; animation: talk 0.22s steps(2) infinite; }
+@keyframes talk {
+  0% { transform: scaleY(1); }
+  100% { transform: scaleY(0.3); }
+}
+
+/* happy: wave */
+.milo--happy .milo__arm--right {
+  transform-origin: 50% 0%;
+  animation: wave 0.6s ease-in-out 2;
+}
+@keyframes wave {
+  0%, 100% { transform: rotate(-150deg); }
+  50% { transform: rotate(-120deg); }
+}
+
+/* ---------- chat panel ---------- */
+.panel {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  max-height: 420px;
+  background: rgba(255, 255, 255, 0.96);
+  border-radius: 18px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  user-select: text;
+  animation: pop 0.18s ease-out;
+}
+@keyframes pop {
+  from { transform: scale(0.92) translateY(8px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+.panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: #8b5a2b;
+  color: #fff;
+  font-weight: 600;
+}
+.panel__actions { display: flex; gap: 6px; }
+.chip {
+  border: 0;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  cursor: pointer;
+}
+.chip--danger { background: rgba(0, 0, 0, 0.25); }
+.panel__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bubble {
+  max-width: 85%;
+  padding: 8px 12px;
+  border-radius: 14px;
+  font-size: 14px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+.bubble--assistant { background: #f3e7da; color: #2b1a0e; align-self: flex-start; }
+.bubble--user { background: #8b5a2b; color: #fff; align-self: flex-end; }
+.bubble--typing { opacity: 0.7; font-style: italic; }
+.panel__input {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid #eee;
+}
+.panel__input input {
+  flex: 1;
+  border: 1px solid #ddd;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 14px;
+  outline: none;
+}
+.panel__input input:focus { border-color: #8b5a2b; }
+.panel__input button {
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 14px;
+  background: #8b5a2b;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+.panel__input button:disabled { opacity: 0.5; cursor: default; }

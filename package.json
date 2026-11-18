@@ -1,0 +1,32 @@
+{
+  "name": "milo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Milo: an animated AI companion that lives on your screen",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "dev": "npm run build:main && concurrently -k -n vite,main,electron \"vite\" \"tsc -p tsconfig.main.json -w --preserveWatchOutput\" \"wait-on tcp:5173 dist/main/main.js && cross-env MILO_DEV=1 electron .\"",
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:renderer": "vite build",
+    "build": "npm run build:main && npm run build:renderer",
+    "start": "npm run build && electron .",
+    "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
+    "electron": "^33.2.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3",
+    "wait-on": "^8.0.1"
+  }
+}
