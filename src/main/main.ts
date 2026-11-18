@@ -16,7 +16,7 @@ import { transcribe } from "./ears";
 import { click, ensureBrowser, frontApp, openApp, openFolder, openLatestDownload, openUrl, pressKeys, typeText } from "./hands";
 import { plan } from "./quick";
 import { research } from "./research";
-import { Action, askMilo, classify, sweepPlan, ChatMessage, checkAnswer, locateInCrop, nextAction, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
+import { Action, askMilo, classify, setUserName, sweepPlan, ChatMessage, checkAnswer, locateInCrop, nextAction, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
 dotenv.config({ path: path.join(app.getAppPath(), ".env") });
 
@@ -495,6 +495,7 @@ ipcMain.handle("milo:mic-access", async () => {
 ipcMain.handle("milo:tts", (_e, text: string, urgent?: boolean) => speak(text, !!urgent));
 ipcMain.on("milo:copy", (_e, text: string) => clipboard.writeText(text));
 ipcMain.on("milo:set-character", (_e, desc: string) => setCharacter(desc));
+ipcMain.on("milo:set-name", (_e, name: string) => setUserName(name));
 ipcMain.on("milo:quit", () => app.quit());
 
 // ---------- app lifecycle -----------------------------------------------------

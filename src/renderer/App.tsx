@@ -7,7 +7,7 @@ import { Bubble, Confetti, Highlight } from "./Effects";
 import * as tts from "./voice";
 import ResearchPanel, { PanelSize } from "./ResearchPanel";
 import { Pin, SweepHUD, SweepState, SweepSummary, WorkCard } from "./Sweep";
-import { sfx } from "./sfx";
+import { setSounds, sfx, soundsOn } from "./sfx";
 
 type Msg = { role: "user" | "assistant"; content: string };
 type Pos = { x: number; y: number };
@@ -81,6 +81,14 @@ export default function App() {
   const [researchQ, setResearchQ] = useState<{ q: string; id: number } | null>(null);
   const [rpSize, setRpSize] = useState<PanelSize>("compact");
   const [sweep, setSweep] = useState<SweepState | null>(null);
+  const [sounds, setSoundsState] = useState(soundsOn());
+  const [name, setNameState] = useState(() => {
+    try {
+      return localStorage.getItem("milo.name") || "";
+    } catch {
+      return "";
+    }
+  });
   const sweepStop = useRef(false);
 
   const posRef = useRef(pos);
@@ -134,6 +142,16 @@ export default function App() {
       /* ignore */
     }
   }, [character]);
+
+  // Remember the student's name (and tell the brain).
+  useEffect(() => {
+    window.milo.setName(name);
+    try {
+      localStorage.setItem("milo.name", name);
+    } catch {
+      /* ignore */
+    }
+  }, [name]);
 
   const hover = useCallback((on: boolean) => window.milo.setClickable(on), []);
 
@@ -640,6 +658,13 @@ export default function App() {
 
   // ---- voice commands -------------------------------------------------------------
   routeRef.current = (text: string, spoken = true) => {
+    const nm = text.match(/^(?:call me|my name is|my name's|i'?m called)\s+([a-z][a-z' -]{0,30})$/i);
+    if (nm) {
+      const n = nm[1].trim().replace(/\b\w/g, (c) => c.toUpperCase());
+      setNameState(n);
+      say(`Got it, ${n}.`).then(() => setBubble(null));
+      return;
+    }
     if (researchQ) {
       const t = text.toLowerCase();
       if (/^(close|done|thanks|thank you|got it|never ?mind|that'?s all)\b/.test(t)) return closeResearch();
@@ -1221,6 +1246,16 @@ export default function App() {
               <button className={`chip ${handsFree ? "chip--on" : ""}`} onClick={toggleHandsFree} title='Always listening for "Milo…"'>
                 {handsFree ? "Hands-free on" : "Hands-free"}
               </button>
+              <button
+                className="chip"
+                onClick={() => {
+                  setSounds(!sounds);
+                  setSoundsState(!sounds);
+                }}
+                title="Interface sounds"
+              >
+                {sounds ? "Sounds on" : "Sounds off"}
+              </button>
               <button className="chip" onClick={() => setVoice((v) => !v)}>
                 {voice ? "Voice on" : "Voice off"}
               </button>
@@ -1247,6 +1282,10 @@ export default function App() {
             <button className="talk-btn" onClick={talk}>
               Talk to Milo
             </button>
+            <label className="name-row">
+              <span>Your name</span>
+              <input value={name} onChange={(e) => setNameState(e.target.value.slice(0, 30))} placeholder="So Milo can greet you" />
+            </label>
             <div className="hint">Cmd+Shift+Space = talk · Cmd+Shift+Y = look · or turn on Hands-free</div>
           </div>
 

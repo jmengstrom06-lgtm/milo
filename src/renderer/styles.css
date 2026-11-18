@@ -967,3 +967,8 @@ body,
 .sum-ans { flex: 1; color: #fff; font-weight: 600; }
 .sum-tag { font-size: 10.5px; color: #8b8ba3; }
 .sum-tag--ok { color: #6ee7b7; }
+
+.name-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #8a7a9a; }
+.name-row input { flex: 1; border: 1px solid #ddd; border-radius: 8px; padding: 5px 8px; font-size: 13px; outline: none; }
+.name-row input:focus { border-color: var(--accent); }
+.panel__actions { flex-wrap: wrap; justify-content: flex-end; }

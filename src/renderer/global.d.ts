@@ -71,6 +71,7 @@ declare global {
       onTeachScreen: (cb: () => void) => () => void;
       onTalk: (cb: () => void) => () => void;
       setCharacter: (desc: string) => void;
+      setName: (name: string) => void;
       quit: () => void;
     };
   }

@@ -98,22 +98,35 @@ export async function pressKeys(combo: string) {
   }
 }
 
-/** Type text. Short plain text is typed key by key (looks like Milo typing); long or fancy text is pasted. */
+/** Make text typeable key by key: swap smart quotes and dashes for plain ones. */
+function plainify(text: string) {
+  return text
+    .replace(/[\u201C\u201D\u201E]/g, '"')
+    .replace(/[\u2018\u2019\u201A]/g, "'")
+    .replace(/[\u2013\u2014]/g, "-")
+    .replace(/\u2026/g, "...")
+    .replace(/\u00A0/g, " ")
+    .replace(/\r\n?/g, "\n");
+}
+
+const KEYSTROKE = ["-e", "on run argv", "-e", 'tell application "System Events" to keystroke (item 1 of argv)', "-e", "end run"];
+
+/**
+ * Type text so it visibly appears character by character (it looks great on video).
+ * Long or non-English text falls back to a paste.
+ */
 export async function typeText(text: string) {
-  const plain = /^[\x20-\x7E]*$/.test(text);
+  const t = plainify(text);
   try {
-    if (plain && text.length <= 120) {
-      await run("osascript", [
-        "-e", "on run argv",
-        "-e", 'tell application "System Events"',
-        "-e", "repeat with c in characters of (item 1 of argv)",
-        "-e", "keystroke c",
-        "-e", "delay 0.012",
-        "-e", "end repeat",
-        "-e", "end tell",
-        "-e", "end run",
-        text,
-      ]);
+    if (/^[\x20-\x7E\n\t]*$/.test(t) && t.length <= 2500) {
+      const lines = t.split("\n");
+      for (let li = 0; li < lines.length; li++) {
+        const line = lines[li];
+        for (let i = 0; i < line.length; i += 48) {
+          await run("osascript", [...KEYSTROKE, line.slice(i, i + 48)]);
+        }
+        if (li < lines.length - 1) await run("osascript", ["-e", 'tell application "System Events" to key code 36']);
+      }
       return;
     }
     const saved = clipboard.readText();

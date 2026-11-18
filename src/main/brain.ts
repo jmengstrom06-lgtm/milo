@@ -23,7 +23,11 @@ let characterDesc = "a small purple horned frog (a horned lizard) with a spiky c
 export function setCharacter(desc: string) {
   if (desc) characterDesc = desc;
 }
-const persona = () => `You are Milo, ${characterDesc}, an animated companion who lives on a college student's computer screen.
+let userName = "";
+export function setUserName(name: string) {
+  userName = (name || "").slice(0, 40);
+}
+const persona = () => `You are Milo, ${characterDesc}, an animated companion who lives on a college student's computer screen.${userName ? ` The student's name is ${userName}.` : ""}
 You are friendly, upbeat, fast and a little playful. You talk like a smart friend, never like a textbook.`;
 
 const chatPrompt = () => `${persona()}
