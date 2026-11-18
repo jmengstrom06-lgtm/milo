@@ -28,6 +28,7 @@ declare global {
       copy: (text: string) => void;
       onSummon: (cb: () => void) => () => void;
       onTeachScreen: (cb: () => void) => () => void;
+      setCharacter: (desc: string) => void;
       quit: () => void;
     };
   }

@@ -18,10 +18,14 @@ export type TeachResult = {
 export type CheckResult = { correct: boolean; feedback: string };
 export type Practice = { problems: { question: string; answer: string }[] };
 
-const PERSONA = `You are Milo, a small animated monkey who lives on a college student's computer screen.
+let characterDesc = "a small purple horned frog (a horned lizard) with a spiky crown";
+export function setCharacter(desc: string) {
+  if (desc) characterDesc = desc;
+}
+const persona = () => `You are Milo, ${characterDesc}, an animated companion who lives on a college student's computer screen.
 You are friendly, upbeat, fast and a little playful. You talk like a smart friend, never like a textbook.`;
 
-const CHAT_PROMPT = `${PERSONA}
+const chatPrompt = () => `${persona()}
 Keep chat replies short (1 to 4 sentences) unless the student asks for detail.`;
 
 const MODE_RULES: Record<Mode, string> = {
@@ -201,7 +205,7 @@ async function callTool<T>(body: Record<string, unknown>, toolName: string): Pro
 // ---------------------------------------------------------------------------
 
 export async function askMilo(history: ChatMessage[]): Promise<{ ok: boolean; text: string }> {
-  const r = await callClaude({ max_tokens: 600, system: CHAT_PROMPT, messages: history.slice(-20) });
+  const r = await callClaude({ max_tokens: 600, system: chatPrompt(), messages: history.slice(-20) });
   if (!r.ok) return r;
   const text = r.data
     .filter((b) => b.type === "text")
@@ -217,7 +221,7 @@ export async function teachFromScreen(
   mode: Mode,
   request: string
 ): Promise<ApiOk<TeachResult> | ApiErr> {
-  const system = `${PERSONA}
+  const system = `${persona()}
 You are looking at a screenshot of the student's screen. Find the homework question, problem, blank, or task they most likely need help with (usually the most prominent unanswered one, or the one they point to in their request). Ignore Milo himself, menus, docks and browser chrome.
 ${MODE_RULES[mode]}
 Keep "say" lines short and natural for text-to-speech (no LaTeX, no symbols, say numbers in words if needed).
@@ -252,7 +256,7 @@ If there is nothing to help with, set found=false and use intro to say so playfu
 export async function checkAnswer(lesson: TeachResult, studentAnswer: string): Promise<ApiOk<CheckResult> | ApiErr> {
   return callTool<CheckResult>({
     max_tokens: 1000,
-    system: `${PERSONA}\nYou are checking a student's answer to your own lesson. Accept equivalent forms and reasonable rounding.`,
+    system: `${persona()}\nYou are checking a student's answer to your own lesson. Accept equivalent forms and reasonable rounding.`,
     tools: [CHECK_TOOL],
     tool_choice: { type: "auto" },
     messages: [
@@ -271,7 +275,7 @@ Student answered: ${studentAnswer}`,
 export async function makePractice(lesson: TeachResult): Promise<ApiOk<Practice> | ApiErr> {
   return callTool<Practice>({
     max_tokens: 2000,
-    system: `${PERSONA}\nWrite exactly 3 practice problems that use the same method, slightly varied, increasing difficulty.`,
+    system: `${persona()}\nWrite exactly 3 practice problems that use the same method, slightly varied, increasing difficulty.`,
     tools: [PRACTICE_TOOL],
     tool_choice: { type: "auto" },
     messages: [

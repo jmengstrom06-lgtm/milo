@@ -17,5 +17,6 @@ contextBridge.exposeInMainWorld("milo", {
   copy: (text: string) => ipcRenderer.send("milo:copy", text),
   onSummon: (cb: () => void) => on("milo:summon", cb),
   onTeachScreen: (cb: () => void) => on("milo:teach-screen", cb),
+  setCharacter: (desc: string) => ipcRenderer.send("milo:set-character", desc),
   quit: () => ipcRenderer.send("milo:quit"),
 });

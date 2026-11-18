@@ -1,3 +1,5 @@
+:root { --accent: #5b2d90; --accent-soft: #ece3f7; --accent-deep: #3b1a63; }
+
 html,
 body,
 #root {
@@ -138,7 +140,7 @@ body,
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
-  background: #8b5a2b;
+  background: var(--accent);
   color: #fff;
   font-weight: 600;
 }
@@ -169,8 +171,8 @@ body,
   line-height: 1.4;
   white-space: pre-wrap;
 }
-.bubble--assistant { background: #f3e7da; color: #2b1a0e; align-self: flex-start; }
-.bubble--user { background: #8b5a2b; color: #fff; align-self: flex-end; }
+.bubble--assistant { background: var(--accent-soft); color: #2b1a0e; align-self: flex-start; }
+.bubble--user { background: var(--accent); color: #fff; align-self: flex-end; }
 .bubble--typing { opacity: 0.7; font-style: italic; }
 .panel__input {
   display: flex;
@@ -186,12 +188,12 @@ body,
   font-size: 14px;
   outline: none;
 }
-.panel__input input:focus { border-color: #8b5a2b; }
+.panel__input input:focus { border-color: var(--accent); }
 .panel__input button {
   border: 0;
   border-radius: 999px;
   padding: 8px 14px;
-  background: #8b5a2b;
+  background: var(--accent);
   color: #fff;
   font-weight: 600;
   cursor: pointer;
@@ -343,7 +345,7 @@ body,
   justify-content: space-between;
   padding: 10px 12px 0 50px;
 }
-.notebook__topic { font-size: 28px; font-weight: 700; color: #8b5a2b; line-height: 1.1; }
+.notebook__topic { font-size: 28px; font-weight: 700; color: var(--accent); line-height: 1.1; }
 .nb-x {
   border: 0;
   background: transparent;
@@ -357,14 +359,14 @@ body,
   font-family: -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 11px;
   font-weight: 600;
-  border: 1.5px solid #8b5a2b;
-  color: #8b5a2b;
+  border: 1.5px solid var(--accent);
+  color: var(--accent);
   background: transparent;
   border-radius: 999px;
   padding: 3px 9px;
   cursor: pointer;
 }
-.nb-mode--on { background: #8b5a2b; color: #fff; }
+.nb-mode--on { background: var(--accent); color: #fff; }
 .notebook__page { padding: 6px 16px 16px 50px; overflow-y: auto; font-size: 23px; line-height: 34px; }
 .nb-step { display: flex; gap: 8px; align-items: baseline; animation: write 0.9s steps(24) both; }
 @keyframes write {
@@ -376,8 +378,8 @@ body,
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  border: 2px solid #8b5a2b;
-  color: #8b5a2b;
+  border: 2px solid var(--accent);
+  color: var(--accent);
   font-size: 17px;
   font-weight: 700;
   line-height: 20px;
@@ -386,7 +388,7 @@ body,
 }
 .nb-write .katex { font-size: 0.82em; color: #13213f; }
 .nb-end { margin-top: 6px; animation: pop 0.25s ease-out; }
-.nb-summary { color: #5a3418; font-size: 21px; }
+.nb-summary { color: var(--accent-deep); font-size: 21px; }
 .nb-check { margin: 4px 0; }
 .nb-q { display: block; font-weight: 700; color: #1f2a44; }
 .nb-answer { display: flex; gap: 6px; margin: 4px 0; }
@@ -395,7 +397,7 @@ body,
   font-family: "Caveat", cursive;
   font-size: 22px;
   border: 0;
-  border-bottom: 2px dashed #8b5a2b;
+  border-bottom: 2px dashed var(--accent);
   background: transparent;
   outline: none;
   color: #1f2a44;
@@ -407,7 +409,7 @@ body,
   border: 0;
   border-radius: 999px;
   padding: 5px 12px;
-  background: #8b5a2b;
+  background: var(--accent);
   color: #fff;
   cursor: pointer;
 }
@@ -434,7 +436,7 @@ body,
   font-size: 12px;
   border: 0;
   background: transparent;
-  color: #8b5a2b;
+  color: var(--accent);
   text-decoration: underline;
   cursor: pointer;
   padding: 2px 4px;
@@ -460,7 +462,7 @@ body,
 /* ---------- chat panel additions ---------- */
 .panel { z-index: 35; }
 .panel__look { padding: 10px 12px 8px; border-bottom: 1px solid #eee; display: flex; flex-direction: column; gap: 6px; }
-.seg { display: flex; background: #f3e7da; border-radius: 999px; padding: 3px; }
+.seg { display: flex; background: var(--accent-soft); border-radius: 999px; padding: 3px; }
 .seg__b {
   flex: 1;
   border: 0;
@@ -469,10 +471,10 @@ body,
   padding: 5px 6px;
   font-size: 12px;
   font-weight: 600;
-  color: #8b5a2b;
+  color: var(--accent);
   cursor: pointer;
 }
-.seg__b--on { background: #8b5a2b; color: #fff; }
+.seg__b--on { background: var(--accent); color: #fff; }
 .look-btn {
   border: 0;
   border-radius: 12px;

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import Milo, { Mood } from "./Milo";
+import Milo, { Character, CHARACTERS, Mood } from "./Milo";
 import Notebook from "./Notebook";
 import { Bubble, Confetti, Highlight } from "./Effects";
 import * as tts from "./voice";
@@ -47,6 +47,14 @@ export default function App() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [voice, setVoice] = useState(true);
+  const [character, setCharacter] = useState<Character>(() => {
+    try {
+      const c = localStorage.getItem("milo.character");
+      return c === "monkey" || c === "frog" ? c : "frog";
+    } catch {
+      return "frog";
+    }
+  });
   const [mode, setMode] = useState<MiloMode>("teach");
 
   const [lesson, setLesson] = useState<MiloLesson | null>(null);
@@ -66,6 +74,21 @@ export default function App() {
   const listRef = useRef<HTMLDivElement>(null);
   posRef.current = pos;
   voiceRef.current = voice;
+
+  // Apply the character's colors to the whole UI and tell the brain who Milo is.
+  useEffect(() => {
+    const c = CHARACTERS[character];
+    const root = document.documentElement.style;
+    root.setProperty("--accent", c.accent);
+    root.setProperty("--accent-soft", c.soft);
+    root.setProperty("--accent-deep", c.deep);
+    window.milo.setCharacter(c.persona);
+    try {
+      localStorage.setItem("milo.character", character);
+    } catch {
+      /* ignore */
+    }
+  }, [character]);
 
   const hover = useCallback((on: boolean) => window.milo.setClickable(on), []);
 
@@ -385,7 +408,7 @@ export default function App() {
         }}
         title="Click me · Cmd+Shift+Y = look at my screen"
       >
-        <Milo mood={mood} facing={facing} speaking={speaking} />
+        <Milo mood={mood} facing={facing} speaking={speaking} character={character} />
       </div>
 
       {bubble && <Bubble text={bubble} x={bubbleX} y={bubbleY} />}
@@ -396,6 +419,13 @@ export default function App() {
           <div className="panel__head">
             <span>Milo</span>
             <div className="panel__actions">
+              <button
+                className="chip"
+                title="Switch character"
+                onClick={() => setCharacter((c) => (c === "frog" ? "monkey" : "frog"))}
+              >
+                {CHARACTERS[character].label}
+              </button>
               <button className="chip" onClick={() => setVoice((v) => !v)}>
                 {voice ? "Voice on" : "Voice off"}
               </button>
