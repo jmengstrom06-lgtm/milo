@@ -1,6 +1,7 @@
 import {
   app,
   BrowserWindow,
+  session,
   clipboard,
   desktopCapturer,
   globalShortcut,
@@ -11,6 +12,7 @@ import {
 import path from "node:path";
 import dotenv from "dotenv";
 import { speak } from "./voice";
+import { transcribe } from "./ears";
 import { askMilo, ChatMessage, checkAnswer, locateInCrop, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
 dotenv.config({ path: path.join(app.getAppPath(), ".env") });
@@ -127,27 +129,49 @@ ipcMain.on("milo:set-clickable", (_e, clickable: boolean) => {
 
 ipcMain.handle("milo:ask", (_e, history: ChatMessage[]) => askMilo(history));
 
-ipcMain.handle("milo:look", async (_e, mode: Mode, request: string) => {
+type Box = { x: number; y: number; width: number; height: number };
+
+ipcMain.handle("milo:look", async (_e, mode: Mode, request: string, focus: Box | null) => {
+  // Where the mouse is right now (so "this one" means the question you're hovering).
+  const cursor = screen.getCursorScreenPoint();
   const cap = await captureScreen();
   if (!cap.ok) return cap;
   const { shot } = cap;
   const small = toJpeg(shot.full, 1568);
-  const lesson = await teachFromScreen(small.b64, small.size, mode, request);
+  const pxPerPtSmall = small.k * shot.pxPerPt;
+  const { bounds, workArea } = shot;
+
+  // overlay points <-> screenshot pixels
+  const toPx = (b: Box) => ({
+    x: (b.x + workArea.x - bounds.x) * pxPerPtSmall,
+    y: (b.y + workArea.y - bounds.y) * pxPerPtSmall,
+    width: b.width * pxPerPtSmall,
+    height: b.height * pxPerPtSmall,
+  });
+  const toPt = (b: Box) => ({
+    x: bounds.x + b.x / pxPerPtSmall - workArea.x,
+    y: bounds.y + b.y / pxPerPtSmall - workArea.y,
+    width: b.width / pxPerPtSmall,
+    height: b.height / pxPerPtSmall,
+  });
+
+  const onScreen =
+    cursor.x >= bounds.x && cursor.x <= bounds.x + bounds.width && cursor.y >= bounds.y && cursor.y <= bounds.y + bounds.height;
+  const pointer = onScreen ? { x: (cursor.x - bounds.x) * pxPerPtSmall, y: (cursor.y - bounds.y) * pxPerPtSmall } : undefined;
+
+  const lesson = await teachFromScreen(small.b64, small.size, mode, request, {
+    pointer,
+    focus: focus ? toPx(focus) : undefined,
+  });
   if (!lesson.ok) return lesson;
 
-  // Screenshot pixels -> overlay-window points.
   const t = lesson.data.target;
-  const ptPerPx = 1 / (small.k * shot.pxPerPt);
-  const box =
-    lesson.data.found && t
-      ? {
-          x: shot.bounds.x + t.x * ptPerPx - shot.workArea.x,
-          y: shot.bounds.y + t.y * ptPerPx - shot.workArea.y,
-          width: t.width * ptPerPx,
-          height: t.height * ptPerPx,
-        }
-      : null;
-  return { ok: true, lesson: lesson.data, box };
+  const box = lesson.data.found && t ? toPt(t) : null;
+  const others = (lesson.data.others ?? [])
+    .filter((o) => o && o.width > 4 && o.height > 4)
+    .slice(0, 6)
+    .map((o) => ({ label: String(o.label).slice(0, 12), box: toPt(o) }));
+  return { ok: true, lesson: lesson.data, box, others };
 });
 
 // Lock-on: zoom into a sharp crop around the first guess and find the exact edges.
@@ -193,6 +217,12 @@ ipcMain.handle("milo:refine", async (_e, box: { x: number; y: number; width: num
 
 ipcMain.handle("milo:check", (_e, lesson: TeachResult, answer: string) => checkAnswer(lesson, answer));
 ipcMain.handle("milo:practice", (_e, lesson: TeachResult) => makePractice(lesson));
+ipcMain.handle("milo:stt", (_e, audio: ArrayBuffer) => transcribe(audio));
+ipcMain.handle("milo:mic-access", async () => {
+  if (process.platform !== "darwin") return true;
+  if (systemPreferences.getMediaAccessStatus("microphone") === "granted") return true;
+  return systemPreferences.askForMediaAccess("microphone");
+});
 ipcMain.handle("milo:tts", (_e, text: string) => speak(text));
 ipcMain.on("milo:copy", (_e, text: string) => clipboard.writeText(text));
 ipcMain.on("milo:set-character", (_e, desc: string) => setCharacter(desc));
@@ -202,12 +232,19 @@ ipcMain.on("milo:quit", () => app.quit());
 
 app.whenReady().then(() => {
   if (process.platform === "darwin") app.dock?.hide();
+  // Let Milo's window use the microphone.
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === "media"));
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === "media");
   createOverlay();
 
   // Open Milo's chat from anywhere.
   globalShortcut.register("CommandOrControl+Shift+M", () => {
     overlay?.webContents.send("milo:summon");
     overlay?.focus();
+  });
+  // Talk to Milo from anywhere.
+  globalShortcut.register("CommandOrControl+Shift+Space", () => {
+    overlay?.webContents.send("milo:talk");
   });
   // The magic button: Milo looks at your screen and teaches whatever you're stuck on.
   globalShortcut.register("CommandOrControl+Shift+Y", () => {

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { forwardRef, useImperativeHandle, useState } from "react";
 import MathText, { stripMath } from "./MathText";
 
 type Props = {
@@ -12,11 +12,20 @@ type Props = {
   onClose: () => void;
   onSwitchMode: (m: MiloMode) => void;
   onFeedback: (text: string, correct: boolean) => void;
+  onMic: () => void;
+  listening: boolean;
+};
+
+export type NotebookHandle = {
+  showAnswer: () => void;
+  copy: () => void;
+  practice: () => void;
+  check: (answer: string) => void;
 };
 
 const MODE_LABEL: Record<MiloMode, string> = { teach: "Teach me", help: "Hint", do: "Do it for me" };
 
-export default function Notebook(p: Props) {
+const Notebook = forwardRef<NotebookHandle, Props>(function Notebook(p, ref) {
   const { lesson, mode, revealed, finished } = p;
   const [answer, setAnswer] = useState("");
   const [checking, setChecking] = useState(false);
@@ -27,10 +36,12 @@ export default function Notebook(p: Props) {
   const [openPractice, setOpenPractice] = useState<Record<number, boolean>>({});
   const [copied, setCopied] = useState(false);
 
-  const check = async () => {
-    if (!answer.trim() || checking) return;
+  const check = async (spoken?: string) => {
+    const a = (spoken ?? answer).trim();
+    if (!a || checking) return;
+    if (spoken) setAnswer(spoken);
     setChecking(true);
-    const r = await window.milo.check(lesson, answer.trim());
+    const r = await window.milo.check(lesson, a);
     setChecking(false);
     const fb = r.ok ? r.data : { text: r.text, correct: false };
     const text = "feedback" in fb ? fb.feedback : fb.text;
@@ -40,6 +51,7 @@ export default function Notebook(p: Props) {
   };
 
   const loadPractice = async () => {
+    if (practiceBusy) return;
     setPracticeBusy(true);
     const r = await window.milo.practice(lesson);
     setPracticeBusy(false);
@@ -52,6 +64,16 @@ export default function Notebook(p: Props) {
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
+
+  useImperativeHandle(ref, () => ({
+    showAnswer: () => setShowAnswer(true),
+    copy: () => {
+      setShowAnswer(true);
+      copy();
+    },
+    practice: () => loadPractice(),
+    check: (a: string) => check(a),
+  }));
 
   return (
     <div
@@ -68,6 +90,9 @@ export default function Notebook(p: Props) {
 
       <div className="notebook__head">
         <div className="notebook__topic">{lesson.topic}</div>
+        <button className={`nb-mic ${p.listening ? "nb-mic--on" : ""}`} onClick={p.onMic} title="Talk to Milo (Cmd+Shift+Space)">
+          {p.listening ? "Listening…" : "Talk"}
+        </button>
         <button className="nb-x" onClick={p.onClose} title="Done (Esc)">
           ×
         </button>
@@ -163,4 +188,6 @@ export default function Notebook(p: Props) {
       </div>
     </div>
   );
-}
+});
+
+export default Notebook;

@@ -14,6 +14,7 @@ export type TeachResult = {
   answer: string;
   check_question: string;
   summary: string;
+  others?: { label: string; x: number; y: number; width: number; height: number }[];
 };
 export type CheckResult = { correct: boolean; feedback: string };
 export type Practice = { problems: { question: string; answer: string }[] };
@@ -84,6 +85,22 @@ const TEACH_TOOL = {
       answer: { type: "string", description: "Final answer. Math in $...$ LaTeX allowed." },
       check_question: { type: "string" },
       summary: { type: "string" },
+      others: {
+        type: "array",
+        description:
+          "Up to 6 OTHER distinct questions visible on screen (not the target). label = the number/letter printed on the page (e.g. '3', 'Q5', 'b'), or 2 to 3 words if unnumbered. Pixel boxes like target.",
+        items: {
+          type: "object",
+          properties: {
+            label: { type: "string" },
+            x: { type: "number" },
+            y: { type: "number" },
+            width: { type: "number" },
+            height: { type: "number" },
+          },
+          required: ["label", "x", "y", "width", "height"],
+        },
+      },
     },
     required: ["found", "topic", "intro", "steps", "answer", "check_question", "summary"],
   },
@@ -219,10 +236,17 @@ export async function teachFromScreen(
   jpegBase64: string,
   size: { width: number; height: number },
   mode: Mode,
-  request: string
+  request: string,
+  hints: { pointer?: { x: number; y: number }; focus?: { x: number; y: number; width: number; height: number } } = {}
 ): Promise<ApiOk<TeachResult> | ApiErr> {
   const system = `${persona()}
-You are looking at a screenshot of the student's screen. Find the homework question, problem, blank, or task they most likely need help with (usually the most prominent unanswered one, or the one they point to in their request). Ignore Milo himself, menus, docks and browser chrome.
+You are looking at a screenshot of the student's screen. Ignore Milo himself, menus, docks and browser chrome.
+Choosing the target question, in priority order:
+1. If a FOCUS box is given, use the question in that box.
+2. If the student names one (a number like "4" or "number four", a letter, a topic, words from it, "the last one", "the one at the bottom"), pick exactly that one.
+3. If they say "this", "this one", "here" or "that one" and a POINTER location is given, pick the question under or nearest the pointer.
+4. Otherwise pick the most prominent unanswered question.
+Spoken numbers may arrive as words ("number three"); match them to the numbers printed on the page.
 ${MODE_RULES[mode]}
 Keep "say" lines short and natural for text-to-speech (no LaTeX, no symbols, say numbers in words if needed).
 If there is nothing to help with, set found=false and use intro to say so playfully.`;
@@ -239,7 +263,12 @@ If there is nothing to help with, set found=false and use intro to say so playfu
           { type: "image", source: { type: "base64", media_type: "image/jpeg", data: jpegBase64 } },
           {
             type: "text",
-            text: `The screenshot is ${size.width}x${size.height} pixels.\n` +
+            text:
+              `The screenshot is ${size.width}x${size.height} pixels.\n` +
+              (hints.focus
+                ? `FOCUS box (keep helping with this same question): x=${Math.round(hints.focus.x)}, y=${Math.round(hints.focus.y)}, width=${Math.round(hints.focus.width)}, height=${Math.round(hints.focus.height)}.\n`
+                : "") +
+              (hints.pointer ? `POINTER (student's mouse) is at x=${Math.round(hints.pointer.x)}, y=${Math.round(hints.pointer.y)}.\n` : "") +
               (request?.trim() ? `Student says: "${request.trim()}"` : 'Student says: "Milo, help me with this."'),
           },
         ],

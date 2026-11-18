@@ -18,6 +18,17 @@ An animated AI companion that lives on your screen.
 
 ## Using him
 
+### Talk to him
+- **Cmd+Shift+Space** (or the Talk button): say what you want. "Teach me number 4", "do this one for me" (hover the question), "the one about variance"
+- **Hands-free** (chip in the chat header): always listening, just start with "Milo, ..."
+- During a lesson: "do it for me", "give me a hint", "teach me", "show me the answer", "copy it", "more like this",
+  "say that again", "skip", "no, number 3", "thanks" (closes). When he asks "what do you get?", just say your answer.
+- Other questions on screen get number tags; click one or say its number to switch.
+- First time: allow **Terminal** under System Settings > Privacy & Security > **Microphone**.
+- Speech-to-text uses ElevenLabs (the milo key needs Text to Speech + Speech to Text access).
+
+### Keys and clicks
+
 - **Cmd+Shift+Y** from any app: Milo looks at your screen, jumps to the question, spotlights it, and teaches it in his notebook
 - **Click Milo** to open the chat: pick Teach me / Hint / Do it for me, then hit **Look at my screen**
 - Or type things like "teach me this" or "just do number 4 for me"

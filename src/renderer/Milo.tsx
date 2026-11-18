@@ -11,7 +11,8 @@ export type Mood =
   | "writing"
   | "thinking"
   | "happy"
-  | "celebrating";
+  | "celebrating"
+  | "listening";
 
 export type Character = "frog" | "monkey";
 
