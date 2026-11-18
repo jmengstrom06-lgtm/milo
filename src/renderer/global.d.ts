@@ -23,6 +23,7 @@ declare global {
       look: (mode: MiloMode, request: string) => Promise<{ ok: true; lesson: MiloLesson; box: MiloBox | null } | Err>;
       check: (lesson: MiloLesson, answer: string) => Promise<{ ok: true; data: { correct: boolean; feedback: string } } | Err>;
       practice: (lesson: MiloLesson) => Promise<{ ok: true; data: { problems: { question: string; answer: string }[] } } | Err>;
+      tts: (text: string) => Promise<{ ok: true; audio: string } | Err>;
       copy: (text: string) => void;
       onSummon: (cb: () => void) => () => void;
       onTeachScreen: (cb: () => void) => () => void;

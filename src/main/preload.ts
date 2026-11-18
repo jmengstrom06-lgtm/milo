@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("milo", {
   look: (mode: string, request: string) => ipcRenderer.invoke("milo:look", mode, request),
   check: (lesson: unknown, answer: string) => ipcRenderer.invoke("milo:check", lesson, answer),
   practice: (lesson: unknown) => ipcRenderer.invoke("milo:practice", lesson),
+  tts: (text: string) => ipcRenderer.invoke("milo:tts", text),
   copy: (text: string) => ipcRenderer.send("milo:copy", text),
   onSummon: (cb: () => void) => on("milo:summon", cb),
   onTeachScreen: (cb: () => void) => on("milo:teach-screen", cb),

@@ -10,6 +10,7 @@ import {
 } from "electron";
 import path from "node:path";
 import dotenv from "dotenv";
+import { speak } from "./voice";
 import { askMilo, ChatMessage, checkAnswer, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
 dotenv.config({ path: path.join(app.getAppPath(), ".env") });
@@ -134,6 +135,7 @@ ipcMain.handle("milo:look", async (_e, mode: Mode, request: string) => {
 
 ipcMain.handle("milo:check", (_e, lesson: TeachResult, answer: string) => checkAnswer(lesson, answer));
 ipcMain.handle("milo:practice", (_e, lesson: TeachResult) => makePractice(lesson));
+ipcMain.handle("milo:tts", (_e, text: string) => speak(text));
 ipcMain.on("milo:copy", (_e, text: string) => clipboard.writeText(text));
 ipcMain.on("milo:quit", () => app.quit());
 

@@ -1,4 +1,6 @@
-// Saves the Anthropic API key from your clipboard into .env.
+// Saves an API key from your clipboard into .env. Works for:
+//   Anthropic keys  (start with sk-ant-)  -> ANTHROPIC_API_KEY
+//   ElevenLabs keys (start with sk_)      -> ELEVENLABS_API_KEY
 // Usage: copy the key, then run `npm run setkey` (or double-click "Set Milo Key.command").
 const { execSync } = require("node:child_process");
 const fs = require("node:fs");
@@ -16,9 +18,14 @@ try {
   process.exit(1);
 }
 
-if (!key.startsWith("sk-ant-")) {
-  console.error("Your clipboard doesn't hold an Anthropic key (it should start with sk-ant-).");
-  console.error("Click 'Copy key' in the Claude Console, then run this again.");
+let name = null;
+if (key.startsWith("sk-ant-")) name = "ANTHROPIC_API_KEY";
+else if (/^sk_[A-Za-z0-9]{20,}$/.test(key)) name = "ELEVENLABS_API_KEY";
+
+if (!name) {
+  console.error("Your clipboard doesn't hold a key I recognize.");
+  console.error("Anthropic keys start with sk-ant-   ElevenLabs keys start with sk_");
+  console.error("Copy the key, then run this again.");
   process.exit(1);
 }
 
@@ -26,13 +33,12 @@ let env = fs.existsSync(envPath)
   ? fs.readFileSync(envPath, "utf8")
   : fs.existsSync(examplePath)
     ? fs.readFileSync(examplePath, "utf8")
-    : "ANTHROPIC_API_KEY=\n";
+    : "";
 
-if (/^ANTHROPIC_API_KEY=.*$/m.test(env)) {
-  env = env.replace(/^ANTHROPIC_API_KEY=.*$/m, `ANTHROPIC_API_KEY=${key}`);
-} else {
-  env = `ANTHROPIC_API_KEY=${key}\n` + env;
-}
+const line = new RegExp(`^${name}=.*$`, "m");
+if (line.test(env)) env = env.replace(line, `${name}=${key}`);
+else env = env.replace(/\n*$/, "\n") + `${name}=${key}\n`;
 
 fs.writeFileSync(envPath, env, { mode: 0o600 });
-console.log(`Saved key ending in ...${key.slice(-4)} to .env. Milo has a brain now!`);
+const label = name === "ANTHROPIC_API_KEY" ? "Anthropic (brain)" : "ElevenLabs (voice)";
+console.log(`Saved ${label} key ending in ...${key.slice(-4)} to .env. Restart Milo to use it.`);

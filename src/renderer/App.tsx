@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Milo, { Mood } from "./Milo";
 import Notebook from "./Notebook";
 import { Bubble, Confetti, Highlight } from "./Effects";
+import * as tts from "./voice";
 
 type Msg = { role: "user" | "assistant"; content: string };
 type Pos = { x: number; y: number };
@@ -112,39 +113,20 @@ export default function App() {
   }, [chatOpen, lesson, busy, moveTo]);
 
   // ---- voice ------------------------------------------------------------------
-  const say = useCallback((text: string, opts: { minMs?: number } = {}) => {
-    return new Promise<void>((resolve) => {
-      setBubble(text);
-      const est = Math.max(opts.minMs ?? 1400, text.split(/\s+/).length * 300);
-      if (!voiceRef.current || !window.speechSynthesis) {
-        setSpeaking(true);
-        setTimeout(() => {
-          setSpeaking(false);
-          resolve();
-        }, est);
-        return;
-      }
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-      u.rate = 1.1;
-      u.pitch = 1.25;
-      let done = false;
-      const finish = () => {
-        if (done) return;
-        done = true;
-        setSpeaking(false);
-        resolve();
-      };
-      u.onstart = () => setSpeaking(true);
-      u.onend = finish;
-      u.onerror = finish;
-      setTimeout(finish, est + 6000); // safety net if the voice engine stalls
-      window.speechSynthesis.speak(u);
-    });
+  const say = useCallback(async (text: string, opts: { minMs?: number } = {}) => {
+    setBubble(text);
+    if (!voiceRef.current) {
+      setSpeaking(true);
+      await sleep(Math.max(opts.minMs ?? 1400, text.split(/\s+/).length * 300));
+      setSpeaking(false);
+      return;
+    }
+    await tts.play(text, () => setSpeaking(true));
+    setSpeaking(false);
   }, []);
 
   const hush = () => {
-    window.speechSynthesis?.cancel();
+    tts.stop();
     setSpeaking(false);
   };
 
@@ -188,6 +170,8 @@ export default function App() {
       }
 
       const { lesson: L, box: b } = r;
+      // Generate all of Milo's lines in parallel right now, so he never pauses between steps.
+      if (voiceRef.current) [L.intro, ...L.steps.map((s) => s.say), m === "do" ? L.summary : ""].forEach((t) => t && tts.prefetch(t));
       if (!L.found || !b) {
         setMood("happy");
         await say(L.intro || "I don't see a question on your screen. Open one up and try again!");
