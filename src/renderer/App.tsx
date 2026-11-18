@@ -14,6 +14,7 @@ import { setSounds, sfx, soundsOn } from "./sfx";
 import ToolPanel, { SavedTool, loadTools, saveTools } from "./ToolPanel";
 import QuizPanel, { QuizHandle } from "./QuizPanel";
 import { BriefCard, BriefLoader, BriefState, SignInPanel } from "./Brief";
+import { fastDecide, stripFiller, type DecideState } from "./decide";
 import { stripMath } from "./MathText";
 
 type Msg = { role: "user" | "assistant"; content: string };
@@ -1098,58 +1099,12 @@ export default function App() {
     lastCommand: lastCommand.current || undefined,
   });
   routeRef.current = (raw: string, spoken = true) => {
-    // "Uh, cool, okay, can you…" -> the actual command. Filler never decides anything.
-    const text = raw.replace(/^(?:(?:hey|ok(?:ay)?|so|uh+|um+|cool|alright|all right|yeah|well|and|milo)[,.]?\s+)+/i, "").trim() || raw;
-    if (/^(flag (that|this|it)|that was (wrong|bad|weird|a bug|broken)|log (that|this)|report (a |that |this )?bug|bug report|that'?s a bug)\b/i.test(text.trim())) {
-      flagNow(text);
-      return;
-    }
-    // ---- Milo's Kit
-    const kt = text.toLowerCase().replace(/[.!?]+$/, "").replace(/^(?:(?:can you|could you|would you|please|just|now|okay|ok|hey)[, ]+)+/, "").trim();
+    // Filler ("uh", "cool", "okay") never decides anything.
+    const text = stripFiller(raw);
+    const dstate: DecideState = { kitOpen: (kitApp as DecideState["kitOpen"]) ?? null, researchOpen: !!researchQ, toolOpen: !!tool, lessonOpen: !!lessonRef.current, hasLastAnswer: !!lastAnswer() };
+    if (fastDecide(text, dstate)?.do === "flag") return flagNow(text);
+    // Unmistakable commands for the open Milo app ("next", "the answer is 5", "box plot").
     if (kitApp && kitRef.current?.voice(text)) return;
-    if (/^(what can you (do|open|make)|what('?s| is) in your (kit|tool ?box)|show me your (tools|kit|apps|tool ?box)|open your (kit|tool ?box|tools|apps))$/.test(kt)) {
-      setRingOpen(true);
-      say("Here's what I can open.").then(() => setBubble(null));
-      return;
-    }
-    // "My classes are stats, English comp, bio..." / "set up my classes"
-    if (/^(my (\w+ )?classes are|i'?m taking|this (semester|term) i'?m taking|my (five|5|four|4|six|6) classes are)\b/.test(kt)) {
-      kitRef.current?.setupClasses(text.replace(/^.*?\b(are|taking)\b[:,]?\s*/i, ""));
-      return;
-    }
-    if (/^(set ?up|add|edit|change|update) (my |your )?classes$|^(what are )?my classes\??$/.test(kt)) {
-      kitRef.current?.setupClasses();
-      return;
-    }
-    if (/^(hold|grab|keep) (this|that|it|onto (this|that|it))( for me)?$|^put (this|that|it) in your pocket$/.test(kt)) {
-      kitRef.current?.hold();
-      return;
-    }
-    const drop = kt.match(/^(drop|paste|put) (it|that|what you'?re holding|what you have)(?: (?:in|into|on) (.+))?$/);
-    if (drop && (drop[3] || /holding|have|drop/.test(kt))) {
-      kitRef.current?.drop(drop[3]);
-      return;
-    }
-    if (/^(save|add|put) (that|this|it) (to|in|into) (your |my )?notes?$/.test(kt) && lastAnswer()) {
-      kitRef.current?.saveToNotes(lastAnswer());
-      return;
-    }
-    // "Open sheets" / "open the sheet" / "open up notes" = Milo's apps. Only "Google Sheets", "Excel app", "Apple Notes" mean those products.
-    const ko = kt.match(/^(?:open|show|pull up|bring up|go to)\s+(?:up\s+)?(?:your\s+|the\s+|my\s+)?(notes|study deck|study|sketch ?pad|sketch|sheets?|spread ?sheets?|excel( sheet)?|planner|pocket)(?: app)?$/);
-    if (ko) {
-      const key = ko[1].replace(/\s+/g, " ").replace(/^spread ?sheets?$/, "spreadsheet").replace(/^sheets$/, "sheet").replace(/^excel( sheet)?$/, "sheet");
-      const map: Record<string, KitApp> = { notes: "notes", "study deck": "study", study: "study", sketch: "sketch", "sketch pad": "sketch", sketchpad: "sketch", sheet: "sheet", spreadsheet: "sheet", planner: "planner", pocket: "pocket" };
-      bb("route_instant", { text, kind: "kit", app: map[key] });
-      openKit(map[key] ?? "study");
-      return;
-    }
-    // "Close that Chrome tab. I meant your sheets…": do the close, then the rest.
-    const cc = text.match(/^(?:milo[, ]+)?close (?:that|the|this) (?:chrome|google|browser)(?: browser| tab| window| page)?[.,;!]+\s*(?:(?:no|sorry)[, ]+)?(.{6,})$/i);
-    if (cc) {
-      bb("route_split", { text, close: "chrome tab", rest: cc[1] });
-      runTask("close this Chrome tab", spoken).then(() => routeRef.current(cc[1], spoken));
-      return;
-    }
 
     if (quiz && quizRef.current?.active()) {
       const t = text.toLowerCase().trim().replace(/[.!?]+$/, "");
@@ -1184,34 +1139,45 @@ export default function App() {
       say(`Got it, ${n}.`).then(() => setBubble(null));
       return;
     }
-    if (researchQ || tool || kitApp) {
-      const t0 = text.toLowerCase().replace(/[.!?]+$/, "").trim();
-      const m = t0.match(/^(?:(?:ok(?:ay)?|now|just|please|can you|could you|would you|go ahead and)[, ]+)*(?:close|exit|dismiss|hide|get rid of|shut)\b(.*?)(?:,? (?:and then|and|then) (.+))?$/);
-      if (m && !/\bchrome\b(?!.*\bresearch\b)/.test(m[1]) && /^(\s*(the|this|that|your|my|it|now|please|research|box|panel|tab|window|page|screen|tool|one|you just opened|up|out|thing|notes|study|deck|sketch|sheet|sheets|planner|pocket|kit|graph|chart|problems?|flashcards?)\b)*\s*$/.test(m[1] + " ")) {
-        bb("close_own_panel", { text, then: m[2] ?? null });
+
+    // The few instant decisions (all unit-tested in tests/decide.test.ts). Anything else: the brain decides.
+    const f = fastDecide(text, dstate);
+    if (f) bb("route_instant", { text, ...f });
+    switch (f?.do) {
+      case "kit_menu":
+        setRingOpen(true);
+        say("Here's what I can open.").then(() => setBubble(null));
+        return;
+      case "classes":
+        kitRef.current?.setupClasses(f.text);
+        return;
+      case "hold":
+        kitRef.current?.hold();
+        return;
+      case "drop":
+        kitRef.current?.drop(f.target);
+        return;
+      case "save_notes":
+        kitRef.current?.saveToNotes(lastAnswer());
+        return;
+      case "open_kit":
+        openKit(f.app as KitApp);
+        return;
+      case "close_chrome_then":
+        runTask("close this Chrome tab", spoken).then(() => routeRef.current(f.rest, spoken));
+        return;
+      case "close_own":
         if (kitApp) kitRef.current?.close();
         else if (tool) closeTool();
         else closeResearch();
-        if (m[2]) setTimeout(() => routeRef.current(m[2], spoken), 400);
+        if (f.then) setTimeout(() => routeRef.current(f.then!, spoken), 400);
         return;
-      }
-      const t = text.toLowerCase();
-      // Only a bare "close" / "done" / "thanks" closes the open box. Longer sentences go to the router.
-      if (/^(close( it| this| that| the box| that box)?|done|i'?m done|thanks|thank you|got it|never ?mind|that'?s all)[.!]*$/.test(t.trim())) {
-        if (kitApp) return kitRef.current?.close();
-        return tool ? closeTool() : closeResearch();
-      }
-      if (/(full ?screen|make it (big|bigger|full)|expand( it)?|maximi[sz]e)/.test(t)) return setRpSize("full");
-      if (/(half|split) ?screen|make it half/.test(t)) return setRpSize("half");
-      if (/(smaller|shrink|minimi[sz]e|compact)/.test(t)) return setRpSize("compact");
-    }
-    // Everyday computer shortcuts go straight to the hands (no AI decision needed): they take under a second.
-    const plain = text.toLowerCase().replace(/[.!?]+$/, "").replace(/^(?:(?:can you|could you|would you|please|just|now|okay|ok)[, ]+)+/, "").trim();
-    const aboutKit = /\byour (notes?|study( deck)?|sketch( ?pad)?|sheet|spreadsheet|planner|pocket|kit|tool ?box|flash ?cards)\b/i.test(text);
-    if (!lessonRef.current && !aboutKit && /^(copy|paste|select all|select everything|undo|redo|cut|save|close (this |the |that )?(tab|window)|(open )?(a )?new (chrome )?tab|next tab|previous tab|reopen|(make|take|write|create|add) (me )?(a |an )?(quick )?note|note (that|down)|quit |minimi[sz]e|zoom (in|out)|refresh|reload|go back|scroll (up|down))\b/.test(plain)) {
-      bb("route_instant", { text, kind: "shortcut" });
-      runTask(text, spoken);
-      return;
+      case "resize":
+        setRpSize(f.size);
+        return;
+      case "shortcut":
+        runTask(text, spoken);
+        return;
     }
     const inLesson = !!lessonRef.current;
     const awaitingAnswer = inLesson && finishedRef.current && lessonModeRef.current !== "do" && !!lessonRef.current?.check_question;

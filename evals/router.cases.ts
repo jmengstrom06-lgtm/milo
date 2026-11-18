@@ -58,6 +58,10 @@ export const CASES: Case[] = [
   { real: true, say: "I wanna study for statistics. Open up your sheets and make me a histogram.", expect: { kind: "kit", app: "sheet" } },
   { real: true, say: "Uh, can you close that now and open up your notes and then make a note that I have a flight in a couple hours?", ctx: SHEET, expect: { kind: "close", after: true } },
 
+  { real: true, say: "Milo, would you close that tab with the histogram on it for me?", ctx: SHEET, expect: { kind: "close" }, note: "2026-11-18: went to Chrome" },
+  { real: true, say: "close the tab with the histogram on it and close the Chrome tab.", ctx: SHEET, expect: { kind: "close", after: true } },
+  { real: true, say: "close Chrome.", ctx: SHEET, expect: { kind: "task" } },
+
   // ---- Sheet open -------------------------------------------------------------------------------
   { say: "make it a box plot instead", ctx: SHEET, expect: { kind: "in_app" } },
   { say: "add a column with z-scores", ctx: SHEET, expect: { kind: "in_app" } },

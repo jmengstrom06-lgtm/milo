@@ -276,7 +276,13 @@ ipcMain.on("milo:task-stop", () => {
 });
 
 ipcMain.handle("milo:task", async (_e, task: string) => {
-  if (taskRunning) return { ok: false, text: "I'm already doing something. Say stop first." };
+  if (taskRunning) {
+    // A new command replaces the old one (like a person would): stop it, then do this.
+    taskAbort = true;
+    bb("task", "replaced", { task });
+    for (let i = 0; i < 40 && taskRunning; i++) await new Promise((r) => setTimeout(r, 100));
+    if (taskRunning) return { ok: false, text: "I'm still finishing the last thing. Try again in a second." };
+  }
   taskRunning = true;
   taskAbort = false;
   // Milo must never hold the keyboard while he works, or his typing lands in his own window.

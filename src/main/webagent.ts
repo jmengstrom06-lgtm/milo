@@ -24,7 +24,10 @@ export type WebResult =
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const CANVAS_SITES = /docs\.google\.com\/(document|spreadsheets|presentation)|canva\.com\/design|figma\.com\/(file|design)/;
 
-function describe(s: Snap, tabs: { id: number; title: string; url: string; active: boolean }[]) {
+function describe(raw: Snap, tabs: { id: number; title: string; url: string; active: boolean }[]) {
+  // Chrome's own pages (new tab, settings) give a partial snapshot: never crash on a missing field.
+  const s: Snap = { ...raw, elements: raw.elements ?? [], text: raw.text ?? "", scroll: raw.scroll ?? { y: 0, max: 0 }, title: raw.title ?? "", url: raw.url ?? "", total: raw.total ?? 0 };
+  tabs = Array.isArray(tabs) ? tabs : [];
   const els = s.elements
     .map((e) => {
       const kind = e.role || (e.tag === "input" ? `input${e.type ? ":" + e.type : ""}` : e.editable ? "editable" : e.tag);
@@ -51,7 +54,7 @@ function describe(s: Snap, tabs: { id: number; title: string; url: string; activ
 
 /** Screen point (in macOS points) of an element, so Milo can hop next to it. Approximate. */
 function screenPoint(s: Snap, r: El["rect"] | undefined) {
-  if (!r) return null;
+  if (!r || !s.frame) return null;
   return { x: s.frame.screenX + r.x + r.w / 2, y: s.frame.screenY + s.frame.top + r.y + r.h / 2 };
 }
 
