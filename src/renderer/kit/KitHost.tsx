@@ -7,7 +7,7 @@ import KitPanel, { KitLoading } from "./KitPanel";
 import NotesView, { type NotesHandle } from "./NotesView";
 import PlannerView from "./PlannerView";
 import PocketView from "./PocketView";
-import SheetView from "./SheetView";
+import SheetView, { type SheetHandle } from "./SheetView";
 import SketchView from "./SketchView";
 import StudyDeck, { type StudyHandle } from "./StudyDeck";
 import { KIT_APPS, type GraphSpec, type KitApp, type Plan, type PocketItem, type Sketch, type StudyMode, type StudySet, type Table } from "./types";
@@ -33,6 +33,7 @@ export function studyModeFor(req: string): { mode: StudyMode; count: number } {
   const count = n ? Number(n[1]) || NUM[n[1]] || 0 : 0;
   if (/flash ?cards?|\bcards\b/.test(t)) return { mode: "cards", count: count || 10 };
   if (/practice (test|exam)|mock (test|exam)|test me|exam prep/.test(t)) return { mode: "test", count: count || 8 };
+  if (/\b(teach me|help me (understand|learn)|i don'?t (get|understand)|learn (about|how)|explain (how|what|why)|from scratch|go over)\b/.test(t)) return { mode: "learn", count: 3 };
   if (/\b(solve (it|them)|and solve|walk me through|show me how|worked|example|explain)\b/.test(t) && !/for me to (solve|try)|let me (try|solve)|i('ll| will) (try|solve)/.test(t)) return { mode: "worked", count: count || 1 };
   if (/\b(practice|quiz me|let me try|for me to (solve|try)|problems?|questions?)\b/.test(t)) return { mode: "practice", count: count || 5 };
   return { mode: "worked", count: count || 1 };
@@ -55,11 +56,27 @@ const KitHost = forwardRef<KitHandle, {
   const [study, setStudy] = useState<{ set: StudySet; mode: StudyMode; id: number } | null>(null);
   const [sketch, setSketch] = useState<Sketch | null>(null);
   const [table, setTable] = useState<Table | null>(null);
-  const [plan, setPlan] = useState<Plan | null>(null);
+  const [plan, setPlanState] = useState<Plan | null>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("milo.plan") || "null");
+    } catch {
+      return null;
+    }
+  });
+  const setPlan = (pl: Plan | null) => {
+    setPlanState(pl);
+    try {
+      localStorage.setItem("milo.plan", JSON.stringify(pl));
+    } catch {
+      /* ignore */
+    }
+  };
   const [notesFocus, setNotesFocus] = useState<string | null>(null);
+  const [notesAnswer, setNotesAnswer] = useState<string | null>(null);
   const [pocketV, setPocketV] = useState(0);
   const studyRef = useRef<StudyHandle>(null);
   const notesRef = useRef<NotesHandle>(null);
+  const sheetRef = useRef<SheetHandle>(null);
   const req = useRef(0);
 
   const show = (a: KitApp | null) => {
@@ -79,16 +96,25 @@ const KitHost = forwardRef<KitHandle, {
     p.say("That didn't work. Try asking a little differently.");
   };
 
-  const loadStudy = async (request: string, forced?: StudyMode) => {
+  const loadStudy = async (request: string, forced?: StudyMode, context?: string) => {
     const { mode, count } = studyModeFor(request);
     const m = forced ?? mode;
-    const id = begin("study", m === "worked" ? "Writing a problem" : m === "cards" ? "Making flashcards" : m === "test" ? "Building your practice test" : "Writing practice problems");
-    const r = await window.milo.kit.study(request, m, forced && forced !== mode ? (m === "worked" ? 1 : 5) : count);
+    const id = begin("study", m === "worked" ? "Writing a problem" : m === "learn" ? "Planning your lesson" : m === "cards" ? "Making flashcards" : m === "test" ? "Building your practice test" : "Writing practice problems");
+    const r = await window.milo.kit.study(request, m, forced && forced !== mode ? (m === "worked" ? 1 : m === "cards" ? 10 : m === "test" ? 8 : 5) : count, context);
     if (id !== req.current) return;
     if (!r.ok || !r.data.items.length) return fail(id, r.ok ? "No problems came back." : r.text);
     setLoading(null);
     setStudy({ set: r.data, mode: m, id: Date.now() });
   };
+  /** "Shade above 80" / "add labels": change what's showing instead of starting over. */
+  const editRequest = (r: string) =>
+    sketch
+      ? sketch.graph
+        ? `${r}\n(Change this existing graph "${sketch.title}": ${JSON.stringify(sketch.graph)})`
+        : sketch.svg && sketch.svg.length < 30000
+          ? `${r}\n(Change this existing drawing "${sketch.title}" and return the full updated SVG: ${sketch.svg})`
+          : r
+      : r;
   const loadSketch = async (request: string) => {
     const id = begin("sketch", "Sketching it");
     const r = await window.milo.kit.sketch(request);
@@ -116,6 +142,18 @@ const KitHost = forwardRef<KitHandle, {
     setPlan(r.data);
     p.say(r.data.say);
   };
+  const askNotes = async (q: string) => {
+    const id = begin("notes", "Looking through your notes");
+    const r = await window.milo.kit.askNotes(q);
+    if (id !== req.current) return;
+    setLoading(null);
+    if (!r.ok) return fail(id, r.text);
+    setNotesAnswer(r.data.answer);
+    if (r.data.note_id) setNotesFocus(r.data.note_id);
+    p.say(r.data.answer);
+  };
+  const studyNote = (n: { title: string; body: string }, mode: "practice" | "cards" | "test") =>
+    loadStudy(`${mode === "cards" ? "flashcards" : mode === "test" ? "a practice test" : "practice problems"} on my note: ${n.title}`, mode, `${n.title}\n\n${n.body}`);
   const makeNote = async (request: string) => {
     const id = begin("notes", "Writing your note");
     const r = await window.milo.kit.makeNote(request);
@@ -145,7 +183,13 @@ const KitHost = forwardRef<KitHandle, {
     else if (a === "sketch") loadSketch(r);
     else if (a === "sheet") loadTable(r);
     else if (a === "planner") loadPlan(r);
-    else if (a === "notes") makeNote(r);
+    else if (a === "notes") {
+      setNotesAnswer(null);
+      // A question about your notes gets answered; an instruction ("make notes on this", "write down...") makes a note.
+      const isCommand = /^(make|write|take|create|add|summari[sz]e|put|jot|note|save)\b/i.test(r);
+      if (!isCommand && (/^(what|when|where|who|how|why|did|do|does|which|find|search|look up|is there)\b/i.test(r) || /\?$/.test(r))) askNotes(r);
+      else makeNote(r);
+    }
     else show(a);
   };
 
@@ -168,10 +212,31 @@ const KitHost = forwardRef<KitHandle, {
         if (/^(again|replay|say that again|one more time|repeat)$/.test(t)) return s.replay(), true;
         if (/^(another( one)?|more|more like this|one more|try one like this|give me (another|more))( one| problem| like (this|that))?$/.test(t)) return s.more(), true;
         if (/^(flip( it)?|turn it over)$/.test(t)) return s.show(), true;
+        if (/^(easier|make it easier|an easier one|something easier|too hard)( one| please)?$/.test(t)) return s.easier(), true;
+        if (/^(harder|make it harder|a harder one|something harder|challenge me|too easy)( one| please| ones)?$/.test(t)) return s.harder(), true;
         if (s.awaiting()) {
           const m = t.match(/^(?:(?:the )?answer is|i got|i get|is it|it'?s|it is|i think it'?s|my answer is|that'?s|equals)\s+(.+)/);
           if (m || /\d/.test(t) || t.split(/\s+/).length <= 6) return s.answer(m ? m[1] : text), true;
         }
+      }
+      if (app === "sheet" && table && sheetRef.current && !/^(close|open|go|stop|hide)\b/.test(t)) {
+        sheetRef.current.ask(text);
+        return true;
+      }
+      if (app === "sketch" && sketch && /^(now |also |and |ok(ay)? |what if |then )?(shade|add|change|make|zoom|label|move|remove|show|plot|graph|use|put|draw|color|highlight|mark|switch|flip|swap|turn)\b/.test(t)) {
+        loadSketch(editRequest(text));
+        return true;
+      }
+      if (app === "notes" && /\b(quiz me|test me|flash ?cards|practice)\b/.test(t)) {
+        const n = notesRef.current?.current();
+        if (n) {
+          studyNote(n, /flash ?cards/.test(t) ? "cards" : /test/.test(t) ? "test" : "practice");
+          return true;
+        }
+      }
+      if (app === "notes" && /^(what|when|where|who|how|did|do|which)\b/.test(t)) {
+        askNotes(text);
+        return true;
       }
       if (app === "notes" && /^(add|put|write)\b.*\b(to|in|into) (my |the )?notes?$|^(add|note)( that)?[: ]/.test(t)) {
         const body = text.replace(/^(add|put|write|note)( that)?[:,]?\s*/i, "").replace(/\s*(to|in|into) (my |the )?notes?\.?$/i, "");
@@ -230,10 +295,11 @@ const KitHost = forwardRef<KitHandle, {
       <StudyStart onGo={(r, m) => loadStudy(r, m)} />
     );
   } else if (app === "sketch") {
-    body = sketch ? <SketchView sketch={sketch} onAsk={(r) => loadSketch(sketch.graph ? `${r} (change this graph: ${sketch.title}, ${JSON.stringify(sketch.graph)})` : r)} /> : <AskBox placeholder="Graph y = x^2, shade P(X > 75) for N(70, 5), show a plant cell…" onGo={loadSketch} />;
+    body = sketch ? <SketchView sketch={sketch} onAsk={(r) => loadSketch(editRequest(r))} /> : <AskBox placeholder="Graph y = x^2, shade P(X > 75) for N(70, 5), show a plant cell…" onGo={loadSketch} />;
   } else if (app === "sheet") {
     body = table ? (
       <SheetView
+        ref={sheetRef}
         table={table}
         say={(t) => p.say(t)}
         onGraph={(spec: GraphSpec, t: string) => {
@@ -245,8 +311,8 @@ const KitHost = forwardRef<KitHandle, {
       <AskBox placeholder="Put these test scores in a table: 72, 85, 90, 64…" onGo={loadTable} />
     );
   } else if (app === "planner") {
-    body = plan ? <PlannerView plan={plan} onPractice={(topic) => loadStudy(`practice problems: ${topic}`, "practice")} onRebuild={() => loadPlan("Rebuild my study plan")} /> : <AskBox placeholder="Plan my week for Exam 3 on Nov 25…" onGo={loadPlan} />;
-  } else if (app === "notes") body = <NotesView ref={notesRef} focusId={notesFocus} say={(t) => p.say(t)} />;
+    body = plan ? <PlannerView plan={plan} say={(t) => p.say(t)} onPractice={(topic) => loadStudy(`practice problems: ${topic}`, "practice")} onRebuild={() => loadPlan("Rebuild my study plan")} /> : <AskBox placeholder="Plan my week for Exam 3 on Nov 25…" onGo={loadPlan} />;
+  } else if (app === "notes") body = <NotesView ref={notesRef} focusId={notesFocus} answer={notesAnswer} say={(t) => p.say(t)} onStudy={studyNote} />;
   else body = <PocketView version={pocketV} onDrop={(it: PocketItem) => (async () => { await window.milo.kit.pocketCopy(it.id); show(null); await p.runTask(`switch to ${it.from && !/milo|electron/i.test(it.from) ? it.from : "the app I was just using"} and paste`); })()} />;
 
   return (

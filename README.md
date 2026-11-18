@@ -98,10 +98,15 @@ Milo reads web pages' real buttons and text boxes instead of guessing from scree
 Pages that can't be read as elements (Google Docs, Sheets, Slides) automatically use screen mode.
 
 ## Milo's Kit (his own apps)
-Say **"Milo, what can you do?"** (or click **Kit** in the chat panel) to see them fan out around him.
-- **Study**: "make a stats problem and solve it" (worked example, step by step, with a graph), "give me 5 practice problems on this", "flashcards for chapter 4", "practice test on this". Answer out loud; say "hint", "show me", "next", "another one". He remembers your weak spots.
-- **Sketch**: "graph y = x^2 - 3", "shade P(X > 78) for N(70, 5)", "show me what a plant cell looks like" (images need an OpenAI key: `npm run setkey -- openai`).
-- **Notes**: "make notes on this page", "add to my notes: exam 3 is Nov 25", "save that to my notes". One click sends a note to Apple Notes.
-- **Sheet**: "put these scores in a table" (live mean, median, std dev), Graph it, Copy for Excel.
-- **Planner**: "plan my week for Exam 3" (uses your D2L due dates), Practice buttons on every study block.
+Say **"Milo, what can you do?"** (or click **Kit** in the chat panel) to see them fan out around him. "Your notes", "your sketch pad" etc. always mean Milo's apps.
+- **Study**
+  - "Teach me z-scores": a mini-lesson, then a worked example, then problems for you.
+  - "Make a stats problem and solve it": solved step by step, written as he says it, with a self-drawing graph.
+  - "Give me 5 practice problems on this": answer out loud or typed; **Show my work** and he points to the exact line you went wrong.
+  - Misses offer an **Easier one**; three in a row offers **Harder ones**. Mastery bars per skill.
+  - "Practice test on this": timed, silent, then a full question-by-question breakdown. Also flashcards.
+- **Sketch**: "graph y = a(x-h)^2 + k" (with sliders), "shade P(X > 78) for N(70, 5)" (drag the mean/cutoff, the area updates), "draw a plant cell / the water cycle / a house" (Milo draws it live, free). Say "shade above 80" or "add labels" to change it. Photo-real images optional with an OpenAI key.
+- **Notes**: "make notes on this page", "add to my notes: ...", "save that to my notes", "what did I write about z-scores?". **Quiz me on this** / **Flashcards** on every note; **Send to Apple Notes**.
+- **Sheet**: "put these scores in a table", then talk to it: "add a z-score column", "sort by score", "only show above average", "graph hours vs score", "who's above average?". Milo computes every number himself. **Copy for Excel**.
+- **Planner**: "plan my week for Exam 3" (uses your D2L due dates). Check blocks off, **Practice** any block, **Add to Calendar** (with reminders).
 - **Pocket**: select text, "hold this"; later "drop it in ChatGPT" or "paste what you're holding".

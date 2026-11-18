@@ -150,6 +150,8 @@ function one(t: string): QuickStep | null {
   // ---- open / go to
   const o = t.match(/^(?:open|launch|start|pull up|bring up|go to|go on|switch to|show me|take me to|visit|get me|make|create)\s+(?:up\s+)?(.+)$/);
   if (!o) return null;
+  // "your notes", "your sketch pad"... are Milo's own apps, not Mac apps.
+  if (/^your\b/.test(o[1])) return null;
   const target = clean(o[1]);
 
   for (const [re, url, label] of NEW_DOCS) {

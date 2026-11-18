@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { log as bb } from "./blackbox";
 import { bridgeConnected, call as ext } from "./bridge";
-import { checkStudy, generateImage, makeNote, makePlan, makeSketch, makeStudySet, makeTable } from "./kit";
+import { askNotes, tableOps, checkStudy, generateImage, makeNote, makePlan, makeSketch, makeStudySet, makeTable } from "./kit";
 
 type Deps = {
   captureJpeg: () => Promise<string | null>;
@@ -53,16 +53,16 @@ export function registerKit(d: Deps) {
   }
 
   // ---- Study Deck
-  ipcMain.handle("kit:study", async (_e, request: string, mode: "worked" | "practice" | "cards" | "test", count: number) => {
+  ipcMain.handle("kit:study", async (_e, request: string, mode: "worked" | "practice" | "cards" | "test" | "learn", count: number, context?: string) => {
     const mem = load<Memory>("study-memory.json", { skills: {} });
     const weak = Object.entries(mem.skills)
       .filter(([, s]) => s.wrong > s.right * 0.5)
       .sort((a, b) => b[1].wrong - a[1].wrong)
       .slice(0, 4)
       .map(([k]) => k);
-    const src = await screen(String(request ?? ""));
-    const n = Math.max(1, Math.min(20, Number(count) || (mode === "worked" ? 1 : mode === "test" ? 8 : 5)));
-    return makeStudySet(String(request ?? ""), { mode, count: n, weak, ...src });
+    const src = context ? {} : await screen(String(request ?? ""));
+    const n = Math.max(1, Math.min(20, Number(count) || (mode === "worked" ? 1 : mode === "test" ? 8 : mode === "learn" ? 3 : 5)));
+    return makeStudySet(String(request ?? ""), { mode, count: n, weak, ...src, context: typeof context === "string" ? context : undefined });
   });
   ipcMain.handle("kit:check", async (_e, item: { prompt: string; answer: string; skill?: string }, student: string) => {
     const r = await checkStudy(item, String(student ?? ""));
@@ -85,6 +85,7 @@ export function registerKit(d: Deps) {
     save("study-memory.json", mem);
     return true;
   });
+  ipcMain.handle("kit:mastery", () => load<Memory>("study-memory.json", { skills: {} }).skills);
   ipcMain.handle("kit:weak", () => {
     const mem = load<Memory>("study-memory.json", { skills: {} });
     return Object.entries(mem.skills)
@@ -107,6 +108,10 @@ export function registerKit(d: Deps) {
     const src = await screen(String(request ?? ""));
     return makeTable(String(request ?? ""), src.pageText ?? "");
   });
+
+  ipcMain.handle("kit:table-ops", (_e, request: string, t: { columns: string[]; rows: (string | number)[][] }, stats: string) =>
+    tableOps(String(request ?? ""), { columns: Array.isArray(t?.columns) ? t.columns.slice(0, 30) : [], rows: Array.isArray(t?.rows) ? t.rows.slice(0, 500) : [] }, String(stats ?? "").slice(0, 3000))
+  );
 
   // ---- Notes (saved in the app's data folder)
   ipcMain.handle("kit:notes", () => load<Note[]>("notes.json", []));
@@ -135,6 +140,7 @@ export function registerKit(d: Deps) {
     const src = await screen(String(request ?? ""), /\b(summar|notes? (on|from|about) (this|my screen|the page))/i.test(String(request)));
     return makeNote(String(request ?? ""), { ...src, existingCourses: [...new Set(notes.map((n) => n.course))] });
   });
+  ipcMain.handle("kit:notes-ask", (_e, q: string) => askNotes(String(q ?? ""), load<Note[]>("notes.json", [])));
   ipcMain.handle("kit:note-export", (_e, n: Note) => {
     // Copy into Apple Notes (a real note the student keeps).
     const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;").replace(/\\/g, "\\\\");
@@ -183,6 +189,37 @@ export function registerKit(d: Deps) {
     const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
     const src = await screen(String(request ?? ""));
     return makePlan(String(request ?? ""), today, Array.isArray(items) ? items.slice(0, 40) : [], src.pageText ?? "");
+  });
+
+  // Study plan -> Apple Calendar: write an .ics file and open it (Calendar asks which calendar to add to).
+  ipcMain.handle("kit:plan-ics", async (_e, plan: { title: string; days: { date: string; tasks: { text: string; kind: string; minutes?: number }[] }[] }) => {
+    const esc = (t: string) => String(t).replace(/\\/g, "\\\\").replace(/[,;]/g, (m) => "\\" + m).replace(/\n/g, "\\n");
+    const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
+    const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Milo//Study Plan//EN", "CALSCALE:GREGORIAN"];
+    let n = 0;
+    for (const d of Array.isArray(plan?.days) ? plan.days : []) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d.date)) continue;
+      const day = d.date.replace(/-/g, "");
+      let startMin = 19 * 60; // study blocks start at 7 PM, back to back
+      for (const t of d.tasks ?? []) {
+        lines.push("BEGIN:VEVENT", `UID:milo-${day}-${n++}@milo.app`, `DTSTAMP:${stamp}`);
+        if (t.kind === "exam" || t.kind === "due") {
+          const next = new Date(d.date + "T12:00:00Z");
+          next.setUTCDate(next.getUTCDate() + 1);
+          lines.push(`DTSTART;VALUE=DATE:${day}`, `DTEND;VALUE=DATE:${next.toISOString().slice(0, 10).replace(/-/g, "")}`, `SUMMARY:${esc((t.kind === "exam" ? "EXAM: " : "Due: ") + t.text)}`);
+        } else {
+          const len = Math.max(15, Math.min(180, Number(t.minutes) || 30));
+          const hm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}${String(m % 60).padStart(2, "0")}00`;
+          lines.push(`DTSTART:${day}T${hm(startMin)}`, `DTEND:${day}T${hm(startMin + len)}`, `SUMMARY:${esc("Study: " + t.text)}`, "BEGIN:VALARM", "TRIGGER:-PT10M", "ACTION:DISPLAY", "DESCRIPTION:Study time with Milo", "END:VALARM");
+          startMin += len + 10;
+        }
+        lines.push("END:VEVENT");
+      }
+    }
+    lines.push("END:VCALENDAR");
+    const file = path.join(app.getPath("downloads"), "Milo Study Plan.ics");
+    fs.writeFileSync(file, lines.join("\r\n"));
+    return new Promise((resolve) => execFile("open", [file], (err) => resolve(!err)));
   });
 
   // ---- copy any text (tables as TSV paste straight into Excel / Google Sheets)

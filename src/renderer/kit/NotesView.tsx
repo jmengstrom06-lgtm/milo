@@ -4,7 +4,12 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from "r
 import MathText from "../MathText";
 import type { Note } from "./types";
 
-export type NotesHandle = { add: (draft: { title: string; course: string; body: string }) => Promise<Note>; appendToOpen: (text: string) => Promise<boolean>; open: (id: string) => void };
+export type NotesHandle = {
+  add: (draft: { title: string; course: string; body: string }) => Promise<Note>;
+  appendToOpen: (text: string) => Promise<boolean>;
+  open: (id: string) => void;
+  current: () => Note | null;
+};
 
 function Rendered({ body }: { body: string }) {
   return (
@@ -20,7 +25,12 @@ function Rendered({ body }: { body: string }) {
   );
 }
 
-const NotesView = forwardRef<NotesHandle, { focusId?: string | null; say: (t: string) => Promise<void> }>(function NotesView({ focusId, say }, ref) {
+const NotesView = forwardRef<NotesHandle, {
+  focusId?: string | null;
+  answer?: string | null;
+  say: (t: string) => Promise<void>;
+  onStudy: (note: Note, mode: "practice" | "cards" | "test") => void;
+}>(function NotesView({ focusId, answer, say, onStudy }, ref) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [openId, setOpenId] = useState<string | null>(focusId ?? null);
   const [editing, setEditing] = useState(false);
@@ -66,6 +76,7 @@ const NotesView = forwardRef<NotesHandle, { focusId?: string | null; say: (t: st
       return true;
     },
     open: (id) => setOpenId(id),
+    current: () => open,
   }));
 
   if (open && editing && draft) {
@@ -100,8 +111,11 @@ const NotesView = forwardRef<NotesHandle, { focusId?: string | null; say: (t: st
           <h2>{open.title}</h2>
           <span className="nt-course">{open.course}</span>
         </div>
+        {answer && <div className="nt-answer">{answer}</div>}
         <Rendered body={open.body} />
         <div className="sd-actions">
+          <button className="kit-btn kit-btn--primary" onClick={() => onStudy(open, "practice")}>Quiz me on this</button>
+          <button className="kit-btn" onClick={() => onStudy(open, "cards")}>Flashcards</button>
           <button className="kit-btn" onClick={() => { setDraft(open); setEditing(true); }}>Edit</button>
           <button className="kit-btn" onClick={() => { window.milo.kit.copy(`${open.title}\n\n${open.body}`); flash("Copied"); }}>Copy</button>
           <button
@@ -132,6 +146,7 @@ const NotesView = forwardRef<NotesHandle, { focusId?: string | null; say: (t: st
 
   return (
     <div className="nt">
+      {answer && <div className="nt-answer">{answer}</div>}
       {notes.length === 0 ? (
         <div className="kit-empty">
           <p>No notes yet.</p>

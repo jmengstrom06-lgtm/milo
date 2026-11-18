@@ -67,25 +67,29 @@ declare global {
   interface Window {
     milo: {
       kit: {
-        study: (request: string, mode: import("./kit/types").StudyMode, count: number) => Promise<import("./kit/types").Res<import("./kit/types").StudySet>>;
+        mastery: () => Promise<Record<string, { right: number; wrong: number; last: number }>>;
+        study: (request: string, mode: import("./kit/types").StudyMode, count: number, context?: string) => Promise<import("./kit/types").Res<import("./kit/types").StudySet>>;
         check: (item: { prompt: string; answer: string; skill?: string }, answer: string) => Promise<import("./kit/types").Res<{ correct: boolean; feedback: string }>>;
         mark: (skill: string, correct: boolean) => Promise<boolean>;
         weak: () => Promise<{ skill: string; right: number; wrong: number; last: number }[]>;
         sketch: (request: string) => Promise<import("./kit/types").Res<import("./kit/types").Sketch>>;
         image: (prompt: string) => Promise<{ ok: true; b64: string } | { ok: false; text: string }>;
         hasImages: () => Promise<boolean>;
+        tableOps: (request: string, t: { columns: string[]; rows: (string | number)[][] }, stats: string) => Promise<import("./kit/types").Res<{ ops: import("./kit/types").TableOp[]; say: string }>>;
         table: (request: string) => Promise<import("./kit/types").Res<import("./kit/types").Table>>;
         notes: () => Promise<import("./kit/types").Note[]>;
         saveNote: (n: Partial<import("./kit/types").Note>) => Promise<import("./kit/types").Note>;
         deleteNote: (id: string) => Promise<boolean>;
         makeNote: (request: string) => Promise<import("./kit/types").Res<import("./kit/types").NoteDraft>>;
         exportNote: (n: import("./kit/types").Note) => Promise<boolean>;
+        askNotes: (q: string) => Promise<import("./kit/types").Res<{ answer: string; note_id: string | null }>>;
         pocket: () => Promise<import("./kit/types").PocketItem[]>;
         hold: (text?: string) => Promise<{ ok: true; item: import("./kit/types").PocketItem } | { ok: false; text: string }>;
         pocketCopy: (id: string) => Promise<boolean>;
         pocketRemove: (id: string) => Promise<boolean>;
         plan: (request: string, items: { title: string; course: string; due: string }[]) => Promise<import("./kit/types").Res<import("./kit/types").Plan>>;
         copy: (text: string) => Promise<boolean>;
+        planToCalendar: (plan: import("./kit/types").Plan) => Promise<boolean>;
       };
       log: (src: string, ev: string, data?: Record<string, unknown>) => void;
       flag: (note?: string) => Promise<{ file: string; dir: string }>;

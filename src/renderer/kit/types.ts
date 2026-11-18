@@ -2,7 +2,7 @@
 
 export type GraphSpec =
   | { type: "normal"; mean: number; sd: number; shadeFrom?: number | null; shadeTo?: number | null; markers?: number[]; xlabel?: string }
-  | { type: "function"; exprs: string[]; xmin: number; xmax: number; ymin?: number; ymax?: number; points?: { x: number; y: number; label?: string }[] }
+  | { type: "function"; exprs: string[]; xmin: number; xmax: number; ymin?: number; ymax?: number; points?: { x: number; y: number; label?: string }[]; params?: { name: string; min: number; max: number; value: number }[] }
   | { type: "bar"; labels: string[]; values: number[]; xlabel?: string; ylabel?: string }
   | { type: "line"; labels: string[]; values: number[]; xlabel?: string; ylabel?: string }
   | { type: "scatter"; points: { x: number; y: number }[]; fit?: boolean; xlabel?: string; ylabel?: string }
@@ -18,9 +18,9 @@ export type StudyItem = {
   steps: { say: string; write: string }[];
   graph: GraphSpec | null;
 };
-export type StudySet = { title: string; subject: string; items: StudyItem[]; say: string };
-export type StudyMode = "worked" | "practice" | "cards" | "test";
-export type Sketch = { title: string; say: string; graph: GraphSpec | null; image_prompt: string | null };
+export type StudySet = { title: string; subject: string; items: StudyItem[]; say: string; lesson?: { points: { say: string; write: string }[] } | null };
+export type StudyMode = "worked" | "practice" | "cards" | "test" | "learn";
+export type Sketch = { title: string; say: string; graph: GraphSpec | null; svg?: string | null; image_prompt: string | null };
 export type Table = { title: string; columns: string[]; rows: (string | number)[][]; say: string };
 export type Note = { id: string; title: string; course: string; body: string; created: number; updated: number };
 export type NoteDraft = { title: string; course: string; body: string; say: string };
@@ -41,3 +41,12 @@ export const KIT_APPS: { id: KitApp; name: string; hint: string }[] = [
   { id: "planner", name: "Planner", hint: "Study plan from your due dates" },
   { id: "pocket", name: "Pocket", hint: "Things you asked Milo to hold" },
 ];
+
+export type TableOp =
+  | { op: "add_column"; name: string; expr: string }
+  | { op: "sort"; column: string; desc?: boolean }
+  | { op: "filter"; column: string; cmp: ">" | "<" | ">=" | "<=" | "=" | "!="; value: string }
+  | { op: "remove_column"; column: string }
+  | { op: "rename_column"; column: string; to: string }
+  | { op: "add_row"; values: (string | number)[] }
+  | { op: "graph"; kind: "bar" | "scatter" | "histogram" | "line"; x?: string; y: string };

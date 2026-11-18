@@ -7,7 +7,7 @@ import { log as bb } from "./blackbox";
 // Graphs (drawn by Milo in code: crisp, instant, free)
 export type GraphSpec =
   | { type: "normal"; mean: number; sd: number; shadeFrom?: number | null; shadeTo?: number | null; markers?: number[]; xlabel?: string }
-  | { type: "function"; exprs: string[]; xmin: number; xmax: number; ymin?: number; ymax?: number; points?: { x: number; y: number; label?: string }[] }
+  | { type: "function"; exprs: string[]; xmin: number; xmax: number; ymin?: number; ymax?: number; points?: { x: number; y: number; label?: string }[]; params?: { name: string; min: number; max: number; value: number }[] }
   | { type: "bar"; labels: string[]; values: number[]; xlabel?: string; ylabel?: string }
   | { type: "line"; labels: string[]; values: number[]; xlabel?: string; ylabel?: string }
   | { type: "scatter"; points: { x: number; y: number }[]; fit?: boolean; xlabel?: string; ylabel?: string }
@@ -33,6 +33,11 @@ const GRAPH_SCHEMA = {
     values: { type: "array", items: { type: "number" } },
     points: { type: "array", items: { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, label: { type: "string" } }, required: ["x", "y"] } },
     fit: { type: "boolean" },
+    params: {
+      type: "array",
+      description: "For function graphs: sliders the student can drag. Use single letters a, b, c, k, m, h in exprs (e.g. 'a*(x-h)^2+k') and list them here with a sensible range.",
+      items: { type: "object", properties: { name: { type: "string" }, min: { type: "number" }, max: { type: "number" }, value: { type: "number" } }, required: ["name", "min", "max", "value"] },
+    },
     bins: { type: "number" },
     xlabel: { type: "string" },
     ylabel: { type: "string" },
@@ -40,15 +45,23 @@ const GRAPH_SCHEMA = {
   required: ["type"],
 };
 
-export type Sketch = { title: string; say: string; graph: GraphSpec | null; image_prompt: string | null };
+export type Sketch = { title: string; say: string; graph: GraphSpec | null; svg: string | null; image_prompt: string | null };
 
 export async function makeSketch(request: string, context = ""): Promise<ApiOk<Sketch> | ApiErr> {
-  return callTool<Sketch>(
+  const r = await callTool<Sketch>(
     {
-      max_tokens: 2000,
+      max_tokens: 12000,
       system: `${persona()}
-The student wants to SEE something. If it's math, stats, data or anything plottable, make a graph (precise numbers). If it's a picture of a thing, place or idea (a cell, a dorm room, a historical scene), set graph to null and write image_prompt for an image generator (clear, detailed, realistic or clean illustration style, no text in the image).
-"say" = one short spoken sentence about what the picture shows.`,
+The student wants to SEE something. Pick the best way:
+1. graph: anything plottable (functions, probability, statistics, data). Precise numbers. For "how does a/b/c change the curve" questions, add params (sliders).
+2. svg: everything else (a house, a plant cell, the water cycle, a timeline, a flowchart, a free body diagram, a map, a concept). YOU draw it as an SVG illustration or a labeled diagram:
+   - <svg viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg">, no width/height, transparent background.
+   - It is shown on a DARK background: outlines #e9e9f1 or #c4b5fd (stroke-width 2-3, round caps/joins), soft fills with low opacity (#a78bfa, #38bdf8, #34d399, #f472b6, #fbbf24 at fill-opacity 0.15-0.45).
+   - Clean, modern, flat. Real shapes and proportions, not stick figures. For study diagrams, label every important part: <text> with font-family="Inter, sans-serif" font-size 16-20 fill #e9e9f1, plus thin leader lines.
+   - Draw big shapes first, then details, then labels (Milo animates it in that order).
+   - Only these elements: svg g path rect circle ellipse line polyline polygon text tspan defs linearGradient radialGradient stop. No script, no images, no foreignObject, no CSS.
+3. image_prompt: ONLY if they explicitly want a realistic photo / picture of a real scene. Still include an svg as a fallback.
+"say" = one short spoken sentence about it.`,
       tools: [
         {
           name: "sketch",
@@ -56,9 +69,10 @@ The student wants to SEE something. If it's math, stats, data or anything plotta
           input_schema: {
             type: "object",
             properties: {
-              title: { type: "string", description: "Short title, like 'P(X > 75) for N(70, 5)'." },
+              title: { type: "string", description: "Short title, like 'P(X > 75) for N(70, 5)' or 'Plant cell'." },
               say: { type: "string" },
               graph: { anyOf: [GRAPH_SCHEMA, { type: "null" }] },
+              svg: { type: ["string", "null"], description: "The full SVG markup, when it isn't a graph." },
               image_prompt: { type: ["string", "null"] },
             },
             required: ["title", "say"],
@@ -70,6 +84,8 @@ The student wants to SEE something. If it's math, stats, data or anything plotta
     },
     "sketch"
   );
+  if (!r.ok) return r;
+  return { ok: true, data: { ...r.data, graph: r.data.graph ?? null, svg: r.data.svg ?? null, image_prompt: r.data.image_prompt ?? null } };
 }
 
 /** Image generation (OpenAI). Returns base64 PNG. */
@@ -108,7 +124,7 @@ export type StudyItem = {
   steps: StudyStep[];
   graph: GraphSpec | null;
 };
-export type StudySet = { title: string; subject: string; items: StudyItem[]; say: string };
+export type StudySet = { title: string; subject: string; items: StudyItem[]; say: string; lesson?: { points: StudyStep[] } | null };
 
 const STUDY_TOOL = {
   name: "study_set",
@@ -119,6 +135,11 @@ const STUDY_TOOL = {
       title: { type: "string", description: "Short, like 'Normal distribution: z-scores'." },
       subject: { type: "string", description: "Class or subject, like 'Statistics'." },
       say: { type: "string", description: "One short spoken intro, under 15 words." },
+      lesson: {
+        type: ["object", "null"],
+        description: "Only in learn mode: the mini-lesson Milo teaches before any problems. 3-5 points, each: say (spoken, plain words) + write (shown, key idea or formula in $...$).",
+        properties: { points: { type: "array", items: { type: "object", properties: { say: { type: "string" }, write: { type: "string" } }, required: ["say", "write"] } } },
+      },
       items: {
         type: "array",
         items: {
@@ -146,13 +167,14 @@ const STUDY_TOOL = {
 
 export async function makeStudySet(
   request: string,
-  opts: { mode: "worked" | "practice" | "cards" | "test"; count: number; weak: string[]; pageText?: string; jpeg?: string }
+  opts: { mode: "worked" | "practice" | "cards" | "test" | "learn"; count: number; weak: string[]; pageText?: string; jpeg?: string; context?: string }
 ): Promise<ApiOk<StudySet> | ApiErr> {
   const how = {
     worked: "Make worked examples: realistic exam-style problems with a complete, clear step-by-step solution. These are shown solved, step by step.",
     practice: "Make practice problems the student will solve themselves, easy to harder. Include full worked steps (shown only after they answer).",
     cards: "Make flashcards (kind card): short front, short back. Key terms, formulas, facts. steps can be one step explaining it.",
     test: "Make a realistic practice test: exam-style problems, mixed skills, easy to hard, with full worked steps.",
+    learn: "The student wants to LEARN this from scratch. Write lesson.points (a short, clear mini-lesson: the idea, why it works, the key formula, a common mistake). Then items: the FIRST item is a worked example (it'll be solved for them step by step), the rest are practice problems for them, easy to harder.",
   }[opts.mode];
   const content: unknown[] = [];
   if (opts.jpeg) content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: opts.jpeg } });
@@ -162,6 +184,9 @@ export async function makeStudySet(
       `Student's request: "${request}"`,
       `Make ${opts.count} items. ${how}`,
       opts.weak.length ? `They've been missing these skills lately, so lean on them: ${opts.weak.join("; ")}.` : "",
+      opts.context ? `Base it on this material:\n${opts.context.slice(0, 12000)}` : "",
+      /\b(easier|simpler|more basic)\b/i.test(request) ? "Make these EASIER than before: smaller numbers, one idea at a time." : "",
+      /\b(harder|tougher|challenge|more advanced)\b/i.test(request) ? "Make these HARDER: multi-step, exam-level tricky (but fair)." : "",
       opts.pageText ? `Their screen (course page / notes):\n${opts.pageText.slice(0, 9000)}` : "",
       opts.jpeg || opts.pageText ? "Base the items on the material on their screen." : "",
     ]
@@ -196,7 +221,7 @@ export async function checkStudy(item: { prompt: string; answer: string }, stude
       max_tokens: 600,
       model: process.env.MILO_FAST_MODEL || "claude-haiku-5-5",
       system: `${persona()}
-Check a student's answer. Accept equivalent forms, reasonable rounding, and spoken math ("point six nine" = 0.69). feedback = one short sentence: if right, a quick confirmation; if wrong, what went wrong (don't give the full answer).`,
+Check a student's answer. Accept equivalent forms, reasonable rounding, and spoken math ("point six nine" = 0.69). feedback = one short sentence: if right, a quick confirmation; if wrong, what went wrong (don't give the full answer). If they showed their work, name the exact line where it first went wrong and why (e.g. "Line 2: you subtracted the mean from the wrong value.").`,
       tools: [
         {
           name: "check",
@@ -346,4 +371,91 @@ Build a realistic study plan. Today is ${today}. Spread studying out before each
 export async function quickSay(prompt: string): Promise<string> {
   const r = await callClaude({ max_tokens: 200, system: `${persona()}\nOne short sentence.`, messages: [{ role: "user", content: prompt }] });
   return r.ok ? r.data.filter((b) => b.type === "text").map((b) => b.text).join(" ").trim() : "";
+}
+
+// ---------------------------------------------------------------------------
+// "What did I write about z-scores?": answer from the student's own notes.
+export async function askNotes(question: string, notes: { id: string; title: string; course: string; body: string }[]): Promise<ApiOk<{ answer: string; note_id: string | null }> | ApiErr> {
+  const pack = notes.map((n) => `[${n.id}] ${n.title} (${n.course})\n${n.body.slice(0, 3000)}`).join("\n\n---\n\n").slice(0, 40000);
+  return callTool(
+    {
+      max_tokens: 600,
+      system: `${persona()}
+Answer the student's question using ONLY their own notes below. One or two short spoken sentences. note_id = the note it came from (or null). If the notes don't cover it, say so plainly.`,
+      tools: [
+        {
+          name: "answer",
+          description: "Answer from the notes.",
+          input_schema: { type: "object", properties: { answer: { type: "string" }, note_id: { type: ["string", "null"] } }, required: ["answer"] },
+        },
+      ],
+      tool_choice: { type: "auto" },
+      messages: [{ role: "user", content: `Question: "${question}"\n\nTheir notes:\n${pack || "(no notes yet)"}` }],
+    },
+    "answer"
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sheet: "add a z-score column", "sort by score", "who's above average?". The AI picks the operations;
+// Milo computes every number himself (no AI arithmetic).
+export type TableOp =
+  | { op: "add_column"; name: string; expr: string }
+  | { op: "sort"; column: string; desc?: boolean }
+  | { op: "filter"; column: string; cmp: ">" | "<" | ">=" | "<=" | "=" | "!="; value: string }
+  | { op: "remove_column"; column: string }
+  | { op: "rename_column"; column: string; to: string }
+  | { op: "add_row"; values: (string | number)[] }
+  | { op: "graph"; kind: "bar" | "scatter" | "histogram" | "line"; x?: string; y: string };
+
+export async function tableOps(request: string, t: { columns: string[]; rows: (string | number)[][] }, stats: string): Promise<ApiOk<{ ops: TableOp[]; say: string }> | ApiErr> {
+  const vars = t.columns.map((c, k) => `c${k} = "${c}"`).join(", ");
+  const rows = t.rows.slice(0, 200).map((r) => r.join(" | ")).join("\n");
+  return callTool(
+    {
+      max_tokens: 1500,
+      system: `${persona()}
+You operate a small spreadsheet for a student. Turn their request into operations; Milo computes everything himself.
+Column variables: ${vars}. For each numeric column ck you can also use mean_ck, sd_ck (sample), median_ck, min_ck, max_ck, sum_ck, n_ck.
+add_column.expr is a math expression over those (+ - * / ^, sqrt, abs, ln, log, exp), e.g. z-score of c1: "(c1 - mean_c1)/sd_c1". Use column NAMES (not ck) in sort/filter/graph/remove/rename. filter.value can be a number or one of mean/median/min/max.
+If they just asked a question about the data, use no ops and answer in say (read the data carefully). say = one short spoken sentence.`,
+      tools: [
+        {
+          name: "table_ops",
+          description: "Operations on the table.",
+          input_schema: {
+            type: "object",
+            properties: {
+              say: { type: "string" },
+              ops: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    op: { type: "string", enum: ["add_column", "sort", "filter", "remove_column", "rename_column", "add_row", "graph"] },
+                    name: { type: "string" },
+                    expr: { type: "string" },
+                    column: { type: "string" },
+                    desc: { type: "boolean" },
+                    cmp: { type: "string", enum: [">", "<", ">=", "<=", "=", "!="] },
+                    value: { type: "string" },
+                    to: { type: "string" },
+                    values: { type: "array", items: { type: ["string", "number"] } },
+                    kind: { type: "string", enum: ["bar", "scatter", "histogram", "line"] },
+                    x: { type: "string" },
+                    y: { type: "string" },
+                  },
+                  required: ["op"],
+                },
+              },
+            },
+            required: ["ops", "say"],
+          },
+        },
+      ],
+      tool_choice: { type: "auto" },
+      messages: [{ role: "user", content: `Request: "${request}"\n\nColumns: ${t.columns.join(" | ")}\n${rows}\n\nStats: ${stats}` }],
+    },
+    "table_ops"
+  );
 }

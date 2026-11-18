@@ -1181,7 +1181,8 @@ export default function App() {
     }
     // Everyday computer shortcuts go straight to the hands (no AI decision needed): they take under a second.
     const plain = text.toLowerCase().replace(/[.!?]+$/, "").replace(/^(?:(?:can you|could you|would you|please|just|now|okay|ok)[, ]+)+/, "").trim();
-    if (!lessonRef.current && /^(copy|paste|select all|select everything|undo|redo|cut|save|close (this |the |that )?(tab|window)|(open )?(a )?new (chrome )?tab|next tab|previous tab|reopen|(make|take|write|create|add) (me )?(a |an )?(quick )?note|note (that|down)|quit |minimi[sz]e|zoom (in|out)|refresh|reload|go back|scroll (up|down))\b/.test(plain)) {
+    const aboutKit = /\byour (notes?|study( deck)?|sketch( ?pad)?|sheet|spreadsheet|planner|pocket|kit|tool ?box|flash ?cards)\b/i.test(text);
+    if (!lessonRef.current && !aboutKit && /^(copy|paste|select all|select everything|undo|redo|cut|save|close (this |the |that )?(tab|window)|(open )?(a )?new (chrome )?tab|next tab|previous tab|reopen|(make|take|write|create|add) (me )?(a |an )?(quick )?note|note (that|down)|quit |minimi[sz]e|zoom (in|out)|refresh|reload|go back|scroll (up|down))\b/.test(plain)) {
       bb("route_instant", { text, kind: "shortcut" });
       runTask(text, spoken);
       return;
@@ -1191,7 +1192,7 @@ export default function App() {
     const intent = parse(text, { inLesson, awaitingAnswer, pendingAsk: !!pendingTask.current });
     const nb = notebookRef.current;
     // Unmistakable commands run right away. Everything else: the router decides, knowing what's open.
-    const SURE = ["hush", "yes", "no", "resume", "chain"];
+    const SURE = ["hush", "yes", "no", "resume"];
     const LESSON_SURE = ["close", "goto", "mode", "answer", "show", "copy", "practice", "skip", "repeat", "fill"];
     if (!SURE.includes(intent.kind) && !(inLesson && LESSON_SURE.includes(intent.kind))) {
       setMood("thinking");

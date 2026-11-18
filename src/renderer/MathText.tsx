@@ -10,7 +10,12 @@ export default function MathText({ text, className }: { text: string; className?
           const html = katex.renderToString(p.slice(1, -1), { throwOnError: false, displayMode: false });
           return <span key={i} dangerouslySetInnerHTML={{ __html: html }} />;
         }
-        return <span key={i}>{p}</span>;
+        // **bold** in plain text
+        return (
+          <span key={i}>
+            {p.split(/(\*\*[^*]+\*\*)/g).map((q, j) => (q.startsWith("**") && q.endsWith("**") && q.length > 4 ? <b key={j}>{q.slice(2, -2)}</b> : q))}
+          </span>
+        );
       })}
     </span>
   );
