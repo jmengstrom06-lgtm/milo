@@ -442,40 +442,82 @@ How to work:
 }
 
 // ---------------------------------------------------------------------------
-// Router: when keywords don't settle it, decide what the student wants.
-export type Route = { kind: "chat" | "look" | "task" | "research"; mode?: Mode };
+// Router: decides what the student wants, knowing what's open on screen right now.
+export type RouteKind =
+  | "chat" | "look" | "task" | "research" | "move" | "close" | "open_result"
+  | "sweep" | "build" | "quiz" | "brief" | "watch" | "checkwork";
+export type Route = { kind: RouteKind; mode?: Mode; followUp?: boolean; where?: string; question?: string; on?: boolean; failed?: boolean };
+export type RouteCtx = {
+  researchOpen?: boolean;
+  researchTopic?: string;
+  inLesson?: boolean;
+  lessonTopic?: string;
+  toolOpen?: string;
+  quizOpen?: boolean;
+  lastCommand?: string;
+};
 
 const ROUTE_TOOL = {
   name: "route",
-  description: "Decide what Milo should do with this request.",
+  description: "Decide what Milo should do with what the student just said.",
   input_schema: {
     type: "object",
     properties: {
       kind: {
         type: "string",
-        enum: ["chat", "look", "task", "research"],
-        description:
-          "look = help with a homework question/problem that is (or will be) on screen. task = ONLY when the student explicitly asks to operate the computer (open an app, a site or a tab, click, type, navigate). Asking for information is never a task, even if it mentions the web. research = any question about real-world facts, people, events, news, scores, prices, or asking to be told about or find info on something. chat = just talk or explain a general concept.",
+        enum: ["chat", "look", "task", "research", "move", "close", "open_result", "sweep", "build", "quiz", "brief", "watch", "checkwork"],
+        description: [
+          "research = any request for information about the world: people, events, news, weather, scores, prices, facts, 'do some research on', 'look up', 'tell me about', 'find info on'. Shown in Milo's own research box, never in Chrome.",
+          "task = ONLY when the student explicitly wants the computer operated: open an app, a website or a tab, click, type or write something somewhere (Google Docs, ChatGPT, Notes...), navigate, download. Asking for information is NOT a task.",
+          "look = help with homework that is on the screen (teach / hint / do it).",
+          "move = the student wants Milo himself (the frog character) to go somewhere on the screen: 'move to the bottom left', 'go to the other side', 'get out of the way'.",
+          "close = close / dismiss what Milo has open (research box, tool, lesson).",
+          "open_result = open the page shown in the research box in Chrome ('open it in Chrome', 'open that article').",
+          "sweep = do every question on the page. build = make a small working app/tool/calculator. quiz = quiz me. brief = what's due / daily brief. watch = watch me work (on:false to stop). checkwork = check my work once.",
+          "chat = conversation or explaining a general concept that doesn't need the web or the screen.",
+        ].join(" "),
       },
       mode: { type: "string", enum: ["teach", "help", "do"], description: "For look: teach (explain), help (hint), do (solve/complete it)." },
+      followUp: { type: "boolean", description: "For research: true if this continues the topic in the open research box (uses he/she/it/that, or asks more about the same subject)." },
+      where: {
+        type: "string",
+        enum: ["top-left", "top-right", "bottom-left", "bottom-right", "left", "right", "top", "bottom", "center", "away"],
+        description: "For move: where Milo should go. 'away' = out of the way / other side.",
+      },
+      question: { type: "string", description: "For research: the question, cleaned up (drop filler like 'do some research on')." },
+      on: { type: "boolean", description: "For watch: true to start, false to stop." },
     },
     required: ["kind"],
   },
 };
 
-export async function classify(text: string): Promise<Route> {
-  const r = await callTool<Route>(
-    {
-      max_tokens: 300,
-      system:
-        "You route requests for Milo, a desktop study companion that can see the screen, teach homework on screen, and control the computer.",
-      tools: [ROUTE_TOOL],
-      tool_choice: { type: "auto" },
-      messages: [{ role: "user", content: `Request: "${text}"` }],
-    },
-    ROUTE_TOOL.name
-  );
-  return r.ok ? r.data : { kind: "chat" };
+function routeSystem(ctx: RouteCtx) {
+  const now: string[] = [];
+  if (ctx.researchOpen) now.push(`The research box is OPEN, showing research on: "${ctx.researchTopic ?? "?"}".`);
+  if (ctx.inLesson) now.push(`A homework lesson is open in the notebook about: "${ctx.lessonTopic ?? "?"}".`);
+  if (ctx.toolOpen) now.push(`A tool Milo built is open: "${ctx.toolOpen}".`);
+  if (ctx.quizOpen) now.push("A quiz is open.");
+  if (ctx.lastCommand) now.push(`The student's previous command was: "${ctx.lastCommand}".`);
+  return [
+    "You route requests for Milo, a desktop study companion (an animated frog that lives on the student's screen).",
+    "Milo can: research things in his own research box, see and teach homework on screen, operate the computer (apps, sites, typing), move himself around the screen, build small tools, quiz, check work, and read what's due.",
+    now.length ? "Right now: " + now.join(" ") : "Right now nothing is open.",
+    "Decide what the student wants from what they actually said, not from keywords. Commands about Milo's own position are 'move' even when a box is open. Information requests are always 'research', never 'task'.",
+  ].join("\n");
+}
+
+export async function classify(text: string, ctx: RouteCtx = {}): Promise<Route> {
+  const body = {
+    max_tokens: 300,
+    system: routeSystem(ctx),
+    tools: [ROUTE_TOOL],
+    tool_choice: { type: "auto" },
+    messages: [{ role: "user", content: `The student said: "${text}"` }],
+  };
+  // A small fast model routes; fall back to the main model if it isn't available.
+  let r = await callTool<Route>({ ...body, model: process.env.MILO_ROUTER_MODEL || "claude-haiku-5-5" }, ROUTE_TOOL.name);
+  if (!r.ok) r = await callTool<Route>(body, ROUTE_TOOL.name);
+  return r.ok && r.data?.kind ? r.data : { kind: "chat", failed: true };
 }
 
 // ---------------------------------------------------------------------------

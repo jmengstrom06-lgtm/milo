@@ -17,7 +17,7 @@ import { click, ensureBrowser, frontApp, openApp, openFolder, openLatestDownload
 import { plan } from "./quick";
 import { research } from "./research";
 import { buildTool } from "./builder";
-import { Action, askMilo, classify, makeQuiz, readBrief, setUserName, sweepPlan, watchCheck, ChatMessage, checkAnswer, locateInCrop, nextAction, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
+import { Action, askMilo, classify, RouteCtx, makeQuiz, readBrief, setUserName, sweepPlan, watchCheck, ChatMessage, checkAnswer, locateInCrop, nextAction, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
 dotenv.config({ path: path.join(app.getAppPath(), ".env") });
 
@@ -133,7 +133,7 @@ ipcMain.on("milo:set-clickable", (_e, clickable: boolean) => {
 });
 
 ipcMain.handle("milo:ask", (_e, history: ChatMessage[]) => askMilo(history));
-ipcMain.handle("milo:route", (_e, text: string) => classify(text));
+ipcMain.handle("milo:route", (_e, text: string, ctx?: RouteCtx) => classify(String(text ?? ""), ctx && typeof ctx === "object" ? ctx : {}));
 
 type Box = { x: number; y: number; width: number; height: number };
 

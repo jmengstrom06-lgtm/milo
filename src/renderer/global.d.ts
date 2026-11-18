@@ -1,6 +1,15 @@
 export {};
 
 declare global {
+  type MiloRoute = {
+    kind: "chat" | "look" | "task" | "research" | "move" | "close" | "open_result" | "sweep" | "build" | "quiz" | "brief" | "watch" | "checkwork";
+    mode?: MiloMode;
+    followUp?: boolean;
+    where?: string;
+    question?: string;
+    on?: boolean;
+    failed?: boolean;
+  };
   type MiloMode = "teach" | "help" | "do";
   type MiloStep = { say: string; write: string };
   type MiloLesson = {
@@ -48,7 +57,10 @@ declare global {
     milo: {
       setClickable: (clickable: boolean) => void;
       ask: (history: { role: "user" | "assistant"; content: string }[]) => Promise<{ ok: boolean; text: string }>;
-      route: (text: string) => Promise<{ kind: "chat" | "look" | "task" | "research"; mode?: MiloMode }>;
+      route: (
+        text: string,
+        ctx?: { researchOpen?: boolean; researchTopic?: string; inLesson?: boolean; lessonTopic?: string; toolOpen?: string; quizOpen?: boolean; lastCommand?: string }
+      ) => Promise<MiloRoute>;
       look: (mode: MiloMode, request: string, focus?: MiloBox | null) => Promise<{ ok: true; lesson: MiloLesson; box: MiloBox | null; others: MiloOther[] } | Err>;
       refine: (box: MiloBox, topic: string) => Promise<{ ok: true; box: MiloBox } | Err>;
       check: (lesson: MiloLesson, answer: string) => Promise<{ ok: true; data: { correct: boolean; feedback: string } } | Err>;

@@ -22,7 +22,31 @@ const WALK_SPEED = 220; // px/s when strolling
 const MARGIN = 16;
 const NB_W = 380;
 
-const home = (): Pos => ({ x: window.innerWidth - MILO_W - 24, y: window.innerHeight - MILO_H - 8 });
+/** A named spot on screen for Milo ("bottom-left", "top-right", "center"...). */
+function spot(where: string): Pos {
+  const W = window.innerWidth;
+  const H = window.innerHeight;
+  const L = 24;
+  const R = W - MILO_W - 24;
+  const T = 40;
+  const B = H - MILO_H - 8;
+  const CX = Math.round((W - MILO_W) / 2);
+  const CY = Math.round((H - MILO_H) / 2);
+  const map: Record<string, Pos> = {
+    "top-left": { x: L, y: T }, "top-right": { x: R, y: T }, "bottom-left": { x: L, y: B }, "bottom-right": { x: R, y: B },
+    left: { x: L, y: CY }, right: { x: R, y: CY }, top: { x: CX, y: T }, bottom: { x: CX, y: B }, center: { x: CX, y: CY },
+  };
+  return map[where] ?? map["bottom-right"];
+}
+/** Where Milo lives when he's not busy. You can move it ("Milo, move to the bottom left"). */
+const homeSpot = () => {
+  try {
+    return localStorage.getItem("milo.home") || "bottom-right";
+  } catch {
+    return "bottom-right";
+  }
+};
+const home = (): Pos => spot(homeSpot());
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Is this transcript just Milo's own line coming back through the mic? */
@@ -148,6 +172,19 @@ export default function App() {
   const followUntil = useRef(0); // hands-free: no need to say "Milo" until this time
   const voiceSession = useRef(false); // the current lesson was started by voice
   const routeRef = useRef<(text: string, spoken?: boolean) => void>(() => {});
+  const routeCache = useRef(new Map<string, Promise<MiloRoute>>()); // AI routing started early (while the card counts down)
+  const routeCtxRef = useRef<() => Record<string, unknown>>(() => ({}));
+  const getRoute = (text: string) => {
+    const key = text.trim().toLowerCase();
+    let p = routeCache.current.get(key);
+    if (!p) {
+      p = window.milo.route(text, routeCtxRef.current()).catch(() => ({ kind: "chat", failed: true }) as MiloRoute);
+      routeCache.current.set(key, p);
+      if (routeCache.current.size > 30) routeCache.current.delete(routeCache.current.keys().next().value as string);
+      setTimeout(() => routeCache.current.delete(key), 20000); // context changes: don't reuse old decisions
+    }
+    return p;
+  };
   const pendingTask = useRef<string | null>(null);
   const lastCommand = useRef<string | null>(null);
   const lastCommandAt = useRef(0);
@@ -243,6 +280,7 @@ export default function App() {
   // Wander along the bottom when nothing is going on.
   useEffect(() => {
     if (chatOpen || lesson || busy || working || researchQ) return; // stay put while the research box is open
+    if (homeSpot() !== "bottom-right") return; // you put him somewhere: he stays there
     const t = window.setInterval(() => {
       if (animRef.current) return;
       const r = Math.random();
@@ -1010,6 +1048,15 @@ export default function App() {
   };
 
   // ---- voice commands -------------------------------------------------------------
+  routeCtxRef.current = () => ({
+    researchOpen: !!researchQ,
+    researchTopic: researchQ?.q,
+    inLesson: !!lessonRef.current,
+    lessonTopic: lessonRef.current?.topic,
+    toolOpen: tool ? tool.request : undefined,
+    quizOpen: !!quiz,
+    lastCommand: lastCommand.current || undefined,
+  });
   routeRef.current = (text: string, spoken = true) => {
     if (quiz && quizRef.current?.active()) {
       const t = text.toLowerCase().trim().replace(/[.!?]+$/, "");
@@ -1051,30 +1098,23 @@ export default function App() {
       if (/(half|split) ?screen|make it half/.test(t)) return setRpSize("half");
       if (/(smaller|shrink|minimi[sz]e|compact)/.test(t)) return setRpSize("compact");
     }
-    // ---- Research box is open: follow-ups stay in the box. Chrome only when you ask for it.
-    if (researchQ && !tool) {
-      const t = text.toLowerCase().trim();
-      const wantsPageInChrome =
-        /(open|show|pull up|put).*(it|this|that|the (page|article|site|source|link)).*(chrome|browser|tab)/.test(t) ||
-        /^open (it|this|that)( up)?$/.test(t);
-      if (wantsPageInChrome && researchTop.current) {
-        window.milo.openUrl(researchTop.current);
-        say("Opened it in Chrome.").then(() => setBubble(null));
-        return;
-      }
-      const explicitComputer =
-        /(open|launch|start|pull up|bring up|switch to|go to|take me to).*(chrome|safari|browser|tab|window|app|docs?|google (doc|sheet|slide)s?|notes|spotify|finder|downloads?|youtube|gmail|email|\w+\.(com|org|edu|net))/.test(t) ||
-        /(type|click|scroll|paste|fill (in|out))/.test(t) ||
-        /(my screen|on (my|the) screen|this (problem|question)|homework|worksheet|quiz me|build (me )?a)/.test(t);
-      if (!explicitComputer && !isBareGo(t)) {
-        startResearch(text, spoken, true);
-        return;
-      }
-    }
     const inLesson = !!lessonRef.current;
     const awaitingAnswer = inLesson && finishedRef.current && lessonModeRef.current !== "do" && !!lessonRef.current?.check_question;
     const intent = parse(text, { inLesson, awaitingAnswer, pendingAsk: !!pendingTask.current });
     const nb = notebookRef.current;
+    // Unmistakable commands run right away. Everything else: the router decides, knowing what's open.
+    const SURE = ["hush", "yes", "no", "resume", "chain"];
+    const LESSON_SURE = ["close", "goto", "mode", "answer", "show", "copy", "practice", "skip", "repeat", "fill"];
+    if (!SURE.includes(intent.kind) && !(inLesson && LESSON_SURE.includes(intent.kind))) {
+      setMood("thinking");
+      getRoute(text).then((rt) => {
+        if (rt.failed) return runIntent(intent.kind === "chat" ? { kind: "chat", text } : intent);
+        applyRoute(rt, text, spoken, intent);
+      });
+      return;
+    }
+    runIntent(intent);
+    function runIntent(intent: Intent) {
     switch (intent.kind) {
       case "hush":
         hush();
@@ -1169,23 +1209,82 @@ export default function App() {
         if (lastSaid.current) say(lastSaid.current).then(() => setBubble(null));
         return;
       case "chat":
-        // Keywords didn't settle it: ask the router before assuming it's just chat.
-        if (!inLesson) {
-          setMood("thinking");
-          window.milo.route(intent.text).then((rt) => {
-            if (rt.kind === "look") {
-              const m = rt.mode ?? "teach";
-              setMode(m);
-              look(m, intent.text, null, spoken);
-            } else if (rt.kind === "task") runTask(intent.text, spoken);
-            else if (rt.kind === "research") startResearch(intent.text, spoken);
-            else chat(intent.text, spoken);
-          });
-          return;
-        }
         chat(intent.text, spoken);
         return;
     }
+    }
+  };
+
+  /** Do what the router decided. */
+  const applyRoute = (rt: MiloRoute, text: string, spoken: boolean, local: Intent) => {
+    switch (rt.kind) {
+      case "research":
+        startResearch(rt.question?.trim() || text, spoken, !!researchQ && rt.followUp === true);
+        return;
+      case "task":
+        if (local.kind === "chain") runChain(local.steps, spoken);
+        else runTask(text, spoken);
+        return;
+      case "look": {
+        const m = rt.mode ?? "teach";
+        setMode(m);
+        look(m, text, null, spoken);
+        return;
+      }
+      case "move":
+        moveMilo(rt.where ?? "away");
+        return;
+      case "close":
+        if (tool) closeTool();
+        else if (researchQ) closeResearch();
+        else if (quiz) closeQuiz();
+        else if (lessonRef.current) closeLesson();
+        else setMood("idle");
+        return;
+      case "open_result":
+        if (researchTop.current) {
+          window.milo.openUrl(researchTop.current);
+          say("Opened it in Chrome.").then(() => setBubble(null));
+        } else runTask(text, spoken);
+        return;
+      case "sweep":
+        runSweep();
+        return;
+      case "build":
+        startBuild(text);
+        return;
+      case "quiz":
+        startQuiz(text);
+        return;
+      case "brief":
+        startBrief(spoken);
+        return;
+      case "watch":
+        setWatch(rt.on ?? true);
+        return;
+      case "checkwork":
+        checkWorkNow();
+        return;
+      default:
+        chat(text, spoken);
+    }
+  };
+
+  /** "Milo, move to the bottom left": go there and make it his new spot. */
+  const moveMilo = (where: string) => {
+    let w = where;
+    if (w === "away") w = posRef.current.x > window.innerWidth / 2 ? "bottom-left" : "bottom-right";
+    try {
+      localStorage.setItem("milo.home", w);
+    } catch {
+      /* ignore */
+    }
+    setMood("happy");
+    moveTo(spot(w)).then(() => {
+      setBubble("Got it, I'll hang out here.");
+      setTimeout(() => setBubble((b) => (b === "Got it, I'll hang out here." ? null : b)), 2200);
+      setMood("sitting");
+    });
   };
 
   // If ElevenLabs stops working, say why once (in the backup voice).
@@ -1267,6 +1366,7 @@ export default function App() {
         return;
       }
       let text = r.text;
+      const addressed = stripWake(r.text, true).woke; // you said "Milo" again: that's a NEW command, not more of the last one
       // Did Milo just hear HIMSELF? (Speakers leaking into the mic right after an "interruption".)
       if (Date.now() - e.bargedAt < 20000 && isEcho(text, lastSaid.current)) {
         e.bargedAt = 0;
@@ -1312,8 +1412,8 @@ export default function App() {
 
       // ---- You kept talking right after a research question started: add it to the question.
       const R = researchStart.current;
-      if (!pendingRef.current && R && Date.now() - R.at < 15000 && !isBareGo(text) &&
-          !/^(close|stop|cancel|done|thanks|thank you|never ?mind|full ?screen|half|smaller|bigger|expand|shrink|make it)\b/i.test(text.trim())) {
+      if (!pendingRef.current && !addressed && R && Date.now() - R.at < 15000 && !isBareGo(text) &&
+          !/^(close|stop|cancel|done|thanks|thank you|never ?mind|full ?screen|half|smaller|bigger|expand|shrink|make it|move|go to the|get out|open|launch)\b/i.test(text.trim())) {
         const q = `${R.q.replace(/[?.!\s]+$/, "")}. ${stripGo(text)}`;
         setHeard(q);
         startResearchRef.current(q, true, true);
@@ -1322,11 +1422,11 @@ export default function App() {
 
       // ---- You kept talking right after a command started: it was one long command. Stop, merge, restart.
       const LR = lastRun.current;
-      if (!pendingRef.current && LR && Date.now() - LR.at < 15000) {
+      if (!pendingRef.current && !addressed && LR && Date.now() - LR.at < 15000) {
         const tt = text.trim().toLowerCase().replace(/[.!?]+$/, "");
         const isStop = /^(stop|cancel|never ?mind|forget it|wait|hold on|pause)\b/.test(tt) && tt.split(/\s+/).length <= 4;
         const connects = /^(and|then|also|plus|after that|so|but|with|to|in|on|about|that|which|where|make|write|type|put|have it|and then)\b/.test(tt);
-        if (!isStop && !isBareGo(tt) && (connects || soundsUnfinished(LR.text) || Date.now() - LR.at < 7000)) {
+        if (!isStop && !isBareGo(tt) && (connects || soundsUnfinished(LR.text) || Date.now() - LR.at < 5000)) {
           lastRun.current = null;
           if (workingRef.current) {
             quietStop.current = true;
@@ -1409,6 +1509,7 @@ export default function App() {
     if (!text) return;
     if (goNow && !soundsUnfinished(text)) return runPending(text);
     const unfinished = soundsUnfinished(text);
+    if (!unfinished) getRoute(text); // think about it now, so it's ready when the card runs
     pendingRef.current = { text, started: Date.now(), unfinished };
     setPending({ text, progress: 0, unfinished });
     setHeard(null);
