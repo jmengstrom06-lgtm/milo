@@ -43,7 +43,7 @@ function createOverlay() {
   overlay.setIgnoreMouseEvents(true, { forward: true });
 
   if (isDev) {
-    overlay.loadURL("http://localhost:5173");
+    overlay.loadURL("http://127.0.0.1:5173");
   } else {
     overlay.loadFile(path.join(__dirname, "../renderer/index.html"));
   }
