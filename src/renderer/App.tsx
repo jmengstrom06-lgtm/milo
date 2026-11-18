@@ -539,8 +539,8 @@ export default function App() {
       }
     };
     let inFlight = false;
-    e.onUtterance = async (wav) => {
-      const direct = e.mode !== "always" || Date.now() < followUntil.current; // you were clearly talking to Milo
+    e.onUtterance = async (wav, pushToTalk) => {
+      const direct = pushToTalk || Date.now() < followUntil.current; // you were clearly talking to Milo
       if (inFlight) return; // one at a time; drop extra background chatter
       inFlight = true;
       if (direct) {
@@ -558,7 +558,7 @@ export default function App() {
         return;
       }
       let text = r.text;
-      if (e.mode === "always" && Date.now() > followUntil.current) {
+      if (!direct) {
         // Hands-free: only act when you start with "Milo".
         const w = stripWake(text, true);
         if (!w.woke) {

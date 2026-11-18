@@ -42,7 +42,7 @@ export class Ears {
 
   onLevel: (level: number) => void = () => {};
   onState: (s: EarState) => void = () => {};
-  onUtterance: (wav: ArrayBuffer) => void = () => {};
+  onUtterance: (wav: ArrayBuffer, pushToTalk: boolean) => void = () => {};
 
   async setMode(mode: EarMode) {
     this.mode = mode;
@@ -196,9 +196,10 @@ export class Ears {
       return;
     }
     const wav = encodeWav(frames, RATE);
-    if (this.mode === "once") this.setMode("off");
+    const once = this.mode === "once";
+    if (once) this.setMode("off");
     else this.onState("waiting");
-    this.onUtterance(wav);
+    this.onUtterance(wav, once);
   }
 }
 
