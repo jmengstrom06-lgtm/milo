@@ -5,7 +5,15 @@ type Clip = { ok: true; url: string } | { ok: false };
 const cache = new Map<string, Promise<Clip>>();
 let current: HTMLAudioElement | null = null;
 let elevenDownUntil = 0; // pause ElevenLabs after it fails (no key, out of credits…), then try again
-const elevenDown = () => Date.now() < elevenDownUntil;
+const elevenDown = () => freeVoice || Date.now() < elevenDownUntil;
+/** Free voice: Milo speaks with the Mac's built-in voice (no ElevenLabs credits). Listening is unchanged. */
+let freeVoice = (() => { try { return localStorage.getItem("milo.freeVoice") === "1"; } catch { return false; } })();
+export const isFreeVoice = () => freeVoice;
+export function setFreeVoice(on: boolean) {
+  freeVoice = on;
+  try { localStorage.setItem("milo.freeVoice", on ? "1" : "0"); } catch {}
+  if (on) cache.clear();
+}
 /** Called once when ElevenLabs stops working (e.g. out of credits), so Milo can say so. */
 export let onVoiceTrouble: (reason: "quota" | "key") => void = () => {};
 export function setVoiceTroubleHandler(fn: (reason: "quota" | "key") => void) {

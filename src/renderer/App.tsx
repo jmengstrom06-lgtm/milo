@@ -56,6 +56,11 @@ export default function App() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [voice, setVoice] = useState(true);
+  const [freeVoice, setFreeVoiceState] = useState(tts.isFreeVoice());
+  const setFree = (on: boolean) => {
+    tts.setFreeVoice(on);
+    setFreeVoiceState(on);
+  };
   const [character, setCharacter] = useState<Character>(() => {
     try {
       const c = localStorage.getItem("milo.character");
@@ -978,6 +983,13 @@ export default function App() {
         return;
       }
     }
+    const fv = text.toLowerCase().match(/^(?:use |switch to |turn on )?(?:the )?(free|natural|normal|good|mac|built[- ]in) voice(?: on| mode)?$/);
+    if (fv) {
+      const on = /free|mac|built/.test(fv[1]);
+      setFree(on);
+      say(on ? "Free voice on. I'm using your Mac's voice now." : "Natural voice on.").then(() => setBubble(null));
+      return;
+    }
     const nm = text.match(/^(?:call me|my name is|my name's|i'?m called)\s+([a-z][a-z' -]{0,30})$/i);
     if (nm) {
       const n = nm[1].trim().replace(/\b\w/g, (c) => c.toUpperCase());
@@ -1727,6 +1739,13 @@ export default function App() {
               </button>
               <button className="chip" onClick={() => setVoice((v) => !v)}>
                 {voice ? "Voice on" : "Voice off"}
+              </button>
+              <button
+                className={`chip ${freeVoice ? "chip--on" : ""}`}
+                onClick={() => setFree(!freeVoice)}
+                title="Free voice uses your Mac's built-in voice and saves ElevenLabs credits. Listening still works."
+              >
+                {freeVoice ? "Free voice" : "Natural voice"}
               </button>
               <button className="chip" onClick={closeChat}>
                 Hide
