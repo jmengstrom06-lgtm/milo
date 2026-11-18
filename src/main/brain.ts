@@ -490,7 +490,7 @@ const ROUTE_TOOL = {
           "research = a request for information about the world (people, events, news, weather, scores, prices, facts, 'look up', 'tell me about', 'do some research on') when the student did NOT ask for Chrome / a browser / a tab / a website. Shown in Milo's own research box.",
           "task = the student wants the computer operated: open an app, Chrome, a browser tab or a website, click, type or write something somewhere (Google Docs, ChatGPT, Notes...), navigate, download. If they say Chrome, browser, tab, Google it, or name a website, it's a task even if they want information.",
           "look = help with homework that is on the screen (teach / hint / do it).",
-          "kit = open one of Milo's OWN apps (set app): study (practice problems, a worked example solved step by step, flashcards, practice tests: 'make me a stats problem and solve it', 'quiz me on this', 'flashcards for bio', 'open your notes and make a problem so I can study'), sketch (draw/graph/show what something looks like: 'graph y=x^2', 'show me the normal curve for this', 'what does a mitochondria look like'), notes (Milo's notes: 'make notes on this page', 'add to my notes ...', 'open your notes', 'what did I write about z-scores?', 'quiz me on my stats notes'), sheet (tables, data and charts: 'put these scores in a table', 'find the mean of these', 'make me a histogram', 'make an example histogram', 'box plot of these numbers', 'pie chart of my budget', 'make a chart of the numbers I copied'), planner (study plan / what to study when: 'plan my week for the exam'), pocket (what Milo is holding). These are Milo's own apps, NOT Apple Notes or Excel unless the student names those apps. 'Your notes', 'your sketch', 'your planner' etc. ALWAYS mean Milo's apps. A QUESTION about what an app is or does ('what is the pocket used for?', 'what features are in your sheet?', 'what can your notes do?') is chat: answer it, don't open the app. Pick the app by what they want done, not the first app they name: 'open your notes and make a stats problem and solve it' = study (they want a problem solved); 'open your notes and write down X' = notes.",
+          "kit = open one of Milo's OWN apps (set app): study (practice problems, a worked example solved step by step, flashcards, practice tests: 'make me a stats problem and solve it', 'quiz me on this', 'flashcards for bio', 'open your notes and make a problem so I can study'), sketch (draw/graph/show what something looks like: 'graph y=x^2', 'show me the normal curve for this', 'what does a mitochondria look like'), notes (Milo's notes: 'make notes on this page', 'add to my notes ...', 'open your notes', 'what did I write about z-scores?', 'quiz me on my stats notes'), sheet (tables, data and charts: 'put these scores in a table', 'find the mean of these', 'make me a histogram', 'make an example histogram', 'box plot of these numbers', 'pie chart of my budget', 'make a chart of the numbers I copied'), planner (study plan / what to study when: 'plan my week for the exam'), pocket (what Milo is holding). These are Milo's own apps, NOT Apple Notes, Excel or Google Sheets unless the student names those exact products ('Google Sheets', 'Microsoft Excel', 'Apple Notes', 'Google Docs'). A bare 'sheets', 'the sheet', 'spreadsheet', 'notes', 'sketch', 'study', 'planner' means MILO'S app (kit), even without 'your'. 'Your notes', 'your sketch', 'your planner' etc. ALWAYS mean Milo's apps. A QUESTION about what an app is or does ('what is the pocket used for?', 'what features are in your sheet?', 'what can your notes do?') is chat: answer it, don't open the app. Pick the app by what they want done, not the first app they name: 'open your notes and make a stats problem and solve it' = study (they want a problem solved); 'open your notes and write down X' = notes.",
           "kit_menu = 'what can you do', 'what can you open', 'show me your tools/kit/apps'.",
           "hold = 'hold this', 'grab this', 'keep this for me' (Milo copies the selection into his pocket). drop = 'drop it', 'paste what you're holding', 'drop it in ChatGPT' (set target to where, if they said).",
           "screen_question = a question to answer FROM what's on the student's screen right now that isn't homework to solve: 'when is my next exam' (on D2L), 'what does this email say', 'summarize this page', 'what's due on this page', 'what grade did I get'.",
@@ -535,15 +535,22 @@ function routeSystem(ctx: RouteCtx) {
 
 export async function classify(text: string, ctx: RouteCtx = {}): Promise<Route> {
   const body = {
-    max_tokens: 300,
+    max_tokens: 500,
     system: routeSystem(ctx),
     tools: [ROUTE_TOOL],
     tool_choice: { type: "auto" },
     messages: [{ role: "user", content: `The student said: "${text}"` }],
   };
   // A small fast model routes; fall back to the main model if it isn't available.
-  let r = await callTool<Route>({ ...body, model: process.env.MILO_ROUTER_MODEL || "claude-haiku-5-5" }, ROUTE_TOOL.name);
+  const fast = { ...body, model: process.env.MILO_ROUTER_MODEL || "claude-haiku-5-5" };
+  let r = await callTool<Route>(fast, ROUTE_TOOL.name);
+  if (!r.ok) {
+    bb("router", "retry", { text, why: r.text });
+    await new Promise((res) => setTimeout(res, 350)); // a blip (busy / network): one quick retry
+    r = await callTool<Route>(fast, ROUTE_TOOL.name);
+  }
   if (!r.ok) r = await callTool<Route>(body, ROUTE_TOOL.name);
+  if (!r.ok) bb("router", "failed", { text, why: r.text });
   return r.ok && r.data?.kind ? r.data : { kind: "chat", failed: true };
 }
 

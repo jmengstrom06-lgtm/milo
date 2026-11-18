@@ -26,7 +26,7 @@ const SITES: Record<string, [string, string]> = {
   youtube: ["https://www.youtube.com", "YouTube"],
   gmail: ["https://mail.google.com", "Gmail"], "google mail": ["https://mail.google.com", "Gmail"],
   "google docs": ["https://docs.google.com/document/u/0/", "Google Docs"], docs: ["https://docs.google.com/document/u/0/", "Google Docs"],
-  "google sheets": ["https://docs.google.com/spreadsheets/u/0/", "Google Sheets"], sheets: ["https://docs.google.com/spreadsheets/u/0/", "Google Sheets"],
+  "google sheets": ["https://docs.google.com/spreadsheets/u/0/", "Google Sheets"],
   "google slides": ["https://docs.google.com/presentation/u/0/", "Google Slides"], slides: ["https://docs.google.com/presentation/u/0/", "Google Slides"],
   "google drive": ["https://drive.google.com", "Google Drive"], drive: ["https://drive.google.com", "Google Drive"],
   "google calendar": ["https://calendar.google.com", "Google Calendar"], google: ["https://www.google.com", "Google"],
@@ -41,7 +41,7 @@ const SITES: Record<string, [string, string]> = {
 
 const NEW_DOCS: [RegExp, string, string][] = [
   [/^(a )?(new |blank )?(google )?doc(ument)?$|^(a )?new (google )?docs?$/, "https://docs.new", "a new Google Doc"],
-  [/^(a )?(new |blank )?(google )?(spread)?sheet$|^(a )?new (google )?sheets$/, "https://sheets.new", "a new Google Sheet"],
+  [/^(a )?(new |blank )?google (spread)?sheets?$|^(a )?new google sheets?$/, "https://sheets.new", "a new Google Sheet"],
   [/^(a )?(new |blank )?(google )?slides?( deck)?$|^(a )?new (google )?presentation$/, "https://slides.new", "a new Google Slides deck"],
 ];
 
@@ -50,7 +50,7 @@ const clean = (s: string) =>
   s.toLowerCase().replace(/[.!?]+$/, "").replace(/^(the|my|a|an|up)\s+/g, "").replace(/\s+(app|application|website|site|page|browser)$/, "").trim();
 
 function isNewDocWanted(t: string) {
-  return /\b(new|blank)\b/.test(t) || /^(a )?(doc|document|sheet|spreadsheet|slides?|presentation)$/.test(t);
+  return /\b(new|blank)\b/.test(t) || /^(a )?(doc|document|slides?|presentation)$/.test(t);
 }
 
 /** Exported for tests. */
@@ -152,6 +152,8 @@ function one(t: string): QuickStep | null {
   if (!o) return null;
   // "your notes", "your sketch pad"... are Milo's own apps, not Mac apps.
   if (/^your\b/.test(o[1])) return null;
+  // Milo's own apps (Sheet, Notes, Sketch...) are handled by the app, never launched as Mac apps / Google sites.
+  if (/^(the |my |up |a |an |new |blank )*(sheets?|spread ?sheets?|excel sheet|sketch( ?pad)?|study( deck)?|planner|pocket)$/.test(o[1].trim())) return null;
   const target = clean(o[1]);
 
   for (const [re, url, label] of NEW_DOCS) {

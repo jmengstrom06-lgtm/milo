@@ -1131,10 +1131,20 @@ export default function App() {
       kitRef.current?.saveToNotes(lastAnswer());
       return;
     }
-    const ko = kt.match(/^(?:open|show|pull up|bring up)\s+(?:up\s+)?(?:your|the)\s+(notes|study deck|study|sketch ?pad|sketch|sheet|spreadsheet|planner|pocket)(?: app)?$/);
+    // "Open sheets" / "open the sheet" / "open up notes" = Milo's apps. Only "Google Sheets", "Excel app", "Apple Notes" mean those products.
+    const ko = kt.match(/^(?:open|show|pull up|bring up|go to)\s+(?:up\s+)?(?:your\s+|the\s+|my\s+)?(notes|study deck|study|sketch ?pad|sketch|sheets?|spread ?sheets?|excel( sheet)?|planner|pocket)(?: app)?$/);
     if (ko) {
+      const key = ko[1].replace(/\s+/g, " ").replace(/^spread ?sheets?$/, "spreadsheet").replace(/^sheets$/, "sheet").replace(/^excel( sheet)?$/, "sheet");
       const map: Record<string, KitApp> = { notes: "notes", "study deck": "study", study: "study", sketch: "sketch", "sketch pad": "sketch", sketchpad: "sketch", sheet: "sheet", spreadsheet: "sheet", planner: "planner", pocket: "pocket" };
-      openKit(map[ko[1]] ?? "study");
+      bb("route_instant", { text, kind: "kit", app: map[key] });
+      openKit(map[key] ?? "study");
+      return;
+    }
+    // "Close that Chrome tab. I meant your sheets…": do the close, then the rest.
+    const cc = text.match(/^(?:milo[, ]+)?close (?:that|the|this) (?:chrome|google|browser)(?: browser| tab| window| page)?[.,;!]+\s*(?:(?:no|sorry)[, ]+)?(.{6,})$/i);
+    if (cc) {
+      bb("route_split", { text, close: "chrome tab", rest: cc[1] });
+      runTask("close this Chrome tab", spoken).then(() => routeRef.current(cc[1], spoken));
       return;
     }
 
@@ -1183,7 +1193,11 @@ export default function App() {
         return;
       }
       const t = text.toLowerCase();
-      if (/^(close|done|thanks|thank you|got it|never ?mind|that'?s all)\b/.test(t)) return tool ? closeTool() : closeResearch();
+      // Only a bare "close" / "done" / "thanks" closes the open box. Longer sentences go to the router.
+      if (/^(close( it| this| that| the box| that box)?|done|i'?m done|thanks|thank you|got it|never ?mind|that'?s all)[.!]*$/.test(t.trim())) {
+        if (kitApp) return kitRef.current?.close();
+        return tool ? closeTool() : closeResearch();
+      }
       if (/(full ?screen|make it (big|bigger|full)|expand( it)?|maximi[sz]e)/.test(t)) return setRpSize("full");
       if (/(half|split) ?screen|make it half/.test(t)) return setRpSize("half");
       if (/(smaller|shrink|minimi[sz]e|compact)/.test(t)) return setRpSize("compact");

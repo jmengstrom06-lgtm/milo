@@ -1,7 +1,7 @@
 // Your classes: a chip bar on every Kit app (tap one and every app tailors itself to that class)
 // plus a quick setup ("Stats 2023, English Comp, Bio 101, US History, Spanish 2").
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { KitLoading } from "./KitPanel";
 import { SUBJECT_NAMES, type ClassStore, type Klass, type Subject } from "./types";
 
@@ -45,8 +45,12 @@ export function ClassesEditor({ store, seed, courses, onSave, say }: { store: Cl
     setList(r.data.classes.slice(0, 7).map((c, i) => ({ id: `c${Date.now().toString(36)}${i}`, name: c.name, code: c.code ?? "", subject: c.subject, color: COLORS[i % COLORS.length] })));
     say(r.data.say);
   };
+  const seeded = useRef<string | null>(null);
   useEffect(() => {
-    if (seed) fill(seed); // came from voice: "my classes are..."
+    if (seed && seeded.current !== seed) {
+      seeded.current = seed; // once, even when React runs effects twice
+      fill(seed); // came from voice: "my classes are..."
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed]);
   const upd = (i: number, k: Partial<Klass>) => setList((l) => l.map((c, j) => (j === i ? { ...c, ...k } : c)));
