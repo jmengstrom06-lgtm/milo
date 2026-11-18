@@ -667,3 +667,62 @@ Vary which letter is correct. If there's no study material on screen, quiz on th
     QUIZ_TOOL.name
   );
 }
+
+// ---------------------------------------------------------------------------
+// Daily Brief: read the student's course portal (D2L) homepage and list what's due.
+export type Brief = {
+  signed_in: boolean;
+  items: { title: string; course: string; due: string; urgent: boolean }[];
+  spoken: string;
+};
+
+const BRIEF_TOOL = {
+  name: "brief",
+  description: "What's due, read from the student's course portal page.",
+  input_schema: {
+    type: "object",
+    properties: {
+      signed_in: { type: "boolean", description: "False if this is a login page or asks the student to sign in." },
+      items: {
+        type: "array",
+        description: "Upcoming assignments, quizzes and exams visible on the page, soonest first (max 6).",
+        items: {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            course: { type: "string", description: "Short course name or code." },
+            due: { type: "string", description: "Short human due date, e.g. 'Tomorrow 11:59 PM' or 'Fri, Nov 21'." },
+            urgent: { type: "boolean", description: "Due within about 48 hours." },
+          },
+          required: ["title", "course", "due", "urgent"],
+        },
+      },
+      spoken: {
+        type: "string",
+        description: "One or two short sentences Milo says, e.g. 'You've got two things due tomorrow: the Stats homework and the Accounting quiz.' No greeting.",
+      },
+    },
+    required: ["signed_in", "items", "spoken"],
+  },
+};
+
+export async function readBrief(jpegBase64: string, today: string): Promise<ApiOk<Brief> | ApiErr> {
+  return callTool(
+    {
+      max_tokens: 1500,
+      system: `${persona()}\nYou read a screenshot of the student's course portal (D2L Brightspace or similar). Today is ${today}.`,
+      tools: [BRIEF_TOOL],
+      tool_choice: { type: "auto" },
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: jpegBase64 } },
+            { type: "text", text: "What's coming up?" },
+          ],
+        },
+      ],
+    },
+    BRIEF_TOOL.name
+  );
+}

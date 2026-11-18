@@ -10,6 +10,7 @@ import { Pin, SweepHUD, SweepState, SweepSummary, WorkCard } from "./Sweep";
 import { setSounds, sfx, soundsOn } from "./sfx";
 import ToolPanel, { SavedTool, loadTools, saveTools } from "./ToolPanel";
 import QuizPanel, { QuizHandle } from "./QuizPanel";
+import { BriefCard, BriefLoader, BriefState, SignInPanel } from "./Brief";
 import { stripMath } from "./MathText";
 
 type Msg = { role: "user" | "assistant"; content: string };
@@ -90,6 +91,16 @@ export default function App() {
   const [watching, setWatching] = useState(false);
   const [quiz, setQuiz] = useState<{ id: number; topic: string; questions: QuizQ[]; focus: string } | null>(null);
   const quizRef = useRef<QuizHandle>(null);
+  const [brief, setBrief] = useState<BriefState | null>(null);
+  const [briefRun, setBriefRun] = useState(0); // bump to (re)load the portal
+  const [signIn, setSignIn] = useState(false);
+  const [portal, setPortal] = useState(() => {
+    try {
+      return localStorage.getItem("milo.portal") || "";
+    } catch {
+      return "";
+    }
+  });
   const [flag, setFlag] = useState<{ box: MiloBox; hint: string } | null>(null); // mistake Milo spotted
   const [name, setNameState] = useState(() => {
     try {
@@ -720,6 +731,60 @@ export default function App() {
     setBubble(null);
   };
 
+  // ---- Daily Brief ------------------------------------------------------------------
+  const greeting = () => {
+    const h = new Date().getHours();
+    const part = h < 5 ? "Hey" : h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+    return `${part}${name ? `, ${name}` : ""}.`;
+  };
+  const startBrief = (spoken: boolean) => {
+    if (!portal) {
+      setBrief({ phase: "setup" });
+      say(greeting()).then(() => setBubble(null));
+      return;
+    }
+    setBrief({ phase: "loading" });
+    setBriefRun(Date.now());
+    if (spoken) setMood("looking");
+  };
+  const onBrief = async (st: BriefState) => {
+    setBrief(st);
+    setBriefRun(0);
+    if (st.phase === "ready") {
+      setMood("happy");
+      await say(`${greeting()} ${st.spoken || (st.items.length ? "" : "Nothing due soon. You're all caught up.")}`.trim());
+      setBubble(null);
+    } else if (st.phase === "signin") {
+      await say(`${greeting()} Sign in to D2L once and I'll keep track of what's due.`);
+      setBubble(null);
+    }
+  };
+  const setPortalUrl = (url: string) => {
+    const u = /^https?:\/\//.test(url) ? url : `https://${url}`;
+    setPortal(u);
+    try {
+      localStorage.setItem("milo.portal", u);
+    } catch {
+      /* ignore */
+    }
+    setBrief({ phase: "signin" });
+  };
+  // Greet once a day when Milo starts.
+  useEffect(() => {
+    const today = new Date().toDateString();
+    let last = "";
+    try {
+      last = localStorage.getItem("milo.lastBrief") || "";
+      localStorage.setItem("milo.lastBrief", today);
+    } catch {
+      /* ignore */
+    }
+    if (last === today) return;
+    const t = window.setTimeout(() => startBrief(false), 1500);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // When a panel goes half screen, Milo steps to its left edge so he's never hidden behind it.
   useEffect(() => {
     if (!(researchQ || tool || quiz)) return;
@@ -888,6 +953,9 @@ export default function App() {
         return;
       case "quiz":
         startQuiz(intent.focus);
+        return;
+      case "brief":
+        startBrief(spoken);
         return;
       case "fill": {
         const L = lessonRef.current;
@@ -1235,6 +1303,12 @@ export default function App() {
         closeQuiz();
         return;
       }
+      if (brief || signIn) {
+        setBrief(null);
+        setSignIn(false);
+        hover(false);
+        return;
+      }
       if (sweep) {
         if (sweep.status === "done" || sweep.status === "stopped" || sweep.status === "error") closeSweep();
         else stopSweep();
@@ -1244,7 +1318,7 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lesson, closeLesson, researchQ, sweep, tool, quiz]);
+  }, [lesson, closeLesson, researchQ, sweep, tool, quiz, brief, signIn]);
 
   const send = async () => {
     const text = input.trim();
@@ -1332,6 +1406,35 @@ export default function App() {
             <SweepSummary s={sweep} onClose={closeSweep} hover={hover} style={{ ...rpStyle, height: "auto", maxHeight: H - 32 }} />
           )}
         </>
+      )}
+
+      {briefRun > 0 && portal && <BriefLoader key={briefRun} url={portal} onResult={onBrief} />}
+      {brief && !signIn && (
+        <BriefCard
+          greeting={greeting()}
+          state={brief}
+          style={{ ...rpStyle, height: "auto", maxHeight: H - 32 }}
+          portal={portal}
+          onSetPortal={setPortalUrl}
+          onSignIn={() => setSignIn(true)}
+          onOpenPortal={() => window.milo.openUrl(portal)}
+          onClose={() => {
+            setBrief(null);
+            hover(false);
+          }}
+          hover={hover}
+        />
+      )}
+      {signIn && portal && (
+        <SignInPanel
+          url={portal}
+          style={{ right: 16, top: 16, width: Math.round(W / 2) - 24, height: H - 32 }}
+          hover={hover}
+          onDone={() => {
+            setSignIn(false);
+            startBrief(true);
+          }}
+        />
       )}
 
       {quiz && (

@@ -17,7 +17,7 @@ import { click, ensureBrowser, frontApp, openApp, openFolder, openLatestDownload
 import { plan } from "./quick";
 import { research } from "./research";
 import { buildTool } from "./builder";
-import { Action, askMilo, classify, makeQuiz, setUserName, sweepPlan, watchCheck, ChatMessage, checkAnswer, locateInCrop, nextAction, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
+import { Action, askMilo, classify, makeQuiz, readBrief, setUserName, sweepPlan, watchCheck, ChatMessage, checkAnswer, locateInCrop, nextAction, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
 dotenv.config({ path: path.join(app.getAppPath(), ".env") });
 
@@ -519,6 +519,13 @@ ipcMain.handle("milo:quiz", async (_e, focus: string) => {
     .filter((q) => q && Array.isArray(q.choices) && q.choices.length >= 2)
     .map((q) => ({ ...q, choices: q.choices.slice(0, 4), correct: Math.max(0, Math.min(3, Math.round(q.correct))) }));
   return { ok: true, topic: r.data.topic || "Quiz", questions };
+});
+
+// ---------- daily brief ------------------------------------------------------------------------
+ipcMain.handle("milo:brief", async (_e, dataUrl: string) => {
+  const b64 = String(dataUrl).replace(/^data:image\/\w+;base64,/, "");
+  const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+  return readBrief(b64, today);
 });
 
 // ---------- research ----------------------------------------------------------------

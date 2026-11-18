@@ -40,7 +40,7 @@ declare global {
   // Electron <webview> (live web pages inside the research panel)
   namespace JSX {
     interface IntrinsicElements {
-      webview: { src?: string; style?: Record<string, string | number>; className?: string; partition?: string; ref?: unknown };
+      webview: { src?: string; style?: Record<string, string | number>; className?: string; partition?: string; ref?: unknown; key?: string | number };
     }
   }
 
@@ -73,6 +73,10 @@ declare global {
       watchCheck: (force?: boolean) => Promise<{ ok: true; changed: boolean; mistake?: boolean; box?: MiloBox | null; hint?: string } | Err>;
       watchReset: () => void;
       quiz: (focus: string) => Promise<{ ok: true; topic: string; questions: QuizQ[] } | Err>;
+      brief: (dataUrl: string) => Promise<
+        | { ok: true; data: { signed_in: boolean; items: { title: string; course: string; due: string; urgent: boolean }[]; spoken: string } }
+        | Err
+      >;
       copy: (text: string) => void;
       onSummon: (cb: () => void) => () => void;
       onTeachScreen: (cb: () => void) => () => void;
