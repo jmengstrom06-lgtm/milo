@@ -156,7 +156,30 @@ async function callClaude(body: Record<string, unknown>): Promise<ApiOk<Block[]>
 
 function toolInput<T>(blocks: Block[], name: string): T | null {
   const b = blocks.find((x) => x.type === "tool_use" && x.name === name);
-  return (b?.input as T) ?? null;
+  if (b?.input) return b.input as T;
+  // Fallback: some models answer with JSON text instead of a tool call.
+  const text = blocks.filter((x) => x.type === "text").map((x) => x.text).join("\n");
+  const m = text.match(/\{[\s\S]*\}/);
+  if (m) {
+    try {
+      return JSON.parse(m[0]) as T;
+    } catch {
+      /* ignore */
+    }
+  }
+  return null;
+}
+
+// Call Claude and make sure we get the tool's structured output (one retry if not).
+async function callTool<T>(body: Record<string, unknown>, toolName: string): Promise<ApiOk<T> | ApiErr> {
+  const sys = `${body.system ?? ""}\n\nAlways respond by calling the ${toolName} tool exactly once. Do not reply with plain text.`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const r = await callClaude({ ...body, system: sys });
+    if (!r.ok) return r;
+    const out = toolInput<T>(r.data, toolName);
+    if (out) return { ok: true, data: out };
+  }
+  return { ok: false, text: "I got my wires crossed. Try again?" };
 }
 
 // ---------------------------------------------------------------------------
@@ -183,11 +206,11 @@ ${MODE_RULES[mode]}
 Keep "say" lines short and natural for text-to-speech (no LaTeX, no symbols, say numbers in words if needed).
 If there is nothing to help with, set found=false and use intro to say so playfully.`;
 
-  const r = await callClaude({
-    max_tokens: 2000,
+  const r = await callTool<TeachResult>({
+    max_tokens: 4000,
     system,
     tools: [TEACH_TOOL],
-    tool_choice: { type: "tool", name: TEACH_TOOL.name },
+    tool_choice: { type: "auto" },
     messages: [
       {
         role: "user",
@@ -197,21 +220,20 @@ If there is nothing to help with, set found=false and use intro to say so playfu
         ],
       },
     ],
-  });
+  }, TEACH_TOOL.name);
   if (!r.ok) return r;
-  const out = toolInput<TeachResult>(r.data, TEACH_TOOL.name);
-  if (!out) return { ok: false, text: "I looked but got confused. Try again?" };
+  const out = r.data;
   out.steps = Array.isArray(out.steps) ? out.steps : [];
   out.target = out.target ?? null;
   return { ok: true, data: out };
 }
 
 export async function checkAnswer(lesson: TeachResult, studentAnswer: string): Promise<ApiOk<CheckResult> | ApiErr> {
-  const r = await callClaude({
-    max_tokens: 400,
+  return callTool<CheckResult>({
+    max_tokens: 1000,
     system: `${PERSONA}\nYou are checking a student's answer to your own lesson. Accept equivalent forms and reasonable rounding.`,
     tools: [CHECK_TOOL],
-    tool_choice: { type: "tool", name: CHECK_TOOL.name },
+    tool_choice: { type: "auto" },
     messages: [
       {
         role: "user",
@@ -222,26 +244,20 @@ Correct answer: ${lesson.answer}
 Student answered: ${studentAnswer}`,
       },
     ],
-  });
-  if (!r.ok) return r;
-  const out = toolInput<CheckResult>(r.data, CHECK_TOOL.name);
-  return out ? { ok: true, data: out } : { ok: false, text: "I couldn't check that one. Try again?" };
+  }, CHECK_TOOL.name);
 }
 
 export async function makePractice(lesson: TeachResult): Promise<ApiOk<Practice> | ApiErr> {
-  const r = await callClaude({
-    max_tokens: 900,
+  return callTool<Practice>({
+    max_tokens: 2000,
     system: `${PERSONA}\nWrite exactly 3 practice problems that use the same method, slightly varied, increasing difficulty.`,
     tools: [PRACTICE_TOOL],
-    tool_choice: { type: "tool", name: PRACTICE_TOOL.name },
+    tool_choice: { type: "auto" },
     messages: [
       {
         role: "user",
         content: `Topic: ${lesson.topic}\nWorked steps: ${lesson.steps.map((s) => s.write).join(" | ")}\nAnswer: ${lesson.answer}`,
       },
     ],
-  });
-  if (!r.ok) return r;
-  const out = toolInput<Practice>(r.data, PRACTICE_TOOL.name);
-  return out ? { ok: true, data: out } : { ok: false, text: "Couldn't cook up practice problems. Try again?" };
+  }, PRACTICE_TOOL.name);
 }
