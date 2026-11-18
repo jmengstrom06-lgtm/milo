@@ -15,9 +15,10 @@ const PRE_ROLL = 6; // ~380 ms kept from before speech starts
 const START_FRAMES = 4; // ~256 ms of voice to count as speech
 const MIN_VOICED_S = 0.5; // shorter than this is a cough/click, not words
 const VOICE_RATIO = 0.45; // share of energy that must sit in the human-voice band (300-3400 Hz)
-const END_SILENCE = 14; // ~900 ms of quiet ends the utterance
+const END_SILENCE = 14; // ~900 ms of quiet ends the utterance (plain quiet room)
+const END_NO_VOICE = 24; // ~1.5 s without YOUR voice ends it, even if other people keep talking
 const MAX_FRAMES = Math.round((15 * RATE) / FRAME); // 15 s cap (push-to-talk)
-const MAX_FRAMES_HF = Math.round((8 * RATE) / FRAME); // 8 s cap in hands-free so background chatter can't hang him
+const MAX_FRAMES_HF = Math.round((10 * RATE) / FRAME); // 8 s cap in hands-free so background chatter can't hang him
 const ONCE_TIMEOUT = Math.round((7 * RATE) / FRAME); // give up after 7 s of nothing
 
 export class Ears {
@@ -36,12 +37,16 @@ export class Ears {
   private floor = 0.008;
   private uttEnergy: number[] = []; // per-frame loudness of the current utterance
   private uttPeak = 0; // how loud the current speaker is (slowly decaying peak)
+  private noVoiceRun = 0; // frames since the speaker's own voice was last heard
+  voicedFrames = 0; // voiced length of the last utterance (frames)
   private lastLevel = 0; // loudness of the last finished utterance
   /** How loud YOU are when you talk to Milo (learned). Quieter, farther voices are ignored in hands-free. */
   private userLevel = Number(localStorage.getItem("milo.userLevel") || 0);
 
   onLevel: (level: number) => void = () => {};
   onState: (s: EarState) => void = () => {};
+  /** 0..1 while waiting for you to finish (drives the "sending…" bar). */
+  onPause: (progress: number) => void = () => {};
   onUtterance: (wav: ArrayBuffer, pushToTalk: boolean) => void = () => {};
 
   async setMode(mode: EarMode) {
@@ -113,6 +118,8 @@ export class Ears {
   }
 
   private resetUtterance() {
+    this.noVoiceRun = 0;
+    this.onPause(0);
     this.uttPeak = 0;
     this.uttEnergy = [];
     this.speech = [];
@@ -175,8 +182,13 @@ export class Ears {
     this.uttEnergy.push(rms);
     this.uttPeak = Math.max(this.uttPeak * 0.985, rms);
     this.quietRun = rms < off ? this.quietRun + 1 : 0;
+    // "Your voice" = clearly as loud as you were talking. Other people, quieter, don't reset the timer.
+    const yours = rms > Math.max(off * 1.3, this.uttPeak * 0.5);
+    this.noVoiceRun = yours ? 0 : this.noVoiceRun + 1;
+    if (this.noVoiceRun > 4) this.onPause(Math.min(1, (this.noVoiceRun - 4) / (END_NO_VOICE - 4)));
+    else this.onPause(0);
     const cap = this.mode === "always" ? MAX_FRAMES_HF : MAX_FRAMES;
-    if (this.quietRun >= END_SILENCE || this.speech.length >= cap) this.finish();
+    if (this.quietRun >= END_SILENCE || this.noVoiceRun >= END_NO_VOICE || this.speech.length >= cap) this.finish();
   }
 
   private finish() {
@@ -186,6 +198,7 @@ export class Ears {
     const voiced = energy.length;
     // Typical loudness while talking (upper-middle of the voiced frames).
     const level = voiced ? energy[Math.floor(voiced * 0.7)] : 0;
+    this.voicedFrames = voiced;
     this.lastLevel = level;
     const tooShort = voiced * FRAME < RATE * MIN_VOICED_S;
     // Voice focus: in hands-free, ignore voices much quieter than yours (TV, people across the room).

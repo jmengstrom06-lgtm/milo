@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Milo, { Character, CHARACTERS, Mood } from "./Milo";
 import Notebook, { NotebookHandle } from "./Notebook";
 import { Ears, EarState } from "./ears";
-import { parse, stripWake } from "./commands";
+import { isBareGo, parse, stripGo, stripWake } from "./commands";
 import { Bubble, Confetti, Highlight } from "./Effects";
 import * as tts from "./voice";
 
@@ -73,6 +73,7 @@ export default function App() {
   const [handsFree, setHandsFree] = useState(false);
   const [level, setLevel] = useState(0);
   const [heard, setHeard] = useState<string | null>(null);
+  const [pause, setPause] = useState(0); // "sending…" bar while you finish talking
   const [working, setWorking] = useState(false); // Milo is using the computer
 
   const posRef = useRef(pos);
@@ -91,6 +92,7 @@ export default function App() {
   const voiceSession = useRef(false); // the current lesson was started by voice
   const routeRef = useRef<(text: string, spoken?: boolean) => void>(() => {});
   const pendingTask = useRef<string | null>(null);
+  const lastCommand = useRef<string | null>(null); // last thing you asked for (so a bare "go" can redo it)
   const restoreHandsFree = useRef(false);
   const lastStepSay = useRef("");
   const lastStepPoint = useRef<{ x: number; y: number } | null>(null); // a task waiting on the student's yes/no
@@ -594,22 +596,42 @@ export default function App() {
       }
     };
     let inFlight = false;
+    let queued: { wav: ArrayBuffer; pushToTalk: boolean } | null = null; // newest waiting utterance (never drop yours)
+    e.onPause = (p) => setPause(p);
     e.onUtterance = async (wav, pushToTalk) => {
-      const direct = pushToTalk || Date.now() < followUntil.current; // you were clearly talking to Milo
-      if (inFlight) return; // one at a time; drop extra background chatter
+      if (inFlight) {
+        queued = { wav, pushToTalk };
+        return;
+      }
       inFlight = true;
+      try {
+        await handle(wav, pushToTalk);
+      } finally {
+        inFlight = false;
+        if (queued) {
+          const q = queued;
+          queued = null;
+          e.onUtterance(q.wav, q.pushToTalk);
+        }
+      }
+    };
+    const handle = async (wav: ArrayBuffer, pushToTalk: boolean) => {
+      const direct = pushToTalk || Date.now() < followUntil.current; // you were clearly talking to Milo
+      const longEnough = e.voicedFrames * 1024 > 16000 * 1.0; // over ~1s of real talking
       if (direct) {
         setEarState("thinking");
         setMood("thinking");
       }
       const r = await window.milo.stt(wav);
-      inFlight = false;
       setEarState(e.mode === "off" ? "off" : "waiting");
       if (!r.ok) {
         setMood((m) => (m === "thinking" ? "idle" : m));
         // Only complain if you were talking to him directly; stay quiet about background noise.
-        if (direct) say(r.text === "busy" ? "Sorry, say that one more time?" : r.text).then(() => setBubble(null));
-        if (direct && r.text === "busy") listen();
+        if (direct || longEnough) {
+          await say(r.text === "busy" ? "Sorry, I missed that. Say it one more time?" : r.text);
+          setBubble(null);
+          if (r.text === "busy") listen();
+        }
         return;
       }
       let text = r.text;
@@ -634,6 +656,19 @@ export default function App() {
       }
       followUntil.current = 0;
       if (!text) return;
+      // A bare "go" means: do the last thing I asked (if it didn't happen).
+      if (isBareGo(text)) {
+        if (lastCommand.current) text = lastCommand.current;
+        else {
+          await say("Go where? Tell me what to do.");
+          setBubble(null);
+          listen();
+          return;
+        }
+      } else {
+        text = stripGo(text);
+        lastCommand.current = text;
+      }
       setHeard(text);
       setBubble(null);
       routeRef.current(text);
@@ -652,7 +687,7 @@ export default function App() {
     }
     hush();
     setHeard(null);
-    setBubble("I'm listening… (press again to send)");
+    setBubble("I'm listening… (pause or say \"go\" to send)");
     setMood("listening");
     listen(true);
   }, [listen]);
@@ -825,7 +860,13 @@ export default function App() {
           <div className="ear-ring" style={{ transform: `scale(${1 + level * 0.6})` }} />
         )}
         <Milo mood={mood} facing={facing} speaking={speaking} character={character} />
-        {handsFree && !working && <div className={`ears-on ${earState === "hearing" ? "ears-on--hot" : ""}`}>Say "Hey Milo"</div>}
+        {pause > 0.05 && earState === "hearing" && (
+          <div className="send-bar">
+            <span style={{ width: `${Math.round(pause * 100)}%` }} />
+            <em>sending…</em>
+          </div>
+        )}
+        {handsFree && !working && pause <= 0.05 && <div className={`ears-on ${earState === "hearing" ? "ears-on--hot" : ""}`}>Say "Hey Milo"</div>}
       </div>
 
       {bubble && <Bubble text={short(bubble)} style={bStyle} />}

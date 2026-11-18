@@ -94,3 +94,12 @@ export function parse(raw: string, ctx: { inLesson: boolean; awaitingAnswer: boo
 
   return { kind: "chat", text };
 }
+
+/** Drop a trailing "go" / "do it" / "complete task" the student says to send the command. */
+export function stripGo(text: string): string {
+  const out = text.replace(/[\s,.!-]*\b(okay |ok |alright )?(go|go ahead|go now|go for it|do it|do it now|complete( the)? task|execute|send( it)?|that'?s it|over|thanks)[.!?]*$/i, "").trim();
+  return out || text.trim();
+}
+
+/** Just "go" / "do it" on its own, with nothing else. */
+export const isBareGo = (text: string) => /^(okay |ok )?(go|go ahead|do it|start|begin|complete( the)? task)[.!?]*$/i.test(text.trim());
