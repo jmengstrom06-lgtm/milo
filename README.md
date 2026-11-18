@@ -36,6 +36,14 @@ An animated AI companion that lives on your screen.
 
 "Hey Milo" (hands-free) is on by default; turn it off with the Hands-free chip.
 
+### Final boss features
+- **Worksheet Sweep:** "do this whole worksheet". Every question solved, answers typed into each box or pinned on the page, progress bar, summary with Copy all
+- **Build-a-Tool:** "make me a final grade calculator". Watch the code write itself, then use the app; save to My Tools
+- **Watch Me Work:** "watch me work" / "check my work". Flags real mistakes with an amber ring and a hint
+- **Quiz Mode:** "quiz me on this". 6 questions from what's on screen, answer out loud, score + review
+- **Daily Brief:** greets you by name once a day and reads what's due from D2L (sign in once inside Milo)
+- Subtle sounds (toggle in the chat panel), visible live typing, "call me Jake"
+
 ### Research
 - "Hey Milo, look up…", "who is…", "what's the weather in…", "research…", "search for…"
 - A research panel opens next to Milo: each search, the sources he reads, and the answer appear live; he reads the answer out loud
@@ -72,6 +80,7 @@ System Settings > Privacy & Security > Screen & System Audio Recording, then res
 - [x] Phase 1a: Milo on screen, walks, chats with Claude
 - [ ] Phase 1b: Rive character replaces the SVG placeholder
 - [x] Phase 2: Screen vision, jump to the question, spotlight, animated notebook, Teach / Hint / Do it modes, answer check, practice
+- [x] Phase 2.5: Voice, hands-free, computer control, research, worksheet sweep, tools, watch, quiz, daily brief
 - [ ] Phase 3: Help Me / Do It For Me, real computer actions, memory (Supabase)
 - [ ] Phase 4: Accounts, TCU network, shared study room with two Milos
 - [ ] Phase 5: Polish, signed Mac beta
