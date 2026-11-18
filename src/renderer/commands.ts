@@ -18,6 +18,7 @@ export type Intent =
   | { kind: "build"; request: string } // make a small working app
   | { kind: "watch"; on: boolean } // watch me work (spot mistakes as I go)
   | { kind: "checkwork" } // one-time look for mistakes
+  | { kind: "quiz"; focus: string } // quiz me on what's on screen
   | { kind: "fill" } // type the lesson's answer into the blank
   | { kind: "yes" }
   | { kind: "no" }
@@ -72,6 +73,7 @@ export function parse(raw: string, ctx: { inLesson: boolean; awaitingAnswer: boo
   if (/^(watch me|watch my (work|screen)|keep an eye on (me|my work|this)|watch me work|check my work as i go|watch while i work)\b/.test(t))
     return { kind: "watch", on: true };
   if (/^(check (my|this) work|is (this|my work) right|did i (do this|get this) right|any mistakes)\b/.test(t)) return { kind: "checkwork" };
+  if (/^(quiz me|test me|give me a (quiz|test|practice test)|make (me )?a (quiz|practice test)|study mode|quiz mode)\b/.test(t)) return { kind: "quiz", focus: text };
   if (SWEEP.test(t)) return { kind: "sweep" };
   if (BUILD.test(t) && !/\b(google (doc|sheet|slide)s?|new (tab|window|doc|sheet)|folder|spreadsheet in|document)\b/.test(t)) return { kind: "build", request: text };
 

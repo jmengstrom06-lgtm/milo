@@ -9,6 +9,8 @@ import ResearchPanel, { PanelSize } from "./ResearchPanel";
 import { Pin, SweepHUD, SweepState, SweepSummary, WorkCard } from "./Sweep";
 import { setSounds, sfx, soundsOn } from "./sfx";
 import ToolPanel, { SavedTool, loadTools, saveTools } from "./ToolPanel";
+import QuizPanel, { QuizHandle } from "./QuizPanel";
+import { stripMath } from "./MathText";
 
 type Msg = { role: "user" | "assistant"; content: string };
 type Pos = { x: number; y: number };
@@ -86,6 +88,8 @@ export default function App() {
   const [tool, setTool] = useState<{ request: string; id: number; existing?: SavedTool | null } | null>(null);
   const [tools, setTools] = useState<SavedTool[]>(loadTools);
   const [watching, setWatching] = useState(false);
+  const [quiz, setQuiz] = useState<{ id: number; topic: string; questions: QuizQ[]; focus: string } | null>(null);
+  const quizRef = useRef<QuizHandle>(null);
   const [flag, setFlag] = useState<{ box: MiloBox; hint: string } | null>(null); // mistake Milo spotted
   const [name, setNameState] = useState(() => {
     try {
@@ -716,6 +720,52 @@ export default function App() {
     setBubble(null);
   };
 
+  // When a panel goes half screen, Milo steps to its left edge so he's never hidden behind it.
+  useEffect(() => {
+    if (!(researchQ || tool || quiz)) return;
+    if (rpSize === "half") moveTo({ x: Math.round(window.innerWidth / 2) - MILO_W - 28, y: home().y }, "jump");
+    else if (rpSize === "compact") moveTo(home(), "jump");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rpSize, !!(researchQ || tool || quiz)]);
+
+  // ---- Quiz Mode --------------------------------------------------------------------
+  const startQuiz = async (focus: string) => {
+    closeOthers();
+    setTool(null);
+    setQuiz(null);
+    hover(false);
+    setMood("looking");
+    setBubble("Writing your quiz…");
+    const r = await window.milo.quiz(focus);
+    setBubble(null);
+    if (!r.ok || !r.questions.length) {
+      setMood("idle");
+      await say(r.ok ? "I couldn't find enough material on screen to quiz you on." : r.text);
+      setBubble(null);
+      return;
+    }
+    setRpSize("half");
+    setMood("happy");
+    setQuiz({ id: Date.now(), topic: r.topic, questions: r.questions, focus });
+  };
+  const closeQuiz = () => {
+    hush();
+    setQuiz(null);
+    hover(false);
+    setBubble(null);
+    setMood("idle");
+  };
+  const quizSay = async (text: string) => {
+    await say(text);
+    setBubble(null);
+  };
+  const onQuizFinished = async (score: number, total: number) => {
+    const pct = score / Math.max(1, total);
+    setMood(pct >= 0.7 ? "celebrating" : "happy");
+    await say(pct === 1 ? `Perfect score. ${score} out of ${total}.` : `You got ${score} out of ${total}.${pct < 0.7 ? " Let's review the ones you missed." : " Nice work."}`);
+    setBubble(null);
+  };
+
   // ---- research panel -------------------------------------------------------------
   const startResearch = (q: string, spoken = true) => {
     runId.current++;
@@ -774,6 +824,16 @@ export default function App() {
 
   // ---- voice commands -------------------------------------------------------------
   routeRef.current = (text: string, spoken = true) => {
+    if (quiz && quizRef.current?.active()) {
+      const t = text.toLowerCase().trim().replace(/[.!?]+$/, "");
+      if (/^(end|stop|quit|exit|close)( the)? quiz$|^(i'?m )?done$/.test(t)) return closeQuiz();
+      if (/^(next|next question|continue|go on|okay next)$/.test(t)) return quizRef.current.next();
+      const letter = t.match(/^(?:(?:the )?answer is |it'?s |i (?:think|say|pick|choose) |option |letter )?(a|b|c|d)\b/);
+      if (letter) return quizRef.current.answer("abcd".indexOf(letter[1]));
+      const ch = quizRef.current.choices().map((c) => stripMath(c).toLowerCase());
+      const hit = ch.findIndex((c) => c && (t.includes(c) || (c.length > 3 && c.includes(t))));
+      if (hit >= 0) return quizRef.current.answer(hit);
+    }
     const om = text.toLowerCase().match(/^(?:open|show|launch|pull up|bring up)\s+(?:my\s+)?(.+?)(?:\s+(?:tool|app))?$/);
     if (om) {
       const words = om[1].split(/\s+/).filter((w) => w.length > 2);
@@ -825,6 +885,9 @@ export default function App() {
         return;
       case "checkwork":
         checkWorkNow();
+        return;
+      case "quiz":
+        startQuiz(intent.focus);
         return;
       case "fill": {
         const L = lessonRef.current;
@@ -1168,6 +1231,10 @@ export default function App() {
         closeTool();
         return;
       }
+      if (quiz) {
+        closeQuiz();
+        return;
+      }
       if (sweep) {
         if (sweep.status === "done" || sweep.status === "stopped" || sweep.status === "error") closeSweep();
         else stopSweep();
@@ -1177,7 +1244,7 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lesson, closeLesson, researchQ, sweep, tool]);
+  }, [lesson, closeLesson, researchQ, sweep, tool, quiz]);
 
   const send = async () => {
     const text = input.trim();
@@ -1265,6 +1332,23 @@ export default function App() {
             <SweepSummary s={sweep} onClose={closeSweep} hover={hover} style={{ ...rpStyle, height: "auto", maxHeight: H - 32 }} />
           )}
         </>
+      )}
+
+      {quiz && (
+        <QuizPanel
+          ref={quizRef}
+          key={quiz.id}
+          topic={quiz.topic}
+          questions={quiz.questions}
+          style={rpStyle}
+          size={rpSize}
+          onSize={setRpSize}
+          onClose={closeQuiz}
+          onAgain={() => startQuiz(quiz.focus)}
+          hover={hover}
+          say={quizSay}
+          onFinished={onQuizFinished}
+        />
       )}
 
       {tool && (

@@ -15,6 +15,7 @@ declare global {
     others?: unknown[];
   };
   type MiloOther = { label: string; box: MiloBox };
+  type QuizQ = { q: string; choices: string[]; correct: number; explain: string };
   type SweepItem = {
     label: string;
     work: string;
@@ -71,6 +72,7 @@ declare global {
       onBuild: (cb: (ev: { type: "code"; delta: string } | { type: "done"; title: string; html: string } | { type: "error"; text: string }) => void) => () => void;
       watchCheck: (force?: boolean) => Promise<{ ok: true; changed: boolean; mistake?: boolean; box?: MiloBox | null; hint?: string } | Err>;
       watchReset: () => void;
+      quiz: (focus: string) => Promise<{ ok: true; topic: string; questions: QuizQ[] } | Err>;
       copy: (text: string) => void;
       onSummon: (cb: () => void) => () => void;
       onTeachScreen: (cb: () => void) => () => void;

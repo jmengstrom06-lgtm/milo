@@ -611,3 +611,59 @@ Do not flag unfinished work, style preferences, or anything you're unsure about.
     WATCH_TOOL.name
   );
 }
+
+// ---------------------------------------------------------------------------
+// Quiz Mode: a quiz built from whatever is on screen (slides, notes, a PDF, a textbook page).
+export type QuizData = {
+  topic: string;
+  questions: { q: string; choices: string[]; correct: number; explain: string }[];
+};
+
+const QUIZ_TOOL = {
+  name: "quiz",
+  description: "A multiple-choice quiz on the material shown.",
+  input_schema: {
+    type: "object",
+    properties: {
+      topic: { type: "string", description: "2 to 5 word topic name." },
+      questions: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            q: { type: "string", description: "The question. Math in $...$ LaTeX allowed." },
+            choices: { type: "array", items: { type: "string" }, description: "Exactly 4 choices, plausible distractors." },
+            correct: { type: "number", description: "Index 0-3 of the correct choice." },
+            explain: { type: "string", description: "One short sentence on why it's right (spoken aloud, no LaTeX)." },
+          },
+          required: ["q", "choices", "correct", "explain"],
+        },
+      },
+    },
+    required: ["topic", "questions"],
+  },
+};
+
+export async function makeQuiz(jpegBase64: string, size: { width: number; height: number }, count: number, focus: string): Promise<ApiOk<QuizData> | ApiErr> {
+  return callTool(
+    {
+      max_tokens: 4000,
+      system: `${persona()}
+Write a ${count}-question multiple-choice quiz based ONLY on the study material visible on the student's screen (lecture slides, notes, a PDF, a textbook or web page).
+Mix recall and application questions, easy to harder. Exactly 4 choices each, one clearly correct. No trick questions, no "all of the above".
+Vary which letter is correct. If there's no study material on screen, quiz on the topic the student names.`,
+      tools: [QUIZ_TOOL],
+      tool_choice: { type: "auto" },
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: jpegBase64 } },
+            { type: "text", text: `Screenshot is ${size.width}x${size.height}. ${focus ? `Student said: "${focus}".` : "Quiz me on this."}` },
+          ],
+        },
+      ],
+    },
+    QUIZ_TOOL.name
+  );
+}

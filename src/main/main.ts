@@ -17,7 +17,7 @@ import { click, ensureBrowser, frontApp, openApp, openFolder, openLatestDownload
 import { plan } from "./quick";
 import { research } from "./research";
 import { buildTool } from "./builder";
-import { Action, askMilo, classify, setUserName, sweepPlan, watchCheck, ChatMessage, checkAnswer, locateInCrop, nextAction, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
+import { Action, askMilo, classify, makeQuiz, setUserName, sweepPlan, watchCheck, ChatMessage, checkAnswer, locateInCrop, nextAction, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
 dotenv.config({ path: path.join(app.getAppPath(), ".env") });
 
@@ -507,6 +507,19 @@ ipcMain.handle("milo:watch-check", async (_e, force: boolean) => {
   return { ok: true, changed: true, mistake: r.data.found_mistake && (r.data.confidence ?? 0) >= 0.75 && !!box, box, hint: r.data.hint };
 });
 ipcMain.on("milo:watch-reset", () => (lastThumb = null));
+
+// ---------- quiz -----------------------------------------------------------------------------
+ipcMain.handle("milo:quiz", async (_e, focus: string) => {
+  const cap = await captureScreen();
+  if (!cap.ok) return cap;
+  const small = toJpeg(cap.shot.full, 1568);
+  const r = await makeQuiz(small.b64, small.size, 6, focus || "");
+  if (!r.ok) return r;
+  const questions = (r.data.questions ?? [])
+    .filter((q) => q && Array.isArray(q.choices) && q.choices.length >= 2)
+    .map((q) => ({ ...q, choices: q.choices.slice(0, 4), correct: Math.max(0, Math.min(3, Math.round(q.correct))) }));
+  return { ok: true, topic: r.data.topic || "Quiz", questions };
+});
 
 // ---------- research ----------------------------------------------------------------
 let researchAbort: AbortController | null = null;
