@@ -140,6 +140,27 @@ export async function openApp(name: string) {
 }
 
 export async function openUrl(url: string) {
-  await run("open", [url]);
-  await sleep(1500);
+  // Prefer Chrome; fall back to the default browser.
+  try {
+    await run("open", ["-a", "Google Chrome", url]);
+  } catch {
+    await run("open", [url]);
+  }
+  await sleep(1300);
+}
+
+const BROWSERS = /^(Google Chrome|Safari|Arc|Firefox|Microsoft Edge|Brave Browser|Opera)$/;
+
+export async function frontApp(): Promise<string> {
+  try {
+    return await run("osascript", ["-e", 'tell application "System Events" to get name of first application process whose frontmost is true']);
+  } catch {
+    return "";
+  }
+}
+
+/** Make sure a browser is in front (for tab shortcuts). Opens Chrome if none is. */
+export async function ensureBrowser() {
+  const front = await frontApp();
+  if (!BROWSERS.test(front)) await openApp("Google Chrome");
 }

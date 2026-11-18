@@ -13,7 +13,8 @@ import path from "node:path";
 import dotenv from "dotenv";
 import { speak } from "./voice";
 import { transcribe } from "./ears";
-import { click, openApp, openUrl, pressKeys, typeText } from "./hands";
+import { click, ensureBrowser, openApp, openUrl, pressKeys, typeText } from "./hands";
+import { plan } from "./quick";
 import { Action, askMilo, ChatMessage, checkAnswer, locateInCrop, nextAction, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
 dotenv.config({ path: path.join(app.getAppPath(), ".env") });
@@ -235,6 +236,50 @@ ipcMain.handle("milo:task", async (_e, task: string) => {
   taskAbort = false;
   globalShortcut.register("Escape", () => (taskAbort = true));
   const history: string[] = [];
+
+  // 1) Instant commands (no AI round trip): open apps, sites, tabs, searches.
+  const quick = plan(task);
+  let newTabJustOpened = false;
+  try {
+    for (const q of quick.steps) {
+      if (taskAbort) return { ok: true, status: "stopped", text: "Stopped!" };
+      sendStep({ say: q.say, action: q.kind === "app" ? "open_app" : q.kind === "url" ? "open_url" : "key", point: null });
+      if (q.kind === "app") {
+        await openApp(q.app);
+        history.push(`Opened the ${q.app} app`);
+        newTabJustOpened = false;
+      } else if (q.kind === "url") {
+        if (newTabJustOpened) {
+          // Use the empty tab we just made instead of opening another one.
+          await pressKeys("cmd+l");
+          await typeText(q.url);
+          await pressKeys("enter");
+          await sleep(1300);
+        } else {
+          await openUrl(q.url);
+        }
+        history.push(`Opened ${q.url} in the browser`);
+        newTabJustOpened = false;
+      } else {
+        if (q.browser) await ensureBrowser();
+        await pressKeys(q.keys);
+        history.push(`Pressed ${q.keys} (${q.say})`);
+        newTabJustOpened = q.keys === "cmd+t";
+        await sleep(300);
+      }
+    }
+  } catch (err) {
+    taskRunning = false;
+    globalShortcut.unregister("Escape");
+    return { ok: false, text: (err as Error).message };
+  }
+  if (!quick.rest) {
+    taskRunning = false;
+    globalShortcut.unregister("Escape");
+    return { ok: true, status: "quick", text: "" };
+  }
+  task = quick.rest; // 2) The AI handles whatever's left ("…and write a story about a frog").
+
   let lastClick: { x: number; y: number } | null = null; // screen point of the previous action if it was a click
   try {
     for (let step = 0; step < 14; step++) {

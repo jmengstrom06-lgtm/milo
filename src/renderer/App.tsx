@@ -397,6 +397,10 @@ export default function App() {
         setBubble(null);
         listen();
         return;
+      } else if (r.status === "quick") {
+        // Instant command (open an app, new tab…): no speech or confetti needed, it already happened.
+        setMood("happy");
+        await sleep(1200);
       } else if (r.status === "stopped") {
         setMood("idle");
         await say("Stopped!");
