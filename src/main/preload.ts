@@ -1,13 +1,19 @@
 import { contextBridge, ipcRenderer } from "electron";
 
+function on(channel: string, cb: () => void) {
+  const listener = () => cb();
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
+}
+
 contextBridge.exposeInMainWorld("milo", {
   setClickable: (clickable: boolean) => ipcRenderer.send("milo:set-clickable", clickable),
-  ask: (history: { role: "user" | "assistant"; content: string }[]) =>
-    ipcRenderer.invoke("milo:ask", history) as Promise<{ ok: boolean; text: string }>,
-  onSummon: (cb: () => void) => {
-    const listener = () => cb();
-    ipcRenderer.on("milo:summon", listener);
-    return () => ipcRenderer.removeListener("milo:summon", listener);
-  },
+  ask: (history: unknown) => ipcRenderer.invoke("milo:ask", history),
+  look: (mode: string, request: string) => ipcRenderer.invoke("milo:look", mode, request),
+  check: (lesson: unknown, answer: string) => ipcRenderer.invoke("milo:check", lesson, answer),
+  practice: (lesson: unknown) => ipcRenderer.invoke("milo:practice", lesson),
+  copy: (text: string) => ipcRenderer.send("milo:copy", text),
+  onSummon: (cb: () => void) => on("milo:summon", cb),
+  onTeachScreen: (cb: () => void) => on("milo:teach-screen", cb),
   quit: () => ipcRenderer.send("milo:quit"),
 });

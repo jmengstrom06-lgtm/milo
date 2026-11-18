@@ -1,11 +1,29 @@
 // Placeholder character drawn in SVG. This gets swapped for the Rive character later;
-// the mood names below map 1:1 to the Rive state machine we'll build.
-export type Mood = "idle" | "walking" | "sitting" | "thinking" | "talking" | "happy";
+// each mood maps 1:1 to a state in the Rive state machine we'll build.
+export type Mood =
+  | "idle"
+  | "walking"
+  | "jumping"
+  | "sitting"
+  | "looking"
+  | "pointing"
+  | "writing"
+  | "thinking"
+  | "happy"
+  | "celebrating";
 
-export default function Milo({ mood, facing }: { mood: Mood; facing: "left" | "right" }) {
+export default function Milo({
+  mood,
+  facing,
+  speaking,
+}: {
+  mood: Mood;
+  facing: "left" | "right";
+  speaking: boolean;
+}) {
   return (
     <svg
-      className={`milo milo--${mood}`}
+      className={`milo milo--${mood} ${speaking ? "milo--speaking" : ""}`}
       viewBox="0 0 120 140"
       width={120}
       height={140}
@@ -35,6 +53,13 @@ export default function Milo({ mood, facing }: { mood: Mood; facing: "left" | "r
       </g>
       <g className="milo__arm milo__arm--right">
         <rect x="80" y="82" width="10" height="26" rx="5" fill="#7a4a26" />
+        {/* pencil (writing) */}
+        <g className="milo__pencil">
+          <rect x="82" y="104" width="5" height="22" rx="1" fill="#f5c542" />
+          <polygon points="82,126 87,126 84.5,133" fill="#f0d9b5" />
+          <polygon points="83.6,130 85.4,130 84.5,133" fill="#333" />
+          <rect x="82" y="101" width="5" height="4" fill="#e88" />
+        </g>
       </g>
 
       {/* head */}
@@ -54,6 +79,11 @@ export default function Milo({ mood, facing }: { mood: Mood; facing: "left" | "r
         <ellipse cx="60" cy="56" rx="3" ry="2" fill="#5a3418" />
         <path className="milo__smile" d="M52 61 Q 60 67, 68 61" stroke="#5a3418" strokeWidth="2.5" fill="none" strokeLinecap="round" />
         <ellipse className="milo__mouth" cx="60" cy="63" rx="5" ry="4" fill="#5a3418" />
+        {/* magnifying glass (looking) */}
+        <g className="milo__glass">
+          <circle cx="69" cy="46" r="11" fill="rgba(180,220,255,0.35)" stroke="#444" strokeWidth="3" />
+          <rect x="77" y="53" width="5" height="16" rx="2" fill="#444" transform="rotate(-40 79 61)" />
+        </g>
       </g>
 
       {/* thinking dots */}

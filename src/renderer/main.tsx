@@ -1,5 +1,8 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
+import "katex/dist/katex.min.css";
+import "@fontsource/caveat/500.css";
+import "@fontsource/caveat/700.css";
 import App from "./App";
 import "./styles.css";
 
