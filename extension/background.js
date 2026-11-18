@@ -15,6 +15,9 @@ async function connect() {
     const sock = new WebSocket(`ws://127.0.0.1:${cfg.port}/?token=${encodeURIComponent(cfg.token)}`);
     sock.onopen = () => {
       ws = sock;
+      // Talking every 20 s keeps Chrome from putting this worker to sleep (which drops the connection).
+      clearInterval(self.miloBeat);
+      self.miloBeat = setInterval(() => sock.readyState === 1 && sock.send(JSON.stringify({ beat: Date.now() })), 20000);
       chrome.action.setBadgeText({ text: "" });
       chrome.action.setTitle({ title: "Milo: connected" });
     };
@@ -38,10 +41,10 @@ async function connect() {
       chrome.action.setBadgeText({ text: "off" });
       chrome.action.setBadgeBackgroundColor({ color: "#6b7280" });
       chrome.action.setTitle({ title: "Milo: not running" });
-      setTimeout(connect, 3000);
+      setTimeout(connect, 1500);
     };
   } catch {
-    setTimeout(connect, 5000);
+    setTimeout(connect, 2000);
   } finally {
     connecting = false;
   }

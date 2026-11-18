@@ -16,6 +16,7 @@ declare global {
     where?: string;
     question?: string;
     on?: boolean;
+    after?: string;
     failed?: boolean;
   };
   type MiloMode = "teach" | "help" | "do";

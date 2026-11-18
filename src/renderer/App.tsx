@@ -1111,6 +1111,15 @@ export default function App() {
       return;
     }
     if (researchQ || tool) {
+      const t0 = text.toLowerCase().replace(/[.!?]+$/, "").trim();
+      const m = t0.match(/^(?:(?:ok(?:ay)?|now|just|please|can you|could you|would you|go ahead and)[, ]+)*(?:close|exit|dismiss|hide|get rid of|shut)\b(.*?)(?:,? (?:and then|and|then) (.+))?$/);
+      if (m && !/\bchrome\b(?!.*\bresearch\b)/.test(m[1]) && /^(\s*(the|this|that|your|my|it|research|box|panel|tab|window|page|screen|tool|one|you just opened|up|out|thing)\b)*\s*$/.test(m[1] + " ")) {
+        bb("close_own_panel", { text, then: m[2] ?? null });
+        if (tool) closeTool();
+        else closeResearch();
+        if (m[2]) setTimeout(() => routeRef.current(m[2], spoken), 400);
+        return;
+      }
       const t = text.toLowerCase();
       if (/^(close|done|thanks|thank you|got it|never ?mind|that'?s all)\b/.test(t)) return tool ? closeTool() : closeResearch();
       if (/(full ?screen|make it (big|bigger|full)|expand( it)?|maximi[sz]e)/.test(t)) return setRpSize("full");
@@ -1255,6 +1264,7 @@ export default function App() {
       }
       case "move":
         moveMilo(rt.where ?? "away");
+        if (rt.after) setTimeout(() => routeRef.current(rt.after!, spoken), 900);
         return;
       case "screen_question":
         askAboutScreen(text, spoken);
@@ -1265,6 +1275,7 @@ export default function App() {
         else if (quiz) closeQuiz();
         else if (lessonRef.current) closeLesson();
         else setMood("idle");
+        if (rt.after) setTimeout(() => routeRef.current(rt.after!, spoken), 400);
         return;
       case "open_result":
         if (researchTop.current) {
@@ -1478,10 +1489,30 @@ export default function App() {
         }
         text = w.rest;
       } else {
-        text = stripWake(text).rest || text;
+        const sw = stripWake(text);
+        if (sw.woke && !sw.rest.replace(/[^a-z0-9]/gi, "")) {
+          // Just "Milo." — he's listening, wait for the actual command.
+          setMood("listening");
+          followUntil.current = Date.now() + 10000;
+          sfx.chime();
+          setBubble("Yeah?");
+          setTimeout(() => setBubble((b) => (b === "Yeah?" ? null : b)), 4000);
+          return;
+        }
+        text = sw.rest || text;
         if (text) e.learnVoice();
       }
       if (!text) return;
+      // E) "...never mind" / "cancel that" at the end cancels the whole thing.
+      if (/(never ?mind|forget it|scratch that|cancel( that| it)?|don'?t do (it|that))[.!]*$/i.test(text.trim())) {
+        bb("cancelled_by_speaker", { text });
+        if (pendingRef.current) cancelPending();
+        else {
+          setBubble("Okay, never mind.");
+          setTimeout(() => setBubble((b) => (b === "Okay, never mind." ? null : b)), 1800);
+        }
+        return;
+      }
 
       // ---- You kept talking right after a research question started: add it to the question.
       const R = researchStart.current;
@@ -1784,6 +1815,9 @@ export default function App() {
         : { left: clamp(a.x + MILO_W + 12, 16, W - w - 16), top, width: w, height: h };
   }
 
+  // While Milo is using the computer, his own panels get out of the way (they come back when he's done).
+  const panelStyle: React.CSSProperties = working ? { ...rpStyle, visibility: "hidden", pointerEvents: "none" } : rpStyle;
+
   // Speech bubble: never on top of Milo. Above him (growing upward) if there's room,
   // otherwise beside him on the side away from the notebook, otherwise below.
   const bubblePos = (): React.CSSProperties => {
@@ -1884,7 +1918,7 @@ export default function App() {
           key={tool.id}
           request={tool.request}
           existing={tool.existing}
-          style={rpStyle}
+          style={panelStyle}
           size={rpSize}
           onSize={setRpSize}
           onClose={closeTool}
@@ -1899,7 +1933,7 @@ export default function App() {
           key={researchQ.id}
           question={researchQ.q}
           history={researchTurns}
-          style={rpStyle}
+          style={panelStyle}
           size={rpSize}
           onSize={setRpSize}
           onClose={closeResearch}

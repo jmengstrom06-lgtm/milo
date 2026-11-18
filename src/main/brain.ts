@@ -449,7 +449,7 @@ How to work:
 export type RouteKind =
   | "chat" | "look" | "task" | "research" | "move" | "close" | "open_result" | "screen_question"
   | "sweep" | "build" | "quiz" | "brief" | "watch" | "checkwork";
-export type Route = { kind: RouteKind; mode?: Mode; followUp?: boolean; where?: string; question?: string; on?: boolean; failed?: boolean };
+export type Route = { kind: RouteKind; mode?: Mode; followUp?: boolean; where?: string; question?: string; on?: boolean; after?: string; failed?: boolean };
 export type RouteCtx = {
   researchOpen?: boolean;
   researchTopic?: string;
@@ -470,12 +470,12 @@ const ROUTE_TOOL = {
         type: "string",
         enum: ["chat", "look", "task", "research", "move", "close", "open_result", "screen_question", "sweep", "build", "quiz", "brief", "watch", "checkwork"],
         description: [
-          "research = any request for information about the world: people, events, news, weather, scores, prices, facts, 'do some research on', 'look up', 'tell me about', 'find info on'. Shown in Milo's own research box, never in Chrome.",
-          "task = ONLY when the student explicitly wants the computer operated: open an app, a website or a tab, click, type or write something somewhere (Google Docs, ChatGPT, Notes...), navigate, download. Asking for information is NOT a task.",
+          "research = a request for information about the world (people, events, news, weather, scores, prices, facts, 'look up', 'tell me about', 'do some research on') when the student did NOT ask for Chrome / a browser / a tab / a website. Shown in Milo's own research box.",
+          "task = the student wants the computer operated: open an app, Chrome, a browser tab or a website, click, type or write something somewhere (Google Docs, ChatGPT, Notes...), navigate, download. If they say Chrome, browser, tab, Google it, or name a website, it's a task even if they want information.",
           "look = help with homework that is on the screen (teach / hint / do it).",
           "screen_question = a question to answer FROM what's on the student's screen right now that isn't homework to solve: 'when is my next exam' (on D2L), 'what does this email say', 'summarize this page', 'what's due on this page', 'what grade did I get'.",
           "move = the student wants Milo himself (the frog character) to go somewhere on the screen: 'move to the bottom left', 'go to the other side', 'get out of the way'.",
-          "close = close / dismiss what Milo has open (research box, tool, lesson).",
+          "close = close / dismiss what Milo has open himself: his research box (it looks like a browser window, the student may call it 'the tab', 'this tab', 'the research tab', 'that page', 'the window'), a tool he built, or a lesson. When Milo's research box is open, 'close this tab' / 'close that' means the research box, not Chrome.",
           "open_result = open the page shown in the research box in Chrome ('open it in Chrome', 'open that article').",
           "sweep = do every question on the page. build = make a small working app/tool/calculator. quiz = quiz me. brief = what's due / daily brief. watch = watch me work (on:false to stop). checkwork = check my work once.",
           "chat = conversation or explaining a general concept that doesn't need the web or the screen.",
@@ -490,6 +490,7 @@ const ROUTE_TOOL = {
       },
       question: { type: "string", description: "For research: the question, cleaned up (drop filler like 'do some research on')." },
       on: { type: "boolean", description: "For watch: true to start, false to stop." },
+      after: { type: "string", description: "Only when the student asked for two things where the first is about Milo himself (close, move): the rest of the request to do after it, in their words, e.g. 'open ChatGPT and have it write a story'." },
     },
     required: ["kind"],
   },
@@ -497,7 +498,7 @@ const ROUTE_TOOL = {
 
 function routeSystem(ctx: RouteCtx) {
   const now: string[] = [];
-  if (ctx.researchOpen) now.push(`The research box is OPEN, showing research on: "${ctx.researchTopic ?? "?"}".`);
+  if (ctx.researchOpen) now.push(`Milo's research box is OPEN on screen (it looks like a browser tab showing a web page), showing research on: "${ctx.researchTopic ?? "?"}".`);
   if (ctx.inLesson) now.push(`A homework lesson is open in the notebook about: "${ctx.lessonTopic ?? "?"}".`);
   if (ctx.toolOpen) now.push(`A tool Milo built is open: "${ctx.toolOpen}".`);
   if (ctx.quizOpen) now.push("A quiz is open.");
@@ -506,7 +507,7 @@ function routeSystem(ctx: RouteCtx) {
     "You route requests for Milo, a desktop study companion (an animated frog that lives on the student's screen).",
     "Milo can: research things in his own research box, see and teach homework on screen, operate the computer (apps, sites, typing), move himself around the screen, build small tools, quiz, check work, and read what's due.",
     now.length ? "Right now: " + now.join(" ") : "Right now nothing is open.",
-    "Decide what the student wants from what they actually said, not from keywords. Commands about Milo's own position are 'move' even when a box is open. Information requests are always 'research', never 'task'.",
+    "Decide what the student wants from what they actually said, not from keywords. Commands about Milo's own position are 'move' even when a box is open. Speech often has filler and self-corrections ('um', 'actually no, do X instead'): go with their final intent. Always answer by calling the route tool.",
   ].join("\n");
 }
 
