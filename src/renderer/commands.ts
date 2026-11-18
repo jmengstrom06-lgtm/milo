@@ -15,6 +15,7 @@ export type Intent =
   | { kind: "task"; task: string } // do something on the computer: open, click, type…
   | { kind: "research"; question: string } // look something up live (research panel)
   | { kind: "sweep" } // do every question on the page
+  | { kind: "build"; request: string } // make a small working app
   | { kind: "fill" } // type the lesson's answer into the blank
   | { kind: "yes" }
   | { kind: "no" }
@@ -58,11 +59,15 @@ const TASK =
 const SWEEP =
   /\b(do|finish|complete|answer|solve|fill (out|in))\b.*\b(whole|entire|all|every|everything)\b.*\b(worksheet|assignment|homework|page|quiz|questions|problems|them|these|it)?|\b(do|finish|complete|fill out) (this|the|my) (worksheet|assignment|homework|problem set)\b|\bworksheet sweep\b/;
 
+const BUILD =
+  /^(?:can you |could you |please )?(make|build|create|code|design|whip up|throw together) (me )?(a|an|my|some)?\s*.*\b(calculator|tool|app|tracker|timer|planner|converter|generator|flash ?cards?|game|dashboard|widget|checklist|budget|countdown|stopwatch|scheduler|organizer|randomizer|visualizer|simulator|grapher|graphing)\b/;
+
 export function parse(raw: string, ctx: { inLesson: boolean; awaitingAnswer: boolean; pendingAsk?: boolean }): Intent {
   const text = raw.trim().replace(/[.!?]+$/, "");
   const t = text.toLowerCase();
   if (!t) return { kind: "chat", text };
   if (SWEEP.test(t)) return { kind: "sweep" };
+  if (BUILD.test(t) && !/\b(google (doc|sheet|slide)s?|new (tab|window|doc|sheet)|folder|spreadsheet in|document)\b/.test(t)) return { kind: "build", request: text };
 
   if (ctx.pendingAsk) {
     if (/^(yes|yeah|yep|yup|sure|go ahead|do it|ok|okay|send it|please do|go for it|confirm)\b/.test(t)) return { kind: "yes" };

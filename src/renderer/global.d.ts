@@ -66,6 +66,9 @@ declare global {
       sweepPlan: (skip: string[]) => Promise<{ ok: true; items: SweepItem[]; more: boolean } | Err>;
       sweepFill: (item: SweepItem) => Promise<{ ok: true } | Err>;
       scrollPage: () => Promise<{ ok: true } | Err>;
+      build: (req: string) => Promise<boolean>;
+      stopBuild: () => void;
+      onBuild: (cb: (ev: { type: "code"; delta: string } | { type: "done"; title: string; html: string } | { type: "error"; text: string }) => void) => () => void;
       copy: (text: string) => void;
       onSummon: (cb: () => void) => () => void;
       onTeachScreen: (cb: () => void) => () => void;

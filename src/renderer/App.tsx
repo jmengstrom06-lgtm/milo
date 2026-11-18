@@ -8,6 +8,7 @@ import * as tts from "./voice";
 import ResearchPanel, { PanelSize } from "./ResearchPanel";
 import { Pin, SweepHUD, SweepState, SweepSummary, WorkCard } from "./Sweep";
 import { setSounds, sfx, soundsOn } from "./sfx";
+import ToolPanel, { SavedTool, loadTools, saveTools } from "./ToolPanel";
 
 type Msg = { role: "user" | "assistant"; content: string };
 type Pos = { x: number; y: number };
@@ -82,6 +83,8 @@ export default function App() {
   const [rpSize, setRpSize] = useState<PanelSize>("compact");
   const [sweep, setSweep] = useState<SweepState | null>(null);
   const [sounds, setSoundsState] = useState(soundsOn());
+  const [tool, setTool] = useState<{ request: string; id: number; existing?: SavedTool | null } | null>(null);
+  const [tools, setTools] = useState<SavedTool[]>(loadTools);
   const [name, setNameState] = useState(() => {
     try {
       return localStorage.getItem("milo.name") || "";
@@ -600,6 +603,50 @@ export default function App() {
     hover(false);
   };
 
+  // ---- Build-a-Tool ---------------------------------------------------------------
+  const closeOthers = () => {
+    runId.current++;
+    hush();
+    setChatOpen(false);
+    setLesson(null);
+    setBox(null);
+    setResearchQ(null);
+    setSweep(null);
+  };
+  const startBuild = (request: string) => {
+    closeOthers();
+    setRpSize("compact");
+    setTool({ request, id: Date.now() });
+    setMood("writing");
+    say("Building it now. Watch.").then(() => setBubble(null));
+    setTimeout(() => window.milo.build(request), 60);
+  };
+  const openTool = (t: SavedTool) => {
+    closeOthers();
+    setRpSize("half");
+    setTool({ request: t.title, id: Date.now(), existing: t });
+    setMood("happy");
+  };
+  const closeTool = () => {
+    window.milo.stopBuild();
+    setTool(null);
+    hover(false);
+    setMood("idle");
+  };
+  const onToolDone = async (title: string) => {
+    setMood("celebrating");
+    sfx.success();
+    setRpSize((s) => (s === "compact" ? "half" : s)); // give the new tool room
+    await say(`Done. Your ${title} is ready.`);
+    setBubble(null);
+    setMood("happy");
+  };
+  const onToolSaved = (t: SavedTool) => {
+    const next = [t, ...tools.filter((x) => x.id !== t.id)];
+    setTools(next);
+    saveTools(next);
+  };
+
   // ---- research panel -------------------------------------------------------------
   const startResearch = (q: string, spoken = true) => {
     runId.current++;
@@ -658,6 +705,15 @@ export default function App() {
 
   // ---- voice commands -------------------------------------------------------------
   routeRef.current = (text: string, spoken = true) => {
+    const om = text.toLowerCase().match(/^(?:open|show|launch|pull up|bring up)\s+(?:my\s+)?(.+?)(?:\s+(?:tool|app))?$/);
+    if (om) {
+      const words = om[1].split(/\s+/).filter((w) => w.length > 2);
+      const hit = tools.find((t) => words.length && words.every((w) => t.title.toLowerCase().includes(w)));
+      if (hit) {
+        openTool(hit);
+        return;
+      }
+    }
     const nm = text.match(/^(?:call me|my name is|my name's|i'?m called)\s+([a-z][a-z' -]{0,30})$/i);
     if (nm) {
       const n = nm[1].trim().replace(/\b\w/g, (c) => c.toUpperCase());
@@ -665,9 +721,9 @@ export default function App() {
       say(`Got it, ${n}.`).then(() => setBubble(null));
       return;
     }
-    if (researchQ) {
+    if (researchQ || tool) {
       const t = text.toLowerCase();
-      if (/^(close|done|thanks|thank you|got it|never ?mind|that'?s all)\b/.test(t)) return closeResearch();
+      if (/^(close|done|thanks|thank you|got it|never ?mind|that'?s all)\b/.test(t)) return tool ? closeTool() : closeResearch();
       if (/(full ?screen|make it (big|bigger|full)|expand( it)?|maximi[sz]e)/.test(t)) return setRpSize("full");
       if (/(half|split) ?screen|make it half/.test(t)) return setRpSize("half");
       if (/(smaller|shrink|minimi[sz]e|compact)/.test(t)) return setRpSize("compact");
@@ -691,6 +747,9 @@ export default function App() {
         return;
       case "sweep":
         runSweep();
+        return;
+      case "build":
+        startBuild(intent.request);
         return;
       case "fill": {
         const L = lessonRef.current;
@@ -1030,6 +1089,10 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      if (tool) {
+        closeTool();
+        return;
+      }
       if (sweep) {
         if (sweep.status === "done" || sweep.status === "stopped" || sweep.status === "error") closeSweep();
         else stopSweep();
@@ -1039,7 +1102,7 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lesson, closeLesson, researchQ, sweep]);
+  }, [lesson, closeLesson, researchQ, sweep, tool]);
 
   const send = async () => {
     const text = input.trim();
@@ -1127,6 +1190,21 @@ export default function App() {
             <SweepSummary s={sweep} onClose={closeSweep} hover={hover} style={{ ...rpStyle, height: "auto", maxHeight: H - 32 }} />
           )}
         </>
+      )}
+
+      {tool && (
+        <ToolPanel
+          key={tool.id}
+          request={tool.request}
+          existing={tool.existing}
+          style={rpStyle}
+          size={rpSize}
+          onSize={setRpSize}
+          onClose={closeTool}
+          onDone={onToolDone}
+          onSaved={onToolSaved}
+          hover={hover}
+        />
       )}
 
       {researchQ && (
@@ -1282,6 +1360,16 @@ export default function App() {
             <button className="talk-btn" onClick={talk}>
               Talk to Milo
             </button>
+            {tools.length > 0 && (
+              <div className="mytools">
+                <span>My tools</span>
+                {tools.slice(0, 6).map((t) => (
+                  <button key={t.id} onClick={() => openTool(t)} title={`Open ${t.title}`}>
+                    {t.title}
+                  </button>
+                ))}
+              </div>
+            )}
             <label className="name-row">
               <span>Your name</span>
               <input value={name} onChange={(e) => setNameState(e.target.value.slice(0, 30))} placeholder="So Milo can greet you" />

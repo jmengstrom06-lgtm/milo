@@ -16,6 +16,7 @@ import { transcribe } from "./ears";
 import { click, ensureBrowser, frontApp, openApp, openFolder, openLatestDownload, openUrl, pressKeys, typeText } from "./hands";
 import { plan } from "./quick";
 import { research } from "./research";
+import { buildTool } from "./builder";
 import { Action, askMilo, classify, setUserName, sweepPlan, ChatMessage, checkAnswer, locateInCrop, nextAction, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
 dotenv.config({ path: path.join(app.getAppPath(), ".env") });
@@ -477,6 +478,15 @@ ipcMain.handle("milo:research", async (_e, question: string) => {
   return true;
 });
 ipcMain.on("milo:research-stop", () => researchAbort?.abort());
+
+let buildAbort: AbortController | null = null;
+ipcMain.handle("milo:build", async (_e, request: string) => {
+  buildAbort?.abort();
+  buildAbort = new AbortController();
+  await buildTool(request, (ev) => overlay?.webContents.send("milo:build-event", ev), buildAbort.signal);
+  return true;
+});
+ipcMain.on("milo:build-stop", () => buildAbort?.abort());
 ipcMain.on("milo:open-url", (_e, url: string) => {
   if (/^https?:\/\//.test(url)) openUrl(url);
 });
