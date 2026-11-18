@@ -56,5 +56,16 @@ if (line.test(env)) env = env.replace(line, `${name}=${key}`);
 else env = env.replace(/\n*$/, "\n") + `${name}=${key}\n`;
 
 fs.writeFileSync(envPath, env, { mode: 0o600 });
+
+// The installed Milo app reads its keys from its own data folder: save it there too.
+const appEnv = path.join(require("node:os").homedir(), "Library", "Application Support", "Milo", ".env");
+try {
+  let a = fs.existsSync(appEnv) ? fs.readFileSync(appEnv, "utf8") : "";
+  a = line.test(a) ? a.replace(line, `${name}=${key}`) : a.replace(/\n*$/, "\n").replace(/^\n$/, "") + `${name}=${key}\n`;
+  fs.mkdirSync(path.dirname(appEnv), { recursive: true });
+  fs.writeFileSync(appEnv, a, { mode: 0o600 });
+} catch {
+  /* not on a Mac / no app yet */
+}
 const label = name === "ANTHROPIC_API_KEY" ? "Anthropic (brain)" : name === "DEEPGRAM_API_KEY" ? "Deepgram (ears)" : name === "OPENAI_API_KEY" ? "OpenAI (images)" : "ElevenLabs (voice)";
 console.log(`Saved ${label} key ending in ...${key.slice(-4)} to .env. Restart Milo to use it.`);

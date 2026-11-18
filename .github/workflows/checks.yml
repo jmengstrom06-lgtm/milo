@@ -33,3 +33,62 @@ jobs:
           name: router-eval
           path: evals/results/
           if-no-files-found: ignore
+
+  # After the checks pass on main: GitHub builds Milo.app on a Mac, signs it, and publishes a release.
+  # The installed app sees the release and updates itself.
+  build-mac:
+    needs: checks
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: macos-14
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Version
+        run: |
+          V="0.2.${{ github.run_number }}"
+          npm version "$V" --no-git-tag-version --allow-same-version
+          echo "VERSION=$V" >> $GITHUB_ENV
+      - name: Build Milo.app
+        run: npm run build && npx electron-builder --mac dir --arm64 --publish never
+      - name: Sign (stable signature so Mac permissions survive updates)
+        env:
+          P12: ${{ secrets.MILO_SIGN_P12 }}
+        run: |
+          APP="release/mac-arm64/Milo.app"
+          if [ -n "$P12" ]; then
+            security create-keychain -p ci build.keychain
+            security list-keychains -d user -s build.keychain $(security list-keychains -d user | tr -d '"')
+            security unlock-keychain -p ci build.keychain
+            security set-keychain-settings -t 3600 build.keychain
+            echo "$P12" | base64 --decode > milo.p12
+            security import milo.p12 -k build.keychain -P milo -T /usr/bin/codesign
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ci build.keychain >/dev/null
+            ID=$(security find-identity -p codesigning build.keychain | grep -o '[0-9A-F]\{40\}' | head -1)
+            echo "Signing with $ID"
+            codesign --force --deep --sign "$ID" --keychain build.keychain "$APP"
+          else
+            echo "::warning::No MILO_SIGN_P12 secret: ad-hoc signing (Mac will re-ask for permissions after each update)"
+            codesign --force --deep --sign - "$APP"
+          fi
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -d -r- "$APP"
+      - name: Package
+        run: |
+          cd release/mac-arm64
+          ditto -c -k --keepParent Milo.app ../Milo-mac-arm64.zip
+          mkdir dmg && cp -R Milo.app dmg/ && ln -s /Applications dmg/Applications
+          hdiutil create -volname Milo -srcfolder dmg -ov -format UDZO ../Milo.dmg
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION" release/Milo-mac-arm64.zip release/Milo.dmg \
+            --title "Milo $VERSION" \
+            --notes "$(git log -1 --pretty=%B | head -20)"

@@ -14,7 +14,8 @@ const token = crypto.randomBytes(24).toString("hex");
 
 export const bridgeConnected = () => !!client && client.readyState === WebSocket.OPEN;
 
-export function startBridge(extensionDir: string, port = 47321, tries = 0) {
+export function startBridge(extensionDir: string | string[], port = 47321, tries = 0) {
+  const dirs = Array.isArray(extensionDir) ? extensionDir : [extensionDir];
   const wss = new WebSocketServer({
     host: "127.0.0.1",
     port,
@@ -27,8 +28,8 @@ export function startBridge(extensionDir: string, port = 47321, tries = 0) {
   });
   wss.on("listening", () => {
     try {
-      fs.writeFileSync(path.join(extensionDir, "config.json"), JSON.stringify({ port, token }), { mode: 0o600 });
-      bb("bridge", "listening", { port });
+      for (const dir of dirs) fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify({ port, token }), { mode: 0o600 });
+      bb("bridge", "listening", { port, dirs: dirs.length });
     } catch (e) {
       bb("bridge", "config_write_failed", { error: (e as Error).message });
     }

@@ -14,7 +14,8 @@
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "eval": "tsx evals/run-router.ts",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test",
+    "pack": "npm run build && electron-builder --mac dir --arm64"
   },
   "dependencies": {
     "@fontsource/caveat": "^5.3.0",
@@ -32,6 +33,7 @@
     "concurrently": "^9.1.0",
     "cross-env": "^7.0.3",
     "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tsx": "^4.23.15",
@@ -39,5 +41,44 @@
     "vite": "^6.0.3",
     "vitest": "^3.2.7",
     "wait-on": "^8.0.1"
+  },
+  "productName": "Milo",
+  "author": "Jake Engstrom",
+  "build": {
+    "appId": "app.milo.companion",
+    "productName": "Milo",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json",
+      "build/trayTemplate*.png"
+    ],
+    "extraResources": [
+      {
+        "from": "extension",
+        "to": "extension",
+        "filter": [
+          "**/*",
+          "!config.json"
+        ]
+      }
+    ],
+    "asar": true,
+    "mac": {
+      "category": "public.app-category.education",
+      "icon": "build/icon.png",
+      "identity": null,
+      "target": [
+        "dir"
+      ],
+      "extendInfo": {
+        "LSUIElement": true,
+        "NSMicrophoneUsageDescription": "Milo listens when you talk to him.",
+        "NSAppleEventsUsageDescription": "Milo opens apps, tabs and notes for you when you ask.",
+        "NSScreenCaptureUsageDescription": "Milo looks at your screen to help with what you're working on."
+      }
+    }
   }
 }

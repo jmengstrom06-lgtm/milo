@@ -9,9 +9,9 @@ import {
   screen,
   systemPreferences,
   shell,
+  Notification,
 } from "electron";
 import path from "node:path";
-import dotenv from "dotenv";
 import { speak } from "./voice";
 import { log as bb, saveClip, timer, LOG_DIR, LOG_FILE } from "./blackbox";
 import { closeFlux, fluxAvailable, forceEndTurn, onFlux, openFlux, sendAudio } from "./flux";
@@ -25,9 +25,13 @@ import { plan } from "./quick";
 import { research } from "./research";
 import { buildTool } from "./builder";
 import { askScreen } from "./brain";
+import { createTray, extensionDirs, firstRunDefaults, loadKeys } from "./appshell";
+import { checkForUpdate, installUpdate, startUpdater, updateReady } from "./updater";
 import { Action, askMilo, classify, RouteCtx, makeQuiz, readBrief, setUserName, sweepPlan, watchCheck, ChatMessage, checkAnswer, locateInCrop, nextActions, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
-dotenv.config({ path: path.join(app.getAppPath(), ".env") });
+loadKeys();
+// One Milo at a time (login item + opening the app = still one frog).
+if (!app.requestSingleInstanceLock()) app.quit();
 
 // ---------- black-box log: every request Milo handles, how long it took, what came back ----------
 const QUIET = new Set(["milo:watch-check", "milo:mic-access", "milo:hands-access", "milo:log-flag"]);
@@ -743,8 +747,9 @@ app.on("web-contents-created", (_e, contents) => {
 });
 
 app.whenReady().then(() => {
-  startBridge(path.join(app.getAppPath(), "extension"));
+  startBridge(extensionDirs());
   if (process.platform === "darwin") app.dock?.hide();
+  firstRunDefaults();
   // Let Milo's window use the microphone.
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === "media"));
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === "media");
@@ -764,6 +769,18 @@ app.whenReady().then(() => {
   globalShortcut.register("CommandOrControl+Shift+Y", () => {
     overlay?.webContents.send("milo:teach-screen");
   });
+
+  // The frog in the menu bar: show/hide, keys, logs, start at login, updates, quit.
+  const notify = (body: string) => body && new Notification({ title: "Milo", body }).show();
+  const tray = createTray({
+    overlay: () => overlay,
+    talk: () => overlay?.webContents.send("milo:talk"),
+    say: notify,
+    checkUpdates: () => checkForUpdate(true).then(notify),
+    updateReady,
+    installUpdate,
+  });
+  startUpdater(() => tray.refresh());
 });
 
 app.on("will-quit", () => globalShortcut.unregisterAll());
