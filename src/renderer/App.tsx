@@ -25,6 +25,15 @@ const NB_W = 380;
 const home = (): Pos => ({ x: window.innerWidth - MILO_W - 24, y: window.innerHeight - MILO_H - 8 });
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Is this transcript just Milo's own line coming back through the mic? */
+function isEcho(heard: string, said: string) {
+  const words = (t: string) => t.toLowerCase().replace(/[^a-z0-9' ]+/g, " ").split(/\s+/).filter(Boolean);
+  const h = words(heard);
+  if (!h.length || !said) return false;
+  const s = new Set(words(said));
+  const hits = h.filter((w) => s.has(w)).length;
+  return hits / h.length >= 0.6;
+}
 
 // Guess what the student wants from what they typed.
 function detectMode(text: string, fallback: MiloMode): MiloMode {
@@ -235,18 +244,21 @@ export default function App() {
   }, [chatOpen, lesson, busy, working, moveTo]);
 
   // ---- voice ------------------------------------------------------------------
-  const say = useCallback(async (text: string, opts: { minMs?: number } = {}) => {
+  const say = useCallback(async (text: string, opts: { minMs?: number; noBarge?: boolean } = {}) => {
     setBubble(text);
     setHeard(null);
     lastSaid.current = text;
-    ears.current?.mute(true); // don't let Milo hear himself
+    ears.current?.mute(true, !opts.noBarge); // don't let Milo hear himself
     try {
       if (!voiceRef.current) {
         setSpeaking(true);
         await sleep(Math.max(opts.minMs ?? 1400, text.split(/\s+/).length * 300));
         return;
       }
-      await tts.play(text, () => setSpeaking(true));
+      await tts.play(text, () => {
+        setSpeaking(true);
+        ears.current?.started();
+      });
     } finally {
       setSpeaking(false);
       setTimeout(() => ears.current?.mute(false), 250);
@@ -1197,6 +1209,24 @@ export default function App() {
         return;
       }
       let text = r.text;
+      // Did Milo just hear HIMSELF? (Speakers leaking into the mic right after an "interruption".)
+      if (Date.now() - e.bargedAt < 20000 && isEcho(text, lastSaid.current)) {
+        e.bargedAt = 0;
+        followUntil.current = 0;
+        setEarState(e.mode === "off" ? "off" : "waiting");
+        // It was a false alarm: finish what he was saying, then carry on.
+        const cut = lastSaid.current;
+        interrupted.current = false;
+        if (cut) await say(cut, { noBarge: true });
+        const r = resumeRef.current;
+        resumeRef.current = null;
+        if (r) r();
+        else {
+          setMood((m) => (m === "thinking" || m === "listening" ? "idle" : m));
+          setTimeout(() => setBubble((b) => (b === cut ? null : b)), 2500);
+        }
+        return;
+      }
       if (!direct) {
         // Hands-free: only act when you start with "Milo".
         const w = stripWake(text, true);

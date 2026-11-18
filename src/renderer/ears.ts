@@ -12,6 +12,8 @@ export type EarState = "off" | "waiting" | "hearing" | "timeout";
 const RATE = 16000;
 const FRAME = 1024; // 64 ms per frame at 16 kHz
 const PRE_ROLL = 12; // ~770 ms kept from before speech starts (so soft first words aren't lost)
+const WARMUP_FRAMES = 13; // ~830 ms at the start of each line: just learn Milo's own loudness
+const BARGE_FRAMES = 7; // ~450 ms of you talking over him to interrupt
 const START_FRAMES = 4; // ~256 ms of voice to count as speech
 const MIN_VOICED_S = 0.5; // shorter than this is a cough/click, not words
 const VOICE_RATIO = 0.45; // share of energy that must sit in the human-voice band (300-3400 Hz)
@@ -41,7 +43,18 @@ export class Ears {
   voicedFrames = 0; // voiced length of the last utterance (frames)
   private lastLevel = 0; // loudness of the last finished utterance
   /** How loud YOU are when you talk to Milo (learned). Quieter, farther voices are ignored in hands-free. */
-  private userLevel = Number(localStorage.getItem("milo.userLevel") || 0);
+  private userLevel = (() => {
+    try {
+      // v2: older builds could learn Milo's OWN voice as yours (too loud), so start fresh once.
+      if (localStorage.getItem("milo.userLevelV") !== "2") {
+        localStorage.removeItem("milo.userLevel");
+        localStorage.setItem("milo.userLevelV", "2");
+      }
+      return Math.min(0.12, Number(localStorage.getItem("milo.userLevel") || 0));
+    } catch {
+      return 0;
+    }
+  })();
 
   onLevel: (level: number) => void = () => {};
   onState: (s: EarState) => void = () => {};
@@ -49,7 +62,9 @@ export class Ears {
   onPause: (progress: number) => void = () => {};
   /** You started talking over Milo: he should stop and listen. */
   onBargeIn: () => void = () => {};
-  private echo = 0.01; // how loud Milo's own voice is in the mic while he talks
+  private echo = 0.01; // how loud Milo's own voice is in the mic while he talks (peak-tracked)
+  private warmup = 0;
+  private bargeOk = true;
   private bargeRun = 0;
   onUtterance: (wav: ArrayBuffer, pushToTalk: boolean, forced: boolean) => void = () => {};
 
@@ -66,16 +81,26 @@ export class Ears {
     this.onState("waiting");
   }
 
-  /** Ignore the mic while Milo is talking so he doesn't hear himself. */
-  mute(on: boolean) {
+  /** Ignore the mic while Milo is talking so he doesn't hear himself.
+   *  The first ~0.8s of each line only measures how loud his own voice is in the mic; after that,
+   *  you have to be clearly louder than him to interrupt. allowBargeIn=false turns interrupting off for this line. */
+  mute(on: boolean, allowBargeIn = true) {
     if (on && this.speaking) return; // already listening to you (you talked over Milo): don't cut that off
     this.muted = on;
     this.bargeRun = 0;
+    this.bargeOk = allowBargeIn;
     if (on) {
       this.echo = 0.01;
+      this.warmup = 1e9; // no interrupting until his voice actually starts (see started())
       this.resetUtterance();
     }
   }
+  /** Milo's audio just started playing: measure his loudness for a moment, then allow interrupting. */
+  started() {
+    if (this.muted) this.warmup = WARMUP_FRAMES;
+  }
+  /** True right after you interrupted Milo (so the app can check it wasn't just his own voice). */
+  bargedAt = 0;
 
   private async open() {
     if (this.stream) return;
@@ -112,7 +137,8 @@ export class Ears {
   /** Call when an utterance turned out to be the student talking to Milo, so he learns their voice level. */
   learnVoice() {
     if (!this.lastLevel) return;
-    this.userLevel = this.userLevel ? this.userLevel * 0.7 + this.lastLevel * 0.3 : this.lastLevel;
+    const lvl = Math.min(0.12, this.lastLevel); // cap so one loud moment can't make him deaf to normal talking
+    this.userLevel = this.userLevel ? this.userLevel * 0.7 + lvl * 0.3 : lvl;
     try {
       localStorage.setItem("milo.userLevel", String(this.userLevel));
     } catch {
@@ -158,13 +184,20 @@ export class Ears {
       // leaking into the mic), stop him and start listening.
       this.ring.push(data);
       if (this.ring.length > 6) this.ring.shift();
-      const thresh = Math.max(0.05, this.echo * 2.6, this.userLevel * 0.8);
+      if (this.warmup > 0) {
+        this.warmup--;
+        this.echo = Math.max(this.echo, rms); // his loudest so far
+        return;
+      }
+      if (!this.bargeOk) return;
+      const thresh = Math.max(0.06, this.echo * 2.2, this.userLevel * 0.85);
       if (rms > thresh) this.bargeRun++;
       else {
         this.bargeRun = 0;
-        this.echo = this.echo * 0.95 + rms * 0.05;
+        this.echo = Math.max(this.echo * 0.997, rms); // keep tracking his peaks, slowly forget
       }
-      if (this.bargeRun >= 5) {
+      if (this.bargeRun >= BARGE_FRAMES) {
+        this.bargedAt = Date.now();
         this.bargeRun = 0;
         this.muted = false;
         this.onBargeIn();
