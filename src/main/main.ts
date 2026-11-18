@@ -19,12 +19,12 @@ import { macSpeak } from "./macvoice";
 import { bridgeConnected, call as ext, startBridge } from "./bridge";
 import { runWebTask } from "./webagent";
 import { transcribe } from "./ears";
-import { click, ensureBrowser, frontApp, openApp, openFolder, openLatestDownload, openUrl, pressKeys, typeText } from "./hands";
+import { click, ensureBrowser, frontApp, openApp, openFolder, openLatestDownload, openUrl, pressKeys, quitApp, typeText } from "./hands";
 import { plan } from "./quick";
 import { research } from "./research";
 import { buildTool } from "./builder";
 import { askScreen } from "./brain";
-import { Action, askMilo, classify, RouteCtx, makeQuiz, readBrief, setUserName, sweepPlan, watchCheck, ChatMessage, checkAnswer, locateInCrop, nextAction, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
+import { Action, askMilo, classify, RouteCtx, makeQuiz, readBrief, setUserName, sweepPlan, watchCheck, ChatMessage, checkAnswer, locateInCrop, nextActions, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
 dotenv.config({ path: path.join(app.getAppPath(), ".env") });
 
@@ -315,12 +315,21 @@ ipcMain.handle("milo:task", async (_e, task: string) => {
         }
         history.push(`Opened ${q.url} in the browser`);
         newTabJustOpened = false;
+      } else if (q.kind === "type") {
+        await sleep(250);
+        await typeText(q.text);
+        history.push(`Typed "${q.text.slice(0, 80)}"`);
+        newTabJustOpened = false;
+      } else if (q.kind === "quit") {
+        await quitApp(q.app);
+        history.push(`Closed the ${q.app} app`);
+        newTabJustOpened = false;
       } else {
         if (q.browser) await ensureBrowser();
         await pressKeys(q.keys);
         history.push(`Pressed ${q.keys} (${q.say})`);
         newTabJustOpened = q.keys === "cmd+t";
-        await sleep(300);
+        await sleep(q.keys === "cmd+n" ? 450 : 150);
       }
     }
   } catch (err) {
@@ -365,94 +374,115 @@ ipcMain.handle("milo:task", async (_e, task: string) => {
       bb("task", "web_mode_handoff_to_screen", { why: w.text });
     }
 
-    // 3) Screen mode: look at a screenshot, act, repeat.
-    for (let step = 0; step < 14; step++) {
+    // 3) Screen mode: look at a screenshot, plan several steps, do them back to back, look again.
+    for (let round = 0; round < 10; round++) {
       if (taskAbort) return { ok: true, status: "stopped", text: "Stopped!" };
       const cap = await captureScreen();
       if (!cap.ok) return cap;
       const { shot } = cap;
       const small = toJpeg(shot.full, 1568);
       const k = small.k * shot.pxPerPt; // screenshot px per screen point
-      const r = await nextAction(small.b64, small.size, task, history);
+      const r = await nextActions(small.b64, small.size, task, history);
       if (taskAbort) return { ok: true, status: "stopped", text: "Stopped!" };
       if (!r.ok) return r;
-      const a: Action = r.data;
+      bb("task", "plan", { round, steps: r.data.map((a) => `${a.action}${a.keys ? " " + a.keys : ""}${a.app ? " " + a.app : ""}${a.text && a.action === "type" ? " \"" + a.text.slice(0, 30) + "\"" : ""}`) });
 
-      // Screen point (for the click) and overlay point (for Milo to hop to).
-      const screenPt =
-        a.x !== undefined && a.y !== undefined ? { x: shot.bounds.x + a.x / k, y: shot.bounds.y + a.y / k } : null;
-      const overlayPt = screenPt ? { x: screenPt.x - shot.workArea.x, y: screenPt.y - shot.workArea.y } : null;
+      for (let si = 0; si < r.data.length; si++) {
+        const a = r.data[si];
+        if (taskAbort) return { ok: true, status: "stopped", text: "Stopped!" };
+        // Screen point (for the click) and overlay point (for Milo to hop to).
+        const screenPt =
+          a.x !== undefined && a.y !== undefined ? { x: shot.bounds.x + a.x / k, y: shot.bounds.y + a.y / k } : null;
+        const overlayPt = screenPt ? { x: screenPt.x - shot.workArea.x, y: screenPt.y - shot.workArea.y } : null;
 
-      if (a.action === "done") return { ok: true, status: "done", text: a.text || a.say || "All done!" };
+        if (a.action === "done") return { ok: true, status: "done", text: a.text || a.say || "Done." };
+        if (a.action === "ask") return { ok: true, status: "ask", text: a.text || a.say || "Should I go ahead?" };
 
-      // Don't repeat the exact same non-click action: it already happened. Nudge the AI to try something else.
-      const sig = `${a.action}|${a.app ?? ""}|${a.url ?? ""}|${a.keys ?? ""}|${a.text ?? ""}`;
-      if (a.action !== "click" && a.action !== "double_click" && a.action !== "wait" && sig === lastSig) {
-        stuck++;
-        history.push(`(You just did "${a.action}${a.app ? " " + a.app : ""}" already and it worked. Don't repeat it; do the next step or a different approach.)`);
-        if (stuck >= 3) return { ok: false, text: "I got stuck doing the same thing over and over, so I stopped. Can you tell me a bit more?" };
-        continue;
-      }
-      lastSig = sig;
-
-      // Don't click the same spot twice in a row: the first click already worked (text fields look the same after).
-      if ((a.action === "click" || a.action === "double_click") && screenPt && lastClick &&
-          Math.hypot(screenPt.x - lastClick.x, screenPt.y - lastClick.y) < 25) {
-        history.push("(Skipped a repeat click on the same spot: it's already selected. Do the next thing, e.g. type.)");
-        lastClick = null;
-        continue;
-      }
-      if (a.action === "ask") return { ok: true, status: "ask", text: a.text || a.say || "Should I go ahead?" };
-
-      sendStep({ say: a.say, action: a.action, point: overlayPt });
-      await sleep(650); // let Milo hop over before acting
-      if (taskAbort) return { ok: true, status: "stopped", text: "Stopped!" };
-
-      overlay?.setIgnoreMouseEvents(true, { forward: true }); // never click on Milo himself
-      lastClick = a.action === "click" || a.action === "double_click" ? screenPt : null;
-      switch (a.action) {
-        case "open_app":
-          if (!a.app) throw new Error("No app name");
-          history.push(`Opened ${await openApp(a.app)} (it's now in front with a window)`);
-          break;
-        case "open_url":
-          if (!a.url || !/^https?:\/\//.test(a.url)) throw new Error("Bad URL");
-          await openUrl(a.url);
-          history.push(`Opened ${a.url}`);
-          break;
-        case "click":
-        case "double_click":
-          if (!screenPt) throw new Error("Click without a point");
-          await click(screenPt.x, screenPt.y, a.action === "double_click" ? 2 : 1);
-          typeTarget = screenPt;
-          history.push(`${a.action === "click" ? "Clicked" : "Double-clicked"} at (${a.x}, ${a.y}): ${a.say}`);
-          break;
-        case "type": {
-          sendStep({ say: a.say, action: "typing", point: null });
-          // If Milo's own window somehow has the keyboard, click the box again before typing.
-          const front = await frontApp();
-          if (/^(Electron|Milo)$/i.test(front) && typeTarget) {
-            await click(typeTarget.x, typeTarget.y);
-            await sleep(250);
-          }
-          await typeText(a.text ?? "");
-          history.push(`Typed "${(a.text ?? "").slice(0, 80)}"`);
+        // Don't repeat the exact same non-click action from the last round: it already happened.
+        const sig = `${a.action}|${a.app ?? ""}|${a.url ?? ""}|${a.keys ?? ""}|${a.text ?? ""}`;
+        if (a.action !== "click" && a.action !== "double_click" && a.action !== "wait" && a.action !== "key" && sig === lastSig) {
+          stuck++;
+          history.push(`(You just did "${a.action}${a.app ? " " + a.app : ""}" already and it worked. Don't repeat it; do the next step or a different approach.)`);
+          if (stuck >= 3) return { ok: false, text: "I got stuck repeating myself, so I stopped. Can you say it a bit differently?" };
           break;
         }
-        case "key":
-          await pressKeys(a.keys ?? "");
-          history.push(`Pressed ${a.keys}`);
-          break;
-        case "scroll":
-          await pressKeys(a.direction === "up" ? "pageup" : "pagedown");
-          history.push(`Scrolled ${a.direction ?? "down"}`);
-          break;
-        case "wait":
-          await sleep(1200);
-          history.push("Waited");
-          break;
+        lastSig = sig;
+
+        // Don't click the same spot twice in a row: the first click already worked.
+        if ((a.action === "click" || a.action === "double_click") && screenPt && lastClick &&
+            Math.hypot(screenPt.x - lastClick.x, screenPt.y - lastClick.y) < 25) {
+          history.push("(Skipped a repeat click on the same spot: it's already selected. Do the next thing, e.g. type.)");
+          lastClick = null;
+          continue;
+        }
+
+        sendStep({ say: a.say, action: a.action, point: overlayPt });
+        if (overlayPt) await sleep(260); // a quick hop so you can see where he's about to click
+        if (taskAbort) return { ok: true, status: "stopped", text: "Stopped!" };
+
+        overlay?.setIgnoreMouseEvents(true, { forward: true }); // never click on Milo himself
+        lastClick = a.action === "click" || a.action === "double_click" ? screenPt : null;
+        let changesScreen = false;
+        switch (a.action) {
+          case "open_app":
+            if (!a.app) throw new Error("No app name");
+            history.push(`Opened ${await openApp(a.app)} (it's now in front with a window)`);
+            changesScreen = true;
+            break;
+          case "open_url":
+            if (!a.url || !/^https?:\/\//.test(a.url)) throw new Error("Bad URL");
+            await openUrl(a.url);
+            history.push(`Opened ${a.url}`);
+            changesScreen = true;
+            break;
+          case "click":
+          case "double_click":
+            if (!screenPt) throw new Error("Click without a point");
+            await click(screenPt.x, screenPt.y, a.action === "double_click" ? 2 : 1);
+            typeTarget = screenPt;
+            history.push(`${a.action === "click" ? "Clicked" : "Double-clicked"} at (${a.x}, ${a.y}): ${a.say}`);
+            await sleep(180);
+            break;
+          case "type": {
+            sendStep({ say: a.say, action: "typing", point: null });
+            // If Milo's own window somehow has the keyboard, click the box again before typing.
+            const front = await frontApp();
+            if (/^(Electron|Milo)$/i.test(front) && typeTarget) {
+              await click(typeTarget.x, typeTarget.y);
+              await sleep(200);
+            }
+            await typeText(a.text ?? "");
+            history.push(`Typed "${(a.text ?? "").slice(0, 80)}"`);
+            break;
+          }
+          case "key":
+            await pressKeys(a.keys ?? "");
+            history.push(`Pressed ${a.keys}`);
+            changesScreen = /^(enter|return|cmd\+(t|n|w|l|tab)|cmd\+shift\+t|ctrl\+tab)$/i.test((a.keys ?? "").trim());
+            await sleep(changesScreen ? 500 : 120);
+            break;
+          case "scroll":
+            await pressKeys(a.direction === "up" ? "pageup" : "pagedown");
+            history.push(`Scrolled ${a.direction ?? "down"}`);
+            changesScreen = true;
+            break;
+          case "wait":
+            await sleep(1000);
+            history.push("Waited");
+            break;
+        }
+        if (changesScreen) {
+          // Keyboard-only steps after it (type the URL, press enter, cmd+n...) don't depend on where things
+          // are on screen, so keep going. Anything that clicks a spot needs a fresh look first.
+          const rest = r.data.slice(si + 1);
+          if (rest.length && rest.every((x) => ["type", "key", "wait", "done", "ask"].includes(x.action))) {
+            await sleep(a.action === "open_app" || a.action === "open_url" ? 900 : 450);
+            continue;
+          }
+          break; // the rest of the plan was made for the old screen: look again
+        }
       }
-      await sleep(450); // let the screen update before the next look
+      await sleep(300); // let the screen settle before the next look
     }
     return { ok: true, status: "done", text: "I took a bunch of steps. Check if that's what you wanted!" };
   } catch (err) {

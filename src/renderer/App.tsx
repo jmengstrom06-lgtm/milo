@@ -49,6 +49,11 @@ const homeSpot = () => {
 const home = (): Pos => spot(homeSpot());
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Keep spoken wrap-ups short: first sentence only, and never a paragraph. */
+function shortLine(t: string) {
+  const first = (t || "").replace(/\s+/g, " ").trim().match(/^.*?[.!?](?=\s|$)/)?.[0] ?? t.trim();
+  return first.length > 140 ? first.slice(0, 137).replace(/[ ,;:]+\S*$/, "") + "…" : first;
+}
 /** Black-box log (what Milo decided and why). Lands in ~/Milo Logs on the Mac. */
 const bb = (ev: string, data: Record<string, unknown> = {}) => window.milo.log("app", ev, data);
 /** Is this transcript just Milo's own line coming back through the mic? */
@@ -245,7 +250,9 @@ export default function App() {
   const hover = useCallback((on: boolean) => window.milo.setClickable(on), []);
 
   // ---- movement ---------------------------------------------------------------
-  const moveTo = useCallback((target: Pos, style: "walk" | "jump" = "walk") => {
+  const moveTo = useCallback((target: Pos, styleIn: "walk" | "jump" | "zip" = "walk") => {
+    // While he's working, he zips (fast and snappy) instead of strolling.
+    const style = workingRef.current ? "zip" : styleIn;
     return new Promise<void>((resolve) => {
       if (animRef.current) cancelAnimationFrame(animRef.current);
       const tx = clamp(target.x, MARGIN, window.innerWidth - MILO_W - MARGIN);
@@ -255,14 +262,15 @@ export default function App() {
       if (dist < 2) return resolve();
 
       setFacing(tx < start.x ? "left" : "right");
-      setMood(style === "jump" ? "jumping" : "walking");
-      const duration = style === "jump" ? clamp(dist / 1500, 0.35, 0.8) * 1000 : (dist / WALK_SPEED) * 1000;
-      const arc = style === "jump" ? Math.min(180, 60 + dist * 0.2) : 0;
+      setMood(style === "walk" ? "walking" : "jumping");
+      const duration =
+        style === "zip" ? clamp(dist / 4500, 0.12, 0.26) * 1000 : style === "jump" ? clamp(dist / 2200, 0.25, 0.55) * 1000 : (dist / WALK_SPEED) * 1000;
+      const arc = style === "zip" ? Math.min(40, 10 + dist * 0.04) : style === "jump" ? Math.min(160, 50 + dist * 0.18) : 0;
       const t0 = performance.now();
 
       const step = (now: number) => {
         const k = Math.min(1, (now - t0) / duration);
-        const e = style === "jump" ? (k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2) : k;
+        const e = style === "zip" ? 1 - Math.pow(1 - k, 3) : style === "jump" ? (k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2) : k;
         const next = {
           x: start.x + (tx - start.x) * e,
           y: start.y + (ty - start.y) * e - arc * Math.sin(Math.PI * k),
@@ -272,6 +280,7 @@ export default function App() {
         if (k >= 1) {
           animRef.current = null;
           if (style === "jump") sfx.hop();
+          else if (style === "zip") sfx.tick();
           setMood("idle");
           resolve();
           return;
@@ -547,8 +556,8 @@ export default function App() {
       setBubble("On it!");
       const r = await window.milo.task(task);
       setWorking(false);
-      // Done working: hop back to the corner so he's not sitting on top of what he just made.
-      moveTo(home(), "jump");
+      // Done working: hop back to his spot first (bottom right by default), THEN say what he did.
+      await moveTo(home(), "jump");
       if (!r.ok) {
         setMood("thinking");
         await say(r.text);
@@ -593,15 +602,13 @@ export default function App() {
       // Finished.
       if (partOfChain) {
         setMood("happy");
-        await say(r.text || "Found it.");
+        await say(shortLine(r.text || "Found it."));
         setBubble(null);
         return true;
       }
-      setMood("celebrating");
-      setConfetti({ x: posRef.current.x + MILO_W / 2, y: posRef.current.y + 40, seed: Date.now() });
-      await say(r.text);
-      setBubble(null);
       setMood("happy");
+      await say(shortLine(r.text));
+      setBubble(null);
       if (byVoice) listen();
       return true;
     },
@@ -1125,6 +1132,13 @@ export default function App() {
       if (/(full ?screen|make it (big|bigger|full)|expand( it)?|maximi[sz]e)/.test(t)) return setRpSize("full");
       if (/(half|split) ?screen|make it half/.test(t)) return setRpSize("half");
       if (/(smaller|shrink|minimi[sz]e|compact)/.test(t)) return setRpSize("compact");
+    }
+    // Everyday computer shortcuts go straight to the hands (no AI decision needed): they take under a second.
+    const plain = text.toLowerCase().replace(/[.!?]+$/, "").replace(/^(?:(?:can you|could you|would you|please|just|now|okay|ok)[, ]+)+/, "").trim();
+    if (!lessonRef.current && /^(copy|paste|select all|select everything|undo|redo|cut|save|close (this |the |that )?(tab|window)|(open )?(a )?new (chrome )?tab|next tab|previous tab|reopen|(make|take|write|create|add) (me )?(a |an )?(quick )?note|note (that|down)|quit |minimi[sz]e|zoom (in|out)|refresh|reload|go back|scroll (up|down))\b/.test(plain)) {
+      bb("route_instant", { text, kind: "shortcut" });
+      runTask(text, spoken);
+      return;
     }
     const inLesson = !!lessonRef.current;
     const awaitingAnswer = inLesson && finishedRef.current && lessonModeRef.current !== "do" && !!lessonRef.current?.check_question;

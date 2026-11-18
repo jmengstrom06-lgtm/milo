@@ -229,6 +229,14 @@ async function openChrome(url?: string) {
   await sleep(600);
 }
 
+/** Quit an app the normal way (it can still ask to save). */
+export async function quitApp(name: string) {
+  const real = resolveApp(name);
+  await run("osascript", ["-e", `tell application "${real.replace(/"/g, "")}" to quit`]).catch(() => {});
+  await sleep(400);
+  return real;
+}
+
 export async function openApp(name: string) {
   const real = resolveApp(name);
   if (real === "Google Chrome") {

@@ -6,7 +6,9 @@ export type QuickStep =
   | { kind: "url"; url: string; say: string }
   | { kind: "keys"; keys: string; say: string; browser?: boolean }
   | { kind: "download"; say: string }
-  | { kind: "folder"; folder: "downloads" | "desktop" | "documents"; say: string };
+  | { kind: "folder"; folder: "downloads" | "desktop" | "documents"; say: string }
+  | { kind: "type"; text: string; say: string }
+  | { kind: "quit"; app: string; say: string };
 
 const APPS: Record<string, string> = {
   chrome: "Google Chrome", "google chrome": "Google Chrome", "chrome browser": "Google Chrome", browser: "Google Chrome", "web browser": "Google Chrome", safari: "Safari", firefox: "Firefox", arc: "Arc",
@@ -53,7 +55,28 @@ function isNewDocWanted(t: string) {
 
 /** Exported for tests. */
 export function plan(raw: string): { steps: QuickStep[]; rest: string | null } {
-  const text = raw.trim().replace(/[.!?]+$/, "");
+  // Spoken filler doesn't change the command: "could you please open a new tab for me" = "open a new tab".
+  const text = raw
+    .trim()
+    .replace(/[.!?]+$/, "")
+    .replace(/^(?:(?:hey |ok(?:ay)? |yo )?milo|um+|uh+|so|okay|ok|now|just|please|can you|could you|would you|will you|go ahead and|i want you to|i'd like you to)[, ]+/gi, "")
+    .replace(/^(?:(?:can you|could you|would you|please|just|now)[, ]+)+/i, "")
+    .replace(/,? (?:please|for me|real quick|quickly)$/i, "")
+    .trim();
+
+  // "Make a note that ..." -> Notes, new note, type it. The whole thing, no AI.
+  const note = text.match(/^(?:make|take|write|create|add|jot down)(?: me)? (?:a |an )?(?:quick )?note(?: in notes)?(?: that says| saying| that|:|,)?\s+(.+)$/i) ||
+    text.match(/^note (?:that|down)\s+(.+)$/i);
+  if (note) {
+    return {
+      steps: [
+        { kind: "app", app: "Notes", say: "Opening Notes" },
+        { kind: "keys", keys: "cmd+n", say: "New note" },
+        { kind: "type", text: note[1].replace(/^(.)/, (c) => c.toUpperCase()), say: "Writing it down" },
+      ],
+      rest: null,
+    };
+  }
   const t = text.toLowerCase();
 
   // Split "do X and then do Y" into the first clause and the rest.
@@ -84,7 +107,27 @@ function one(t: string): QuickStep | null {
     return { kind: "download", say: "Opening your latest download!" };
 
   // ---- tab / browser keys
-  if (/^(open |make |start )?(a )?new tab$/.test(t)) return { kind: "keys", keys: "cmd+t", say: "New tab!", browser: true };
+  if (/^(open |make |start )?(up )?(a |another )?(new )?((google )?chrome |browser )?tab( in (google )?chrome)?$/.test(t) && /tab/.test(t))
+    return { kind: "keys", keys: "cmd+t", say: "New tab!", browser: true };
+  // ---- everyday editing keys (act on whatever app you're in)
+  if (/^copy( (it|this|that|the text|everything|all of it))?$/.test(t)) return { kind: "keys", keys: "cmd+c", say: "Copied" };
+  if (/^paste( (it|this|that))?( (here|in here|in there))?$/.test(t)) return { kind: "keys", keys: "cmd+v", say: "Pasted" };
+  if (/^(select all|select everything|highlight (it all|everything|all))$/.test(t)) return { kind: "keys", keys: "cmd+a", say: "Selected all" };
+  if (/^(undo|undo (it|that|this)|take (it|that) back)$/.test(t)) return { kind: "keys", keys: "cmd+z", say: "Undone" };
+  if (/^redo( (it|that))?$/.test(t)) return { kind: "keys", keys: "cmd+shift+z", say: "Redone" };
+  if (/^cut( (it|this|that))?$/.test(t)) return { kind: "keys", keys: "cmd+x", say: "Cut" };
+  if (/^save( (it|this|that|the (file|doc|document)))?$/.test(t)) return { kind: "keys", keys: "cmd+s", say: "Saved" };
+  if (/^(minimi[sz]e|hide) (it|this|that|this window|the window)$/.test(t)) return { kind: "keys", keys: "cmd+m", say: "Minimized" };
+  if (/^close (this |the |that )?window$/.test(t)) return { kind: "keys", keys: "cmd+w", say: "Closing it" };
+  if (/^(zoom in|make (it|the text) bigger)$/.test(t)) return { kind: "keys", keys: "cmd+=", say: "Zooming in" };
+  if (/^(zoom out|make (it|the text) smaller)$/.test(t)) return { kind: "keys", keys: "cmd+-", say: "Zooming out" };
+  // ---- quit an app: "close chatgpt", "quit spotify"
+  const qa = t.match(/^(?:quit|close|exit|shut down)\s+(?:the |my )?(.+?)(?: app| application)?$/);
+  if (qa && !/\b(tab|window|it|this|that|research|box|panel|tool|page|doc|document|note)\b/.test(qa[1])) {
+    const name = clean(qa[1]);
+    const app = APPS[name] ?? (/^[a-z0-9 ]{2,24}$/.test(name) && name.split(" ").length <= 2 ? name.replace(/\b\w/g, (c) => c.toUpperCase()) : null);
+    if (app) return { kind: "quit", app, say: `Closing ${app.replace(/^Microsoft |\.us$/, "")}` };
+  }
   if (/^(open |make )?(a )?new (browser )?window$/.test(t)) return { kind: "keys", keys: "cmd+n", say: "New window!", browser: true };
   if (/^close (this |the |that )?tab$/.test(t)) return { kind: "keys", keys: "cmd+w", say: "Closing the tab" };
   if (/^(go to |switch to )?(the )?next tab$/.test(t)) return { kind: "keys", keys: "ctrl+tab", say: "Next tab" };

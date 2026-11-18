@@ -2,7 +2,7 @@
 // Falls back to screen mode (screenshots) for pages that can't be read, like Google Docs.
 
 import { call, bridgeConnected } from "./bridge";
-import { webAction, WebAction } from "./brain";
+import { webActions, WebAction } from "./brain";
 import { log as bb } from "./blackbox";
 
 type El = {
@@ -82,75 +82,90 @@ export async function runWebTask(
       bb("web", "canvas_page_use_screen", { url: snap.url });
       return { status: "need_screen", text: "canvas page", history: [...history, `(Browser is on ${snap.url}; it's a canvas editor, so use the screen.)`] };
     }
-    const r = await webAction(task, describe(snap, tabs), history);
+    const r = await webActions(task, describe(snap, tabs), history);
     if (aborted()) return { status: "stopped", text: "Stopped!" };
     if (!r.ok) return { status: "error", text: r.text };
-    const a: WebAction = r.data;
-    bb("web", "action", { step, url: snap.url, ...a });
-    if (a.action === "done") return { status: "done", text: a.text || a.say || "All done!" };
-    if (a.action === "ask") return { status: "ask", text: a.text || a.say || "Should I go ahead?" };
-    if (a.action === "use_screen") return { status: "need_screen", text: a.text || "", history };
+    bb("web", "plan", { step, url: snap.url, steps: r.data.map((x) => `${x.action}${x.id ? " [" + x.id + "]" : ""}${x.keys ? " " + x.keys : ""}${x.url ? " " + x.url : ""}`) });
 
-    const sig = `${a.action}|${a.id ?? ""}|${a.text ?? ""}|${a.url ?? ""}|${a.keys ?? ""}`;
-    if (sig === lastSig && a.action !== "scroll" && a.action !== "wait") {
-      if (++repeats >= 2) return { status: "need_screen", text: "stuck", history: [...history, "(Element mode got stuck repeating itself.)"] };
-      history.push(`(You already did exactly that: ${a.action} ${a.id ?? ""}. It's done; check the page and do the next thing.)`);
-      continue;
-    }
-    lastSig = sig;
-    const el = a.id ? snap.elements.find((e) => e.id === a.id) : undefined;
-    onStep({ say: a.say, action: a.action === "type" ? "typing" : a.action, screenPt: screenPoint(snap, el?.rect) });
+    for (const a of r.data) {
+      if (aborted()) return { status: "stopped", text: "Stopped!" };
+      if (a.action === "done") return { status: "done", text: a.text || a.say || "Done." };
+      if (a.action === "ask") return { status: "ask", text: a.text || a.say || "Should I go ahead?" };
+      if (a.action === "use_screen") return { status: "need_screen", text: a.text || "", history };
 
-    try {
-      switch (a.action) {
-        case "click":
-          await call("click", { tabId: snap.tabId, id: a.id }, 12000);
-          history.push(`Clicked [${a.id}] "${el?.label ?? ""}"`);
-          break;
-        case "type": {
-          const res = await call<{ value?: string }>("type", { tabId: snap.tabId, id: a.id, text: a.text ?? "", clear: !!a.clear }, 8000);
-          history.push(`Typed "${(a.text ?? "").slice(0, 80)}" into [${a.id}] "${el?.label ?? ""}" (box now ends with: "${(res?.value ?? "").slice(-60)}")`);
-          break;
-        }
-        case "key":
-          // Real keystrokes so sites react (Enter to search/send, shortcuts). Chrome must be in front.
-          await call("focus_window", { tabId: snap.tabId }, 4000).catch(() => {});
-          if (snap.focused == null && el) await call("focus", { tabId: snap.tabId, id: el.id }, 4000).catch(() => {});
-          await pressKeys(a.keys ?? "enter");
-          await sleep(900);
-          history.push(`Pressed ${a.keys}`);
-          break;
-        case "navigate":
-          if (!a.url || !/^https?:\/\//.test(a.url)) throw new Error("Bad URL");
-          await call("navigate", { tabId: snap.tabId, url: a.url }, 15000);
-          history.push(`Went to ${a.url}`);
-          break;
-        case "new_tab":
-          await call("new_tab", { url: a.url && /^https?:\/\//.test(a.url) ? a.url : undefined }, 15000);
-          history.push(`Opened a new tab${a.url ? " at " + a.url : ""}`);
-          break;
-        case "switch_tab":
-          await call("switch_tab", { tabId: a.tab }, 5000);
-          history.push(`Switched to tab ${a.tab}`);
-          break;
-        case "back":
-          await call("back", { tabId: snap.tabId }, 8000);
-          history.push("Went back");
-          break;
-        case "scroll":
-          await call("scroll", { tabId: snap.tabId, direction: a.direction ?? "down" }, 5000);
-          history.push(`Scrolled ${a.direction ?? "down"}`);
-          break;
-        case "wait":
-          await sleep(1200);
-          history.push("Waited for the page");
-          break;
+      const sig = `${a.action}|${a.id ?? ""}|${a.text ?? ""}|${a.url ?? ""}|${a.keys ?? ""}`;
+      if (sig === lastSig && a.action !== "scroll" && a.action !== "wait") {
+        if (++repeats >= 2) return { status: "need_screen", text: "stuck", history: [...history, "(Element mode got stuck repeating itself.)"] };
+        history.push(`(You already did exactly that: ${a.action} ${a.id ?? ""}. It's done; check the page and do the next thing.)`);
+        break;
       }
-    } catch (e) {
-      history.push(`(That didn't work: ${(e as Error).message}. Try something else.)`);
-      bb("web", "action_failed", { action: a.action, error: (e as Error).message });
+      lastSig = sig;
+      const el = a.id ? snap.elements.find((e) => e.id === a.id) : undefined;
+      onStep({ say: a.say, action: a.action === "type" ? "typing" : a.action, screenPt: screenPoint(snap, el?.rect) });
+
+      let newPage = false;
+      try {
+        switch (a.action) {
+          case "click": {
+            const res = await call<{ navigates?: boolean }>("click", { tabId: snap.tabId, id: a.id }, 12000);
+            history.push(`Clicked [${a.id}] "${el?.label ?? ""}"`);
+            newPage = !!res?.navigates;
+            break;
+          }
+          case "type": {
+            const res = await call<{ value?: string }>("type", { tabId: snap.tabId, id: a.id, text: a.text ?? "", clear: !!a.clear }, 8000);
+            history.push(`Typed "${(a.text ?? "").slice(0, 80)}" into [${a.id}] "${el?.label ?? ""}" (box now ends with: "${(res?.value ?? "").slice(-60)}")`);
+            break;
+          }
+          case "key":
+            // Real keystrokes so sites react (Enter to search/send, shortcuts). Chrome must be in front.
+            await call("focus_window", { tabId: snap.tabId }, 4000).catch(() => {});
+            if (snap.focused == null && el) await call("focus", { tabId: snap.tabId, id: el.id }, 4000).catch(() => {});
+            await pressKeys(a.keys ?? "enter");
+            history.push(`Pressed ${a.keys}`);
+            newPage = /^(enter|return|cmd\+(t|w|l)|ctrl\+tab|cmd\+shift\+t)$/i.test((a.keys ?? "enter").trim());
+            await sleep(newPage ? 800 : 150);
+            break;
+          case "navigate":
+            if (!a.url || !/^https?:\/\//.test(a.url)) throw new Error("Bad URL");
+            await call("navigate", { tabId: snap.tabId, url: a.url }, 15000);
+            history.push(`Went to ${a.url}`);
+            newPage = true;
+            break;
+          case "new_tab":
+            await call("new_tab", { url: a.url && /^https?:\/\//.test(a.url) ? a.url : undefined }, 15000);
+            history.push(`Opened a new tab${a.url ? " at " + a.url : ""}`);
+            newPage = true;
+            break;
+          case "switch_tab":
+            await call("switch_tab", { tabId: a.tab }, 5000);
+            history.push(`Switched to tab ${a.tab}`);
+            newPage = true;
+            break;
+          case "back":
+            await call("back", { tabId: snap.tabId }, 8000);
+            history.push("Went back");
+            newPage = true;
+            break;
+          case "scroll":
+            await call("scroll", { tabId: snap.tabId, direction: a.direction ?? "down" }, 5000);
+            history.push(`Scrolled ${a.direction ?? "down"}`);
+            newPage = true; // new elements came into view
+            break;
+          case "wait":
+            await sleep(1000);
+            history.push("Waited for the page");
+            newPage = true;
+            break;
+        }
+      } catch (e) {
+        history.push(`(That didn't work: ${(e as Error).message}. Try something else.)`);
+        bb("web", "action_failed", { action: a.action, error: (e as Error).message });
+        break; // re-read the page before trying anything else
+      }
+      if (newPage) break; // element ids belong to the old page: read it again
     }
-    await sleep(300);
+    await sleep(150);
   }
   return { status: "done", text: "I took a bunch of steps. Check if that's what you wanted!" };
 }

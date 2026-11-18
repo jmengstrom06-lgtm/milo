@@ -29,13 +29,13 @@ export function setUserName(name: string) {
   userName = (name || "").slice(0, 40);
 }
 const persona = () => `You are Milo, ${characterDesc}, an animated companion who lives on a college student's computer screen.${userName ? ` The student's name is ${userName}.` : ""}
-You are friendly, upbeat, fast and a little playful. You talk like a smart friend, never like a textbook.`;
+You are friendly, sharp and quick. You talk like a smart friend: short, precise, confident. No hype, no cheesy jokes, no exclamation marks everywhere, never like a textbook.`;
 
 const chatPrompt = () => `${persona()}
 You live on the student's Mac. You CAN look at their screen, jump to homework questions and teach them in your notebook,
 and you CAN use the computer (open apps, files, websites and tabs, click, type). Never say you can't see their screen or use their computer.
 If they want something done on screen, tell them you're on it in a few words.
-Keep chat replies short (1 to 4 sentences) unless the student asks for detail.`;
+Keep replies to 1 or 2 short sentences unless the student asks for detail. Get to the point.`;
 
 const MODE_RULES: Record<Mode, string> = {
   teach: `MODE = TEACH ME. Teach the method so the student can do it themselves.
@@ -371,57 +371,67 @@ export type Action = {
   say: string;
 };
 
+const STEP_PROPS = {
+  action: {
+    type: "string",
+    enum: ["open_app", "open_url", "click", "double_click", "type", "key", "scroll", "wait", "ask", "done"],
+  },
+  x: { type: "number", description: "For click/double_click: pixel x in the screenshot." },
+  y: { type: "number", description: "For click/double_click: pixel y in the screenshot." },
+  text: {
+    type: "string",
+    description: "For type: the exact text to type. For ask: a short question for the student. For done: what you did in 8 words or fewer, e.g. 'Done. Story's pasted in ChatGPT.'",
+  },
+  keys: { type: "string", description: 'For key: a combo like "cmd+a", "cmd+c", "cmd+v", "cmd+t", "cmd+w", "enter", "tab", "escape", "cmd+l".' },
+  app: { type: "string", description: 'For open_app: exact macOS app name, e.g. "Claude", "Google Chrome", "Notes", "Safari".' },
+  url: { type: "string", description: "For open_url: a full https:// URL." },
+  direction: { type: "string", enum: ["up", "down"], description: "For scroll." },
+  say: { type: "string", description: "Tiny status shown while doing it, 2-5 words: 'Opening Notes', 'Pasting it'." },
+};
+
 const ACT_TOOL = {
-  name: "computer_action",
-  description: "Do exactly one action on the student's Mac.",
+  name: "computer_actions",
+  description: "The next steps to do on the student's Mac, in order.",
   input_schema: {
     type: "object",
     properties: {
-      action: {
-        type: "string",
-        enum: ["open_app", "open_url", "click", "double_click", "type", "key", "scroll", "wait", "ask", "done"],
+      steps: {
+        type: "array",
+        minItems: 1,
+        maxItems: 6,
+        items: { type: "object", properties: STEP_PROPS, required: ["action", "say"] },
+        description:
+          "Do as many steps as you can from THIS screenshot without needing to look again (e.g. click the box, type, press enter). End the list right after any step that changes the screen a lot (opening an app or site, a click that opens a new page or menu): you'll get a fresh screenshot then. Put done (or ask) last only when the request will be finished by these steps.",
       },
-      x: { type: "number", description: "For click/double_click: pixel x in the screenshot." },
-      y: { type: "number", description: "For click/double_click: pixel y in the screenshot." },
-      text: {
-        type: "string",
-        description: "For type: the exact text to type. For ask: the question to ask the student. For done: a one-sentence summary of what you did.",
-      },
-      keys: { type: "string", description: 'For key: a combo like "cmd+a", "cmd+t", "enter", "tab", "escape", "cmd+l".' },
-      app: { type: "string", description: 'For open_app: exact macOS app name, e.g. "Claude", "Google Chrome", "Notes", "Safari".' },
-      url: { type: "string", description: "For open_url: a full https:// URL." },
-      direction: { type: "string", enum: ["up", "down"], description: "For scroll." },
-      say: { type: "string", description: "What Milo says while doing this. Under 8 words, playful. E.g. 'Opening Claude!', 'Clicking the message box'." },
     },
-    required: ["action", "say"],
+    required: ["steps"],
   },
 };
 
-export async function nextAction(
+export async function nextActions(
   jpegBase64: string,
   size: { width: number; height: number },
   task: string,
   history: string[]
-): Promise<ApiOk<Action> | ApiErr> {
+): Promise<ApiOk<Action[]> | ApiErr> {
   const system = `${persona()}
-You are controlling the student's Mac to finish their request. Each turn you get a fresh screenshot (Milo himself is hidden from it) and a log of what you've already done. Choose exactly ONE next action.
+You are controlling the student's Mac to finish their request, fast. Each turn you get a fresh screenshot (Milo himself is hidden from it) and a log of what you've already done. Plan the next steps you can do from this screenshot in one go.
 
 How to work:
 - Coordinates are pixels in the screenshot. Aim for the center of the thing you click.
 - To switch to or launch an app, use open_app with its exact name (e.g. "Claude", "Google Chrome", "Notes", "Microsoft Word").
-- To type into something, click the text field first (unless the log shows you just clicked it), then use type.
-- For Google Docs or any document: click inside the page where the text should go (usually at the end of the existing text), then type.
-- Use key for shortcuts and Enter. Use scroll if what you need is off screen.
-- After an action, check the new screenshot to confirm it worked before moving on. If something didn't work, try a different way.
-- Clicking a text box often changes nothing visible. If the log shows you just clicked a text box, assume it worked and type next. Never click the same spot twice in a row.
-- Do exactly what was asked, nothing extra. If asked to type something, type it but don't press Enter or send it unless they asked.
-- NEVER do anything that sends, submits, posts, publishes, buys, pays, deletes, or changes account settings without asking first: use action "ask" with the question instead.
+- Prefer keyboard shortcuts, they're instant: cmd+t new tab, cmd+w close tab, cmd+l address bar, cmd+a select all, cmd+c copy, cmd+v paste, cmd+n new note/doc, cmd+z undo.
+- Copying between places: select (cmd+a or drag), cmd+c, open/switch to the other place, click the box, cmd+v.
+- To type into something, click the text field first (unless the log shows you just clicked it), then type. In Google Docs or any document: click inside the page where the text goes, then type.
+- Clicking a text box often changes nothing visible: assume it worked. Never click the same spot twice in a row.
+- If something in the log didn't work, try a different way.
+- Do exactly what was asked, nothing extra. If asked to type something, don't press Enter or send it unless they asked (asking ChatGPT/Claude something DOES mean send it).
+- NEVER send, submit, post, publish, buy, pay, delete, or change account settings without asking first: use "ask".
 - Never type passwords or payment details. If a login is needed, use "ask".
-- When the request is complete, use "done" with a one-sentence summary in text.
-- If it's impossible, use "done" and explain in text.`;
+- Finish with "done" and a summary of 8 words or fewer.`;
 
   const log = history.length ? history.map((h, i) => `${i + 1}. ${h}`).join("\n") : "(nothing yet)";
-  return callTool<Action>(
+  const r = await callTool<{ steps: Action[] }>(
     {
       max_tokens: 1500,
       system,
@@ -434,7 +444,7 @@ How to work:
             { type: "image", source: { type: "base64", media_type: "image/jpeg", data: jpegBase64 } },
             {
               type: "text",
-              text: `Request: "${task}"\nScreenshot size: ${size.width}x${size.height} pixels.\nWhat you've done so far:\n${log}\n\nWhat's the next action?`,
+              text: `Request: "${task}"\nScreenshot size: ${size.width}x${size.height} pixels.\nWhat you've done so far:\n${log}\n\nWhat are the next steps?`,
             },
           ],
         },
@@ -442,6 +452,12 @@ How to work:
     },
     ACT_TOOL.name
   );
+  if (!r.ok) return r;
+  const steps = Array.isArray(r.data?.steps) ? r.data.steps.filter((s) => s && s.action) : [];
+  // Some models answer with a single step object instead of a list.
+  if (!steps.length && (r.data as unknown as Action)?.action) steps.push(r.data as unknown as Action);
+  if (!steps.length) return { ok: false, text: "I got my wires crossed. Try again?" };
+  return { ok: true, data: steps.slice(0, 6) };
 }
 
 // ---------------------------------------------------------------------------
@@ -788,58 +804,85 @@ export type WebAction = {
   say: string;
 };
 
+const WEB_STEP = {
+  type: "object",
+  properties: {
+    action: {
+      type: "string",
+      enum: ["click", "type", "key", "navigate", "new_tab", "switch_tab", "back", "scroll", "wait", "ask", "done", "use_screen"],
+      description:
+        "click/type use an element id from the list. key = keyboard shortcut or Enter (e.g. 'enter', 'cmd+a', 'cmd+c', 'cmd+v', 'cmd+w'). navigate = open a URL in this tab. new_tab = open a URL in a new tab. switch_tab = go to another open tab (tab = its id). use_screen = this page can't be read as elements (canvas editor like Google Docs/Sheets, a game, a PDF): hand over to screen mode.",
+    },
+    id: { type: "string", description: "Element id from the list (for click / type)." },
+    text: { type: "string", description: "For type: exact text. For ask: a short question. For done: what you did in 8 words or fewer, e.g. 'Done. TCU plays Thursday at 7.'" },
+    clear: { type: "boolean", description: "For type: replace what's in the box instead of adding to it." },
+    keys: { type: "string", description: "For key." },
+    url: { type: "string", description: "For navigate / new_tab: full https URL." },
+    tab: { type: "number", description: "For switch_tab." },
+    direction: { type: "string", enum: ["up", "down", "top", "bottom"] },
+    say: { type: "string", description: "Tiny status, 2-5 words: 'Searching TCU hoops'." },
+  },
+  required: ["action", "say"],
+};
+
 const WEB_TOOL = {
-  name: "web_action",
-  description: "The single next action to take in the browser.",
+  name: "web_actions",
+  description: "The next steps to take in the browser, in order.",
   input_schema: {
     type: "object",
     properties: {
-      action: {
-        type: "string",
-        enum: ["click", "type", "key", "navigate", "new_tab", "switch_tab", "back", "scroll", "wait", "ask", "done", "use_screen"],
+      steps: {
+        type: "array",
+        minItems: 1,
+        maxItems: 6,
+        items: WEB_STEP,
         description:
-          "click/type use an element id from the list. key = keyboard shortcut or Enter (e.g. 'enter', 'cmd+a'). navigate = open a URL in this tab. new_tab = open a URL in a new tab. switch_tab = go to another open tab (tab = its id). use_screen = this page can't be read as elements (canvas editor like Google Docs/Sheets, a game, a PDF): hand over to screen mode.",
+          "Do as many steps as you can with THIS page's element ids (e.g. type in the search box, then press enter). End the list right after a step that loads a new page, switches tabs, or opens a menu/dialog: you'll get the updated page then. Put done (or ask) last only when the request will be finished by these steps.",
       },
-      id: { type: "string", description: "Element id from the list (for click / type)." },
-      text: { type: "string", description: "For type: exact text. For ask: the question. For done: one-sentence summary." },
-      clear: { type: "boolean", description: "For type: replace what's in the box instead of adding to it." },
-      keys: { type: "string", description: "For key." },
-      url: { type: "string", description: "For navigate / new_tab: full https URL." },
-      tab: { type: "number", description: "For switch_tab." },
-      direction: { type: "string", enum: ["up", "down", "top", "bottom"] },
-      say: { type: "string", description: "Very short line shown to the student, like 'Clicking Search' (under 8 words)." },
     },
-    required: ["action", "say"],
+    required: ["steps"],
   },
 };
 
-export async function webAction(task: string, page: string, history: string[]): Promise<ApiOk<WebAction> | ApiErr> {
+export async function webActions(task: string, page: string, history: string[]): Promise<ApiOk<WebAction[]> | ApiErr> {
   const system = `${persona()}
-You are using the student's Chrome browser to finish their request. Instead of a screenshot you get the page as a list of interactive elements (with ids) plus the page's text. Choose exactly ONE next action.
+You are using the student's Chrome browser to finish their request, fast. Instead of a screenshot you get the page as a list of interactive elements (with ids) plus the page's text. Plan the next steps you can do on this page in one go.
 
 How to work:
 - Click and type using element ids from the list. Prefer elements marked on-screen.
 - To search a site, type into its search box, then press enter (key "enter") or click its search button.
-- To write in ChatGPT, Claude, Gemini etc: type into the message box. Don't send it unless the student asked you to send/submit/ask it. If they asked you to ask ChatGPT something or "make a story in ChatGPT", sending the prompt IS what they asked: press enter after typing.
-- If the list is empty or the page is a canvas editor (Google Docs, Sheets, Slides, Canva, Figma) or you can't find what you need after scrolling, use "use_screen".
-- To go to a website directly, use navigate with the URL (faster than searching).
-- After each action you'll get the updated page. Check it worked before moving on. If something didn't work, try a different element or approach. Never repeat the exact same action twice in a row.
+- To go to a website directly, use navigate with the URL (faster than searching). To answer a question from the web, a Google search URL is fine: https://www.google.com/search?q=...
+- To write in ChatGPT, Claude, Gemini etc: type into the message box. Asking ChatGPT something or "have ChatGPT write X" means send it: press enter after typing.
+- Copying text: you already have the page text, so you can type it where it needs to go instead of copy/paste.
+- If the list is empty or the page is a canvas editor (Google Docs, Sheets, Slides, Canva, Figma), use "use_screen".
+- If something in the log didn't work, try a different element or approach. Never repeat the exact same action twice in a row.
 - Do exactly what was asked, nothing extra.
-- NEVER submit forms that buy, pay, post publicly, delete, send email/messages to people, or change account settings without asking first: use "ask".
+- NEVER buy, pay, post publicly, delete, send email/messages to people, or change account settings without asking first: use "ask".
 - Never type passwords or payment details. If a login is needed, use "ask".
-- When the request is complete, use "done" with a one-sentence summary in text.`;
+- Finish with "done" and 8 words or fewer. If they asked a question, the done text IS the answer (short).`;
   const log = history.length ? history.map((h, i) => `${i + 1}. ${h}`).join("\n") : "(nothing yet)";
-  return callTool<WebAction>(
-    {
-      ...(process.env.MILO_WEB_MODEL ? { model: process.env.MILO_WEB_MODEL } : {}),
-      max_tokens: 1200,
-      system,
-      tools: [WEB_TOOL],
-      tool_choice: { type: "auto" },
-      messages: [{ role: "user", content: `Student's request: "${task}"\n\nWhat you've done so far:\n${log}\n\nThe browser right now:\n${page}` }],
-    },
-    WEB_TOOL.name
-  );
+  const body = {
+    max_tokens: 1500,
+    system,
+    tools: [WEB_TOOL],
+    tool_choice: { type: "auto" },
+    messages: [{ role: "user", content: `Student's request: "${task}"\n\nWhat you've done so far:\n${log}\n\nThe browser right now:\n${page}` }],
+  };
+  const pick = (d: { steps?: WebAction[] } | undefined): WebAction[] => {
+    const steps = Array.isArray(d?.steps) ? d!.steps.filter((x) => x && x.action) : [];
+    if (!steps.length && (d as unknown as WebAction)?.action) steps.push(d as unknown as WebAction);
+    return steps.slice(0, 6);
+  };
+  // Reading a list of elements is easy: the fast model does it. The main model is the backup.
+  let r = await callTool<{ steps: WebAction[] }>({ ...body, model: process.env.MILO_WEB_MODEL || "claude-haiku-5-5" }, WEB_TOOL.name);
+  let steps = r.ok ? pick(r.data) : [];
+  if (!steps.length) {
+    r = await callTool<{ steps: WebAction[] }>(body, WEB_TOOL.name);
+    if (!r.ok) return r;
+    steps = pick(r.data);
+  }
+  if (!steps.length) return { ok: false, text: "I got my wires crossed. Try again?" };
+  return { ok: true, data: steps };
 }
 
 
@@ -847,7 +890,7 @@ How to work:
 // Answer a question from what's on screen (page text from the Chrome extension, or a screenshot).
 export async function askScreen(question: string, src: { pageText?: string; url?: string; title?: string; jpeg?: string; size?: { width: number; height: number } }) {
   const system = `${persona()}
-The student asked a question about what's on their screen right now. Answer it from what you're given, in one or two short spoken sentences (no lists, no symbols, no links). Use exact dates, times, names and numbers from the screen. If the answer isn't there, say what you'd need them to open (for example "open your calendar or the course page with the exam schedule").`;
+The student asked a question about what's on their screen right now. Answer it from what you're given in ONE short spoken sentence, under 25 words (no lists, no symbols, no links). Use exact dates, times, names and numbers from the screen. If the answer isn't there, say what you'd need them to open (for example "open your calendar or the course page with the exam schedule").`;
   const content: unknown[] = [];
   if (src.jpeg) content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: src.jpeg } });
   const pageBit = src.pageText ? `\n\nThe page (${src.title ?? ""} — ${src.url ?? ""}):\n${src.pageText.slice(0, 14000)}` : "";
