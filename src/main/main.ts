@@ -18,6 +18,7 @@ import { closeFlux, fluxAvailable, forceEndTurn, onFlux, openFlux, sendAudio } f
 import { macSpeak } from "./macvoice";
 import { bridgeConnected, call as ext, startBridge } from "./bridge";
 import { runWebTask } from "./webagent";
+import { registerKit } from "./kitipc";
 import { transcribe } from "./ears";
 import { click, ensureBrowser, frontApp, openApp, openFolder, openLatestDownload, openUrl, pressKeys, quitApp, typeText } from "./hands";
 import { plan } from "./quick";
@@ -677,6 +678,16 @@ ipcMain.on("milo:save-clip", (_e, wav: ArrayBuffer, note?: string) => {
   if (wav instanceof ArrayBuffer) bb("ears", "clip", { clip: saveClip(wav), note: typeof note === "string" ? note.slice(0, 200) : "" });
 });
 ipcMain.handle("milo:bridge-status", () => bridgeConnected());
+
+registerKit({
+  captureJpeg: async () => {
+    const cap = await captureScreen();
+    return cap.ok ? toJpeg(cap.shot.full, 1568).b64 : null;
+  },
+  frontApp: () => frontApp(),
+  pressKeys: (k) => pressKeys(k),
+  setOverlayFocusable: (on) => overlay?.setFocusable(on),
+});
 
 // "Milo, look at my screen and find out when my next exam is": answer from the page text (Chrome) + a screenshot.
 ipcMain.handle("milo:screen-ask", async (_e, question: string) => {

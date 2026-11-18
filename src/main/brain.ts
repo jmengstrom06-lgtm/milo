@@ -34,6 +34,7 @@ You are friendly, sharp and quick. You talk like a smart friend: short, precise,
 const chatPrompt = () => `${persona()}
 You live on the student's Mac. You CAN look at their screen, jump to homework questions and teach them in your notebook,
 and you CAN use the computer (open apps, files, websites and tabs, click, type). Never say you can't see their screen or use their computer.
+You also have your own apps (your Kit): Study (practice problems, worked examples, flashcards, practice tests), Sketch (graphs and images), Notes, Sheet (tables and stats), Planner (study plans from due dates) and Pocket (things you hold for them).
 If they want something done on screen, tell them you're on it in a few words.
 Keep replies to 1 or 2 short sentences unless the student asks for detail. Get to the point.`;
 
@@ -463,9 +464,9 @@ How to work:
 // ---------------------------------------------------------------------------
 // Router: decides what the student wants, knowing what's open on screen right now.
 export type RouteKind =
-  | "chat" | "look" | "task" | "research" | "move" | "close" | "open_result" | "screen_question"
+  | "chat" | "look" | "task" | "research" | "move" | "close" | "open_result" | "screen_question" | "kit" | "kit_menu" | "hold" | "drop"
   | "sweep" | "build" | "quiz" | "brief" | "watch" | "checkwork";
-export type Route = { kind: RouteKind; mode?: Mode; followUp?: boolean; where?: string; question?: string; on?: boolean; after?: string; failed?: boolean };
+export type Route = { kind: RouteKind; mode?: Mode; followUp?: boolean; where?: string; question?: string; on?: boolean; after?: string; app?: string; target?: string; failed?: boolean };
 export type RouteCtx = {
   researchOpen?: boolean;
   researchTopic?: string;
@@ -484,11 +485,14 @@ const ROUTE_TOOL = {
     properties: {
       kind: {
         type: "string",
-        enum: ["chat", "look", "task", "research", "move", "close", "open_result", "screen_question", "sweep", "build", "quiz", "brief", "watch", "checkwork"],
+        enum: ["chat", "look", "task", "research", "move", "close", "open_result", "screen_question", "kit", "kit_menu", "hold", "drop", "sweep", "build", "quiz", "brief", "watch", "checkwork"],
         description: [
           "research = a request for information about the world (people, events, news, weather, scores, prices, facts, 'look up', 'tell me about', 'do some research on') when the student did NOT ask for Chrome / a browser / a tab / a website. Shown in Milo's own research box.",
           "task = the student wants the computer operated: open an app, Chrome, a browser tab or a website, click, type or write something somewhere (Google Docs, ChatGPT, Notes...), navigate, download. If they say Chrome, browser, tab, Google it, or name a website, it's a task even if they want information.",
           "look = help with homework that is on the screen (teach / hint / do it).",
+          "kit = open one of Milo's OWN apps (set app): study (practice problems, a worked example solved step by step, flashcards, practice tests: 'make me a stats problem and solve it', 'quiz me on this', 'flashcards for bio', 'open your notes and make a problem so I can study'), sketch (draw/graph/show what something looks like: 'graph y=x^2', 'show me the normal curve for this', 'what does a mitochondria look like'), notes (Milo's notes: 'make notes on this page', 'add to my notes ...', 'open your notes'), sheet (a table / quick stats: 'put these scores in a table', 'find the mean of these'), planner (study plan / what to study when: 'plan my week for the exam'), pocket (what Milo is holding). These are Milo's own apps, NOT Apple Notes or Excel unless the student names those apps.",
+          "kit_menu = 'what can you do', 'what can you open', 'show me your tools/kit/apps'.",
+          "hold = 'hold this', 'grab this', 'keep this for me' (Milo copies the selection into his pocket). drop = 'drop it', 'paste what you're holding', 'drop it in ChatGPT' (set target to where, if they said).",
           "screen_question = a question to answer FROM what's on the student's screen right now that isn't homework to solve: 'when is my next exam' (on D2L), 'what does this email say', 'summarize this page', 'what's due on this page', 'what grade did I get'.",
           "move = the student wants Milo himself (the frog character) to go somewhere on the screen: 'move to the bottom left', 'go to the other side', 'get out of the way'.",
           "close = close / dismiss what Milo has open himself: his research box (it looks like a browser window, the student may call it 'the tab', 'this tab', 'the research tab', 'that page', 'the window'), a tool he built, or a lesson. When Milo's research box is open, 'close this tab' / 'close that' means the research box, not Chrome.",
@@ -506,6 +510,8 @@ const ROUTE_TOOL = {
       },
       question: { type: "string", description: "For research: the question, cleaned up (drop filler like 'do some research on')." },
       on: { type: "boolean", description: "For watch: true to start, false to stop." },
+      app: { type: "string", enum: ["study", "sketch", "notes", "sheet", "planner", "pocket"], description: "For kit: which of Milo's apps." },
+      target: { type: "string", description: "For drop: where to paste it, in their words (e.g. 'ChatGPT', 'my Google Doc'). Empty = where they were." },
       after: { type: "string", description: "Only when the student asked for two things where the first is about Milo himself (close, move): the rest of the request to do after it, in their words, e.g. 'open ChatGPT and have it write a story'." },
     },
     required: ["kind"],
@@ -900,3 +906,7 @@ The student asked a question about what's on their screen right now. Answer it f
   const text = r.data.filter((b) => b.type === "text").map((b) => b.text).join(" ").trim();
   return { ok: true as const, text: text || "I couldn't find that on your screen." };
 }
+
+// Shared with the kit (kit.ts).
+export { callTool, callClaude, persona };
+export type { ApiOk, ApiErr };

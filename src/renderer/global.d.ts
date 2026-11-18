@@ -10,13 +10,15 @@ declare global {
     | { type: "closed"; reason: string }
     | { type: "error"; text: string };
   type MiloRoute = {
-    kind: "chat" | "look" | "task" | "research" | "move" | "close" | "open_result" | "screen_question" | "sweep" | "build" | "quiz" | "brief" | "watch" | "checkwork";
+    kind: "chat" | "look" | "task" | "research" | "move" | "close" | "open_result" | "screen_question" | "kit" | "kit_menu" | "hold" | "drop" | "sweep" | "build" | "quiz" | "brief" | "watch" | "checkwork";
     mode?: MiloMode;
     followUp?: boolean;
     where?: string;
     question?: string;
     on?: boolean;
     after?: string;
+    app?: string;
+    target?: string;
     failed?: boolean;
   };
   type MiloMode = "teach" | "help" | "do";
@@ -64,6 +66,27 @@ declare global {
 
   interface Window {
     milo: {
+      kit: {
+        study: (request: string, mode: import("./kit/types").StudyMode, count: number) => Promise<import("./kit/types").Res<import("./kit/types").StudySet>>;
+        check: (item: { prompt: string; answer: string; skill?: string }, answer: string) => Promise<import("./kit/types").Res<{ correct: boolean; feedback: string }>>;
+        mark: (skill: string, correct: boolean) => Promise<boolean>;
+        weak: () => Promise<{ skill: string; right: number; wrong: number; last: number }[]>;
+        sketch: (request: string) => Promise<import("./kit/types").Res<import("./kit/types").Sketch>>;
+        image: (prompt: string) => Promise<{ ok: true; b64: string } | { ok: false; text: string }>;
+        hasImages: () => Promise<boolean>;
+        table: (request: string) => Promise<import("./kit/types").Res<import("./kit/types").Table>>;
+        notes: () => Promise<import("./kit/types").Note[]>;
+        saveNote: (n: Partial<import("./kit/types").Note>) => Promise<import("./kit/types").Note>;
+        deleteNote: (id: string) => Promise<boolean>;
+        makeNote: (request: string) => Promise<import("./kit/types").Res<import("./kit/types").NoteDraft>>;
+        exportNote: (n: import("./kit/types").Note) => Promise<boolean>;
+        pocket: () => Promise<import("./kit/types").PocketItem[]>;
+        hold: (text?: string) => Promise<{ ok: true; item: import("./kit/types").PocketItem } | { ok: false; text: string }>;
+        pocketCopy: (id: string) => Promise<boolean>;
+        pocketRemove: (id: string) => Promise<boolean>;
+        plan: (request: string, items: { title: string; course: string; due: string }[]) => Promise<import("./kit/types").Res<import("./kit/types").Plan>>;
+        copy: (text: string) => Promise<boolean>;
+      };
       log: (src: string, ev: string, data?: Record<string, unknown>) => void;
       flag: (note?: string) => Promise<{ file: string; dir: string }>;
       openLogs: () => void;

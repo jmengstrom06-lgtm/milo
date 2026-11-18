@@ -96,3 +96,12 @@ Milo reads web pages' real buttons and text boxes instead of guessing from scree
 2. Click **Load unpacked** and pick the **extension** folder inside your milo folder.
 3. Start Milo. The chat panel shows **Chrome ✓** when it's connected.
 Pages that can't be read as elements (Google Docs, Sheets, Slides) automatically use screen mode.
+
+## Milo's Kit (his own apps)
+Say **"Milo, what can you do?"** (or click **Kit** in the chat panel) to see them fan out around him.
+- **Study**: "make a stats problem and solve it" (worked example, step by step, with a graph), "give me 5 practice problems on this", "flashcards for chapter 4", "practice test on this". Answer out loud; say "hint", "show me", "next", "another one". He remembers your weak spots.
+- **Sketch**: "graph y = x^2 - 3", "shade P(X > 78) for N(70, 5)", "show me what a plant cell looks like" (images need an OpenAI key: `npm run setkey -- openai`).
+- **Notes**: "make notes on this page", "add to my notes: exam 3 is Nov 25", "save that to my notes". One click sends a note to Apple Notes.
+- **Sheet**: "put these scores in a table" (live mean, median, std dev), Graph it, Copy for Excel.
+- **Planner**: "plan my week for Exam 3" (uses your D2L due dates), Practice buttons on every study block.
+- **Pocket**: select text, "hold this"; later "drop it in ChatGPT" or "paste what you're holding".

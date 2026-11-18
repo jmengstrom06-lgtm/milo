@@ -7,6 +7,27 @@ function on(channel: string, cb: () => void) {
 }
 
 contextBridge.exposeInMainWorld("milo", {
+  kit: {
+    study: (request: string, mode: string, count: number) => ipcRenderer.invoke("kit:study", request, mode, count),
+    check: (item: unknown, answer: string) => ipcRenderer.invoke("kit:check", item, answer),
+    mark: (skill: string, correct: boolean) => ipcRenderer.invoke("kit:mark", skill, correct),
+    weak: () => ipcRenderer.invoke("kit:weak"),
+    sketch: (request: string) => ipcRenderer.invoke("kit:sketch", request),
+    image: (prompt: string) => ipcRenderer.invoke("kit:image", prompt),
+    hasImages: () => ipcRenderer.invoke("kit:has-images"),
+    table: (request: string) => ipcRenderer.invoke("kit:table", request),
+    notes: () => ipcRenderer.invoke("kit:notes"),
+    saveNote: (n: unknown) => ipcRenderer.invoke("kit:note-save", n),
+    deleteNote: (id: string) => ipcRenderer.invoke("kit:note-delete", id),
+    makeNote: (request: string) => ipcRenderer.invoke("kit:note-make", request),
+    exportNote: (n: unknown) => ipcRenderer.invoke("kit:note-export", n),
+    pocket: () => ipcRenderer.invoke("kit:pocket"),
+    hold: (text?: string) => ipcRenderer.invoke("kit:hold", text),
+    pocketCopy: (id: string) => ipcRenderer.invoke("kit:pocket-copy", id),
+    pocketRemove: (id: string) => ipcRenderer.invoke("kit:pocket-remove", id),
+    plan: (request: string, items: unknown[]) => ipcRenderer.invoke("kit:plan", request, items),
+    copy: (text: string) => ipcRenderer.invoke("kit:copy", text),
+  },
   log: (src: string, ev: string, data: Record<string, unknown> = {}) => ipcRenderer.send("milo:log", src, ev, data),
   flag: (note?: string) => ipcRenderer.invoke("milo:log-flag", note ?? ""),
   openLogs: () => ipcRenderer.send("milo:open-logs"),

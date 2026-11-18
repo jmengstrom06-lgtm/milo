@@ -6,6 +6,9 @@ import { Intent, isBareGo, parse, soundsUnfinished, stripGo, stripWake } from ".
 import { Bubble, Confetti, Highlight } from "./Effects";
 import * as tts from "./voice";
 import ResearchPanel, { PanelSize } from "./ResearchPanel";
+import KitHost, { type KitHandle } from "./kit/KitHost";
+import KitRing from "./kit/KitRing";
+import type { KitApp } from "./kit/types";
 import { Pin, SweepHUD, SweepState, SweepSummary, WorkCard } from "./Sweep";
 import { setSounds, sfx, soundsOn } from "./sfx";
 import ToolPanel, { SavedTool, loadTools, saveTools } from "./ToolPanel";
@@ -135,6 +138,9 @@ export default function App() {
   workingRef.current = working;
   const [researchQ, setResearchQ] = useState<{ q: string; id: number } | null>(null);
   const [rpSize, setRpSize] = useState<PanelSize>("compact");
+  const kitRef = useRef<KitHandle>(null);
+  const [kitApp, setKitApp] = useState<KitApp | null>(null); // which of Milo's own apps is open
+  const [ringOpen, setRingOpen] = useState(false); // "what can you do?" ring around Milo
   const [sweep, setSweep] = useState<SweepState | null>(null);
   const [sounds, setSoundsState] = useState(soundsOn());
   const [tool, setTool] = useState<{ request: string; id: number; existing?: SavedTool | null } | null>(null);
@@ -295,7 +301,7 @@ export default function App() {
 
   // Wander along the bottom when nothing is going on.
   useEffect(() => {
-    if (chatOpen || lesson || busy || working || researchQ) return; // stay put while the research box is open
+    if (chatOpen || lesson || busy || working || researchQ || kitApp) return; // stay put while a box is open
     if (homeSpot() !== "bottom-right") return; // you put him somewhere: he stays there
     const t = window.setInterval(() => {
       if (animRef.current) return;
@@ -306,7 +312,7 @@ export default function App() {
       } else if (r < 0.65) setMood("sitting");
     }, 7000);
     return () => window.clearInterval(t);
-  }, [chatOpen, lesson, busy, working, moveTo, researchQ]);
+  }, [chatOpen, lesson, busy, working, moveTo, researchQ, kitApp]);
 
   // ---- voice ------------------------------------------------------------------
   const say = useCallback(async (text: string, opts: { minMs?: number; noBarge?: boolean } = {}) => {
@@ -779,6 +785,7 @@ export default function App() {
 
   // ---- Build-a-Tool ---------------------------------------------------------------
   const closeOthers = () => {
+    kitRef.current?.close();
     runId.current++;
     hush();
     setChatOpen(false);
@@ -906,6 +913,13 @@ export default function App() {
   };
   const onBrief = async (st: BriefState) => {
     setBrief(st);
+    if (st.phase === "ready") {
+      try {
+        localStorage.setItem("milo.briefItems", JSON.stringify(st.items));
+      } catch {
+        /* ignore */
+      }
+    }
     setBriefRun(0);
     if (st.phase === "ready") {
       setMood("happy");
@@ -990,6 +1004,7 @@ export default function App() {
 
   // ---- research panel -------------------------------------------------------------
   const startResearch = (q: string, spoken = true, followUp = false) => {
+    kitRef.current?.close();
     if (!followUp || !researchQ) {
       researchThread.current = [];
       setResearchTurns([]);
@@ -1077,7 +1092,7 @@ export default function App() {
     researchTopic: researchQ?.q,
     inLesson: !!lessonRef.current,
     lessonTopic: lessonRef.current?.topic,
-    toolOpen: tool ? tool.request : undefined,
+    toolOpen: tool ? tool.request : kitApp ? `Milo's ${kitApp} app` : undefined,
     quizOpen: !!quiz,
     lastCommand: lastCommand.current || undefined,
   });
@@ -1086,6 +1101,34 @@ export default function App() {
       flagNow(text);
       return;
     }
+    // ---- Milo's Kit
+    const kt = text.toLowerCase().replace(/[.!?]+$/, "").replace(/^(?:(?:can you|could you|would you|please|just|now|okay|ok|hey)[, ]+)+/, "").trim();
+    if (kitApp && kitRef.current?.voice(text)) return;
+    if (/^(what can you (do|open|make)|what('?s| is) in your (kit|tool ?box)|show me your (tools|kit|apps|tool ?box)|open your (kit|tool ?box|tools|apps))$/.test(kt)) {
+      setRingOpen(true);
+      say("Here's what I can open.").then(() => setBubble(null));
+      return;
+    }
+    if (/^(hold|grab|keep) (this|that|it|onto (this|that|it))( for me)?$|^put (this|that|it) in your pocket$/.test(kt)) {
+      kitRef.current?.hold();
+      return;
+    }
+    const drop = kt.match(/^(drop|paste|put) (it|that|what you'?re holding|what you have)(?: (?:in|into|on) (.+))?$/);
+    if (drop && (drop[3] || /holding|have|drop/.test(kt))) {
+      kitRef.current?.drop(drop[3]);
+      return;
+    }
+    if (/^(save|add|put) (that|this|it) (to|in|into) (your |my )?notes?$/.test(kt) && lastAnswer()) {
+      kitRef.current?.saveToNotes(lastAnswer());
+      return;
+    }
+    const ko = kt.match(/^(?:open|show|pull up|bring up)\s+(?:up\s+)?(?:your|the)\s+(notes|study deck|study|sketch ?pad|sketch|sheet|spreadsheet|planner|pocket)(?: app)?$/);
+    if (ko) {
+      const map: Record<string, KitApp> = { notes: "notes", "study deck": "study", study: "study", sketch: "sketch", "sketch pad": "sketch", sketchpad: "sketch", sheet: "sheet", spreadsheet: "sheet", planner: "planner", pocket: "pocket" };
+      openKit(map[ko[1]] ?? "study");
+      return;
+    }
+
     if (quiz && quizRef.current?.active()) {
       const t = text.toLowerCase().trim().replace(/[.!?]+$/, "");
       if (/^(end|stop|quit|exit|close)( the)? quiz$|^(i'?m )?done$/.test(t)) return closeQuiz();
@@ -1119,12 +1162,13 @@ export default function App() {
       say(`Got it, ${n}.`).then(() => setBubble(null));
       return;
     }
-    if (researchQ || tool) {
+    if (researchQ || tool || kitApp) {
       const t0 = text.toLowerCase().replace(/[.!?]+$/, "").trim();
       const m = t0.match(/^(?:(?:ok(?:ay)?|now|just|please|can you|could you|would you|go ahead and)[, ]+)*(?:close|exit|dismiss|hide|get rid of|shut)\b(.*?)(?:,? (?:and then|and|then) (.+))?$/);
-      if (m && !/\bchrome\b(?!.*\bresearch\b)/.test(m[1]) && /^(\s*(the|this|that|your|my|it|research|box|panel|tab|window|page|screen|tool|one|you just opened|up|out|thing)\b)*\s*$/.test(m[1] + " ")) {
+      if (m && !/\bchrome\b(?!.*\bresearch\b)/.test(m[1]) && /^(\s*(the|this|that|your|my|it|research|box|panel|tab|window|page|screen|tool|one|you just opened|up|out|thing|notes|study|deck|sketch|sheet|planner|pocket|kit|graph|problems?|flashcards?)\b)*\s*$/.test(m[1] + " ")) {
         bb("close_own_panel", { text, then: m[2] ?? null });
-        if (tool) closeTool();
+        if (kitApp) kitRef.current?.close();
+        else if (tool) closeTool();
         else closeResearch();
         if (m[2]) setTimeout(() => routeRef.current(m[2], spoken), 400);
         return;
@@ -1285,8 +1329,24 @@ export default function App() {
       case "screen_question":
         askAboutScreen(text, spoken);
         return;
+      case "kit": {
+        const app = (["study", "sketch", "notes", "sheet", "planner", "pocket"].includes(rt.app ?? "") ? rt.app : "study") as KitApp;
+        openKit(app, text);
+        return;
+      }
+      case "kit_menu":
+        setRingOpen(true);
+        say("Here's what I can open.").then(() => setBubble(null));
+        return;
+      case "hold":
+        kitRef.current?.hold();
+        return;
+      case "drop":
+        kitRef.current?.drop(rt.target);
+        return;
       case "close":
-        if (tool) closeTool();
+        if (kitApp) kitRef.current?.close();
+        else if (tool) closeTool();
         else if (researchQ) closeResearch();
         else if (quiz) closeQuiz();
         else if (lessonRef.current) closeLesson();
@@ -1345,6 +1405,20 @@ export default function App() {
     setBubble(null);
     if (spoken) listen();
   };
+
+  /** Open one of Milo's own apps (Study, Sketch, Notes, Sheet, Planner, Pocket). */
+  const openKit = (app: KitApp, request = "") => {
+    setRingOpen(false);
+    setChatOpen(false);
+    setLesson(null);
+    setBox(null);
+    if (researchQ) closeResearch();
+    if (tool) closeTool();
+    setRpSize(app === "pocket" || app === "notes" ? "compact" : "half");
+    setMood("writing");
+    kitRef.current?.open(app, request);
+  };
+  const lastAnswer = () => (researchThread.current.at(-1)?.a || lastSaid.current || "").replace(/\*\*/g, "");
 
   /** "Milo, move to the bottom left": go there and make it his new spot. */
   const moveMilo = (where: string) => {
@@ -1766,6 +1840,14 @@ export default function App() {
         setBubble(null);
         return;
       }
+      if (ringOpen) {
+        setRingOpen(false);
+        return;
+      }
+      if (kitApp) {
+        kitRef.current?.close();
+        return;
+      }
       if (tool) {
         closeTool();
         return;
@@ -1944,6 +2026,41 @@ export default function App() {
         />
       )}
 
+      <KitHost
+        ref={kitRef}
+        style={panelStyle}
+        size={rpSize}
+        onSize={setRpSize}
+        hover={hover}
+        say={(t, o) => say(t, o).then(() => setBubble(null))}
+        setBubble={setBubble}
+        runTask={(t) => runTask(t, true)}
+        onOpenChange={(a) => {
+          setKitApp(a);
+          if (!a) {
+            hover(false);
+            setMood("idle");
+          }
+        }}
+        briefItems={() => {
+          try {
+            return JSON.parse(localStorage.getItem("milo.briefItems") || "[]");
+          } catch {
+            return [];
+          }
+        }}
+      />
+      {ringOpen && (
+        <KitRing
+          center={{ x: pos.x + MILO_W / 2, y: pos.y + MILO_H / 2 }}
+          hover={hover}
+          onClose={() => {
+            setRingOpen(false);
+            hover(false);
+          }}
+          onPick={(a) => openKit(a)}
+        />
+      )}
       {researchQ && (
         <ResearchPanel
           key={researchQ.id}
@@ -2106,6 +2223,9 @@ export default function App() {
               <span className={`chip ${chromeOn ? "chip--on" : ""}`} title={chromeOn ? "Chrome extension connected: fast web tasks" : "Chrome extension not connected (web tasks use screenshots)"}>
                 {chromeOn ? "Chrome ✓" : "Chrome –"}
               </span>
+              <button className="chip chip--kit" onClick={() => { closeChat(); setRingOpen(true); }} title="Milo's apps: Study, Sketch, Notes, Sheet, Planner, Pocket">
+                Kit
+              </button>
               <button className="chip" onClick={() => window.milo.openLogs()} title="Open Milo's black-box log (Cmd+Shift+B flags a bug)">
                 Logs
               </button>
