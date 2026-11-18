@@ -122,6 +122,7 @@ export default function App() {
   const [heard, setHeard] = useState<string | null>(null);
   const [pause, setPause] = useState(0); // "sending…" bar while you finish talking
   const [working, setWorking] = useState(false); // Milo is using the computer
+  const [live, setLive] = useState<string | null>(null); // your words as you say them (smart ears)
   const workingRef = useRef(false);
   workingRef.current = working;
   const [researchQ, setResearchQ] = useState<{ q: string; id: number } | null>(null);
@@ -192,7 +193,8 @@ export default function App() {
   const lastCommandAt = useRef(0);
   // The "Got it" card: what Milo heard, waiting for go / cancel / more.
   const [pending, setPending] = useState<{ text: string; progress: number; unfinished: boolean } | null>(null);
-  const pendingRef = useRef<{ text: string; started: number; unfinished: boolean; first?: number } | null>(null);
+  const pendingRef = useRef<{ text: string; started: number; unfinished: boolean; first?: number; smart?: boolean } | null>(null);
+  const smartTurn = useRef(false); // the last thing you said was ended by smart ears (Flux), not a pause timer
   const levelRef = useRef(0); // live mic loudness (0..1)
   const lastRun = useRef<{ text: string; at: number } | null>(null); // the command that just started
   const quietStop = useRef(false); // stopping a task to restart it with more words: don't say "Stopped!"
@@ -1346,7 +1348,8 @@ export default function App() {
       }
     };
     let inFlight = false;
-    const queued: { wav: ArrayBuffer; pushToTalk: boolean; forced: boolean }[] = []; // waiting utterances, in order (never drop any)
+    type Heard = { wav: ArrayBuffer; text?: string; pushToTalk: boolean; forced: boolean };
+    const queued: Heard[] = []; // waiting utterances, in order (never drop any)
     e.onPause = (p) => setPause(p);
     e.onDebug = (ev, d) => window.milo.log("ears", ev, d);
     e.onBargeIn = () => {
@@ -1358,28 +1361,46 @@ export default function App() {
       setMood("listening");
       followUntil.current = Date.now() + 12000; // what you say next is for Milo, no "Hey Milo" needed
     };
-    e.onUtterance = async (wav, pushToTalk, forced) => {
+    const take = async (h: Heard) => {
       if (inFlight) {
-        queued.push({ wav, pushToTalk, forced });
+        queued.push(h);
         return;
       }
       inFlight = true;
       try {
-        await handle(wav, pushToTalk, forced);
+        await handle(h.wav, h.pushToTalk, h.forced, h.text);
       } finally {
         inFlight = false;
         const q = queued.shift();
-        if (q) e.onUtterance(q.wav, q.pushToTalk, q.forced);
+        if (q) take(q);
       }
     };
-    const handle = async (wav: ArrayBuffer, pushToTalk: boolean, forced: boolean) => {
+    e.onUtterance = (wav, pushToTalk, forced) => take({ wav, pushToTalk, forced });
+    // Smart ears: the words are already transcribed (and Flux decided you were done).
+    e.onTranscript = (text, pushToTalk, forced, wav) => {
+      setLive(null);
+      window.milo.saveClip(wav, text);
+      take({ wav, text, pushToTalk, forced });
+    };
+    // Your words, live, while you're still talking (only when you're clearly talking to Milo).
+    e.onPartial = (t) => {
+      const toMilo = e.mode === "once" || !!pendingRef.current || Date.now() < followUntil.current || /\b(milo|mylo|my low)\b/i.test(t);
+      if (toMilo) setLive(t.length > 140 ? "…" + t.slice(-140) : t);
+    };
+    window.milo.fluxAvailable().then((ok) => e.setSmart(ok));
+    const offFlux = window.milo.onFlux((ev) => {
+      e.handleFlux(ev);
+      if (ev.type === "end" || ev.type === "closed") setTimeout(() => setLive(null), 400);
+    });
+    const handle = async (wav: ArrayBuffer, pushToTalk: boolean, forced: boolean, already?: string) => {
       const direct = pushToTalk || !!pendingRef.current || Date.now() < followUntil.current; // you were clearly talking to Milo
       const longEnough = e.voicedFrames * 1024 > 16000 * 1.0; // over ~1s of real talking
       if (direct) {
         setEarState("thinking");
         setMood("thinking");
       }
-      const r = await window.milo.stt(wav);
+      smartTurn.current = already != null;
+      const r = already != null ? { ok: true as const, text: already } : await window.milo.stt(wav);
       setEarState(e.mode === "off" ? "off" : "waiting");
       if (!r.ok) {
         setMood((m) => (m === "thinking" ? "idle" : m));
@@ -1520,6 +1541,7 @@ export default function App() {
       setPendingCmd(cleaned, cleaned !== text.trim());
     };
     return () => {
+      offFlux();
       e.setMode("off");
     };
   }, [say, listen]);
@@ -1544,7 +1566,7 @@ export default function App() {
     const unfinished = soundsUnfinished(text);
     if (!unfinished) getRoute(text); // think about it now, so it's ready when the card runs
     bb("card_shown", { text, unfinished, goNow });
-    pendingRef.current = { text, started: Date.now(), unfinished };
+    pendingRef.current = { text, started: Date.now(), unfinished, smart: smartTurn.current };
     setPending({ text, progress: 0, unfinished });
     setHeard(null);
     setBubble(null);
@@ -1581,7 +1603,8 @@ export default function App() {
         if (Date.now() - P.started > 15000) cancelPending(); // gave up waiting for the rest
         return;
       }
-      const prog = (Date.now() - P.started) / AUTO_GO_MS;
+      // Smart ears already waited for you to finish, so the card only needs a short beat.
+      const prog = (Date.now() - P.started) / (P.smart ? 1500 : AUTO_GO_MS);
       if (prog >= 1) runPending(P.text);
       else setPending((p) => (p ? { ...p, progress: prog } : p));
     }, 80);
@@ -1968,6 +1991,7 @@ export default function App() {
       )}
       {!bubble && !pending && heard && <Bubble text={`“${short(heard)}”`} style={bStyle} heard />}
       {!bubble && !pending && !heard && earState === "thinking" && <Bubble text="…" style={bStyle} heard />}
+      {!bubble && !pending && !heard && live && earState !== "thinking" && <Bubble text={live} style={bStyle} heard />}
       {confetti && <Confetti key={confetti.seed} {...confetti} />}
 
       {chatOpen && (

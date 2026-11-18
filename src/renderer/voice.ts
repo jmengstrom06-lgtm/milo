@@ -1,9 +1,12 @@
 // Plays Milo's lines. ElevenLabs audio when available (prefetched so there are no gaps),
-// otherwise the best built-in Mac voice at a natural pitch and speed.
+// otherwise the best Mac voice, rendered to audio. EVERYTHING plays through this page's own audio
+// (Web Audio), so the mic's echo cancelling can remove Milo's voice and he doesn't hear himself.
 
-type Clip = { ok: true; url: string } | { ok: false };
+type Clip = { ok: true; bytes: Uint8Array; engine: "elevenlabs" | "mac" } | { ok: false };
 const cache = new Map<string, Promise<Clip>>();
-let current: HTMLAudioElement | null = null;
+let current: AudioBufferSourceNode | null = null;
+let ctx: AudioContext | null = null;
+const audioCtx = () => (ctx ??= new AudioContext());
 let elevenDownUntil = 0; // pause ElevenLabs after it fails (no key, out of credits…), then try again
 const elevenDown = () => freeVoice || Date.now() < elevenDownUntil;
 /** Free voice: Milo speaks with the Mac's built-in voice (no ElevenLabs credits). Listening is unchanged. */
@@ -20,21 +23,31 @@ export function setVoiceTroubleHandler(fn: (reason: "quota" | "key") => void) {
   onVoiceTrouble = fn;
 }
 
-function b64ToUrl(b64: string) {
+function b64ToBytes(b64: string) {
   const bin = atob(b64);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return URL.createObjectURL(new Blob([bytes], { type: "audio/mpeg" }));
+  return bytes;
+}
+
+/** The free voice: the Mac renders the line to audio (no credits, no glitches). */
+function macClip(key: string): Promise<Clip> {
+  return window.milo
+    .macSay(key)
+    .then((r): Clip => (r.ok ? { ok: true, bytes: b64ToBytes(r.audio), engine: "mac" } : { ok: false }))
+    .catch((): Clip => ({ ok: false }));
 }
 
 /** Start generating audio for a line now, so it's ready when Milo needs it. */
 export function prefetch(text: string, urgent = false): Promise<Clip> {
   const key = text.trim();
-  if (!key || elevenDown()) return Promise.resolve({ ok: false });
-  let p = cache.get(key);
+  if (!key) return Promise.resolve({ ok: false });
+  const useMac = elevenDown();
+  const ck = (useMac ? "mac:" : "el:") + key;
+  let p = cache.get(ck);
   if (!p) {
-    p = window.milo.tts(key, urgent).then((r) => {
-      if (r.ok) return { ok: true as const, url: b64ToUrl(r.audio) };
+    p = useMac ? macClip(key) : window.milo.tts(key, urgent).then((r): Clip | Promise<Clip> => {
+      if (r.ok) return { ok: true, bytes: b64ToBytes(r.audio), engine: "elevenlabs" };
       if (r.text === "no-key") elevenDownUntil = Date.now() + 10 * 60_000;
       else if (r.text === "quota") {
         if (!elevenDown()) onVoiceTrouble("quota");
@@ -44,10 +57,13 @@ export function prefetch(text: string, urgent = false): Promise<Clip> {
         elevenDownUntil = Date.now() + 60_000;
       }
       window.milo.log("voice", "natural_voice_failed", { reason: r.text, text: key.slice(0, 80) });
-      cache.delete(key); // don't keep a failed line around
-      return { ok: false as const };
+      cache.delete(ck); // don't keep a failed line around
+      return macClip(key); // say it in the free voice instead
     });
-    cache.set(key, p);
+    p.then((c) => {
+      if (!c.ok) cache.delete(ck);
+    });
+    cache.set(ck, p);
     if (cache.size > 60) cache.delete(cache.keys().next().value as string);
   }
   return p;
@@ -155,38 +171,56 @@ async function systemSpeak(text: string, onStart: () => void): Promise<void> {
   }
 }
 
+/** Play rendered audio through this page (so echo cancelling knows about it). */
+async function playBytes(bytes: Uint8Array, onStart: () => void): Promise<boolean> {
+  const c = audioCtx();
+  if (c.state === "suspended") await c.resume().catch(() => {});
+  let buf: AudioBuffer;
+  try {
+    buf = await c.decodeAudioData(bytes.slice().buffer);
+  } catch {
+    return false;
+  }
+  await new Promise<void>((resolve) => {
+    const src = c.createBufferSource();
+    src.buffer = buf;
+    src.connect(c.destination);
+    current = src;
+    let done = false;
+    const finish = () => {
+      if (!done) {
+        done = true;
+        if (current === src) current = null;
+        resolve();
+      }
+    };
+    src.onended = finish; // also fires on stop()
+    setTimeout(finish, buf.duration * 1000 + 1500); // never hang
+    src.start();
+    onStart();
+  });
+  return true;
+}
+
 /** Speak a line. Resolves when Milo finishes talking. */
 export async function play(text: string, onStart: () => void): Promise<void> {
   stop();
+  const token = speakToken;
   const clip = await prefetch(text, true);
-  window.milo.log("voice", "play", { engine: clip.ok ? "elevenlabs" : freeVoice ? "mac_free" : "mac_fallback", chars: text.length });
-  if (clip.ok) {
-    await new Promise<void>((resolve) => {
-      const a = new Audio(clip.url);
-      current = a;
-      let done = false;
-      const finish = () => {
-        if (!done) {
-          done = true;
-          if (current === a) current = null;
-          resolve();
-        }
-      };
-      a.onplaying = onStart;
-      a.onended = finish;
-      a.onerror = finish;
-      a.onpause = finish; // stop() pauses
-      a.play().catch(finish);
-    });
-    return;
-  }
-  await systemSpeak(text, onStart);
+  if (token !== speakToken) return; // stopped while it was loading
+  window.milo.log("voice", "play", { engine: clip.ok ? clip.engine : "chromium_speech", free: freeVoice, chars: text.length });
+  if (clip.ok && (await playBytes(clip.bytes, onStart))) return;
+  await systemSpeak(text, onStart); // last resort
 }
 
 export function stop() {
   speakToken++;
   if (current) {
-    current.pause();
+    try {
+      current.stop();
+    } catch {
+      /* already stopped */
+    }
     current = null;
   }
   window.speechSynthesis?.cancel();

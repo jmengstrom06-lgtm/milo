@@ -23,6 +23,10 @@ const MAX_FRAMES = Math.round((25 * RATE) / FRAME); // 25 s cap (push-to-talk)
 const MAX_FRAMES_HF = Math.round((20 * RATE) / FRAME); // 20 s cap in hands-free so background chatter can't hang him
 const FOLLOW_FRAMES = Math.round((5 * RATE) / FRAME); // after you finish a sentence, keep listening 5 s more for the rest
 const ONCE_TIMEOUT = Math.round((7 * RATE) / FRAME); // give up after 7 s of nothing
+// Smart ears (Deepgram Flux): the mic still notices when you START talking (so we only stream, and pay,
+// while you're talking), but Flux decides when you're DONE from what you said.
+const STREAM_IDLE = Math.round((6 * RATE) / FRAME); // close the stream after 6 s with nobody talking
+const FLUX_GRACE = Math.round((8 * RATE) / FRAME); // if Flux hasn't ended the turn 8 s into quiet, end it ourselves
 
 export class Ears {
   mode: EarMode = "off";
@@ -70,12 +74,116 @@ export class Ears {
   private bargeOk = true;
   private bargeRun = 0;
   onUtterance: (wav: ArrayBuffer, pushToTalk: boolean, forced: boolean) => void = () => {};
+  /** Smart ears: a finished turn, already transcribed (plus the audio, for the log). */
+  onTranscript: (text: string, pushToTalk: boolean, forced: boolean, wav: ArrayBuffer) => void = () => {};
+  /** Smart ears: your words so far, live, while you talk. */
+  onPartial: (text: string) => void = () => {};
+  private smart = false;
+  private streaming = false;
+  private streamIdle = 0;
+  private forcing = false;
+  private fallbackAt = 0; // we finished a turn ourselves: ignore Flux's late copy of it
+
+  /** Turn smart ears (Deepgram Flux) on or off. Off = the built-in pause detection. */
+  setSmart(on: boolean) {
+    this.smart = on;
+    if (!on) this.stopStream();
+    this.onDebug("smart_ears", { on });
+  }
+  get isSmart() {
+    return this.smart;
+  }
+
+  private startStream() {
+    if (this.streaming || !this.smart) return;
+    this.streaming = true;
+    this.streamIdle = 0;
+    window.milo.fluxOpen().then((ok) => {
+      if (!ok && this.streaming) {
+        this.onDebug("flux_open_failed", {});
+        this.streaming = false; // the built-in pause detection takes over for this one
+      }
+    });
+  }
+  private stopStream() {
+    if (!this.streaming) return;
+    this.streaming = false;
+    window.milo.fluxClose();
+  }
+  private send(frames: Float32Array[]) {
+    if (!this.streaming) return;
+    for (const f of frames) {
+      const pcm = new Int16Array(f.length);
+      for (let i = 0; i < f.length; i++) {
+        const x = Math.max(-1, Math.min(1, f[i]));
+        pcm[i] = x < 0 ? x * 0x8000 : x * 0x7fff;
+      }
+      window.milo.fluxAudio(pcm.buffer);
+    }
+  }
+
+  /** Events from Deepgram Flux (forwarded by the app). */
+  handleFlux(ev: MiloFluxEvent) {
+    switch (ev.type) {
+      case "start":
+        if (!this.muted && !this.speaking && this.streaming) {
+          this.speaking = true;
+          this.speech = [...this.ring];
+          this.ring = [];
+          this.quietRun = 0;
+          this.onState("hearing");
+        }
+        break;
+      case "update":
+        if (!this.muted) this.onPartial(ev.text);
+        break;
+      case "end":
+        if (Date.now() - this.fallbackAt < 4000) break;
+        this.finishSmart(ev.text, ev.trigger === "manual" || this.forcing);
+        break;
+      case "error":
+        if (ev.text === "key") this.setSmart(false);
+      // falls through
+      case "closed":
+        if (this.streaming) {
+          this.streaming = false;
+          // Mid-sentence when the stream dropped: finish it the old way so nothing is lost.
+          if (this.speaking && this.speech.length > 8) this.finish(false, "flux_dropped");
+        }
+        break;
+    }
+  }
+
+  private finishSmart(text: string, forced: boolean) {
+    this.forcing = false;
+    const frames = this.speech;
+    const energy = this.uttEnergy.filter((e) => e > 0.011).sort((a, b) => a - b);
+    const seconds = +((frames.length * FRAME) / RATE).toFixed(2);
+    this.resetUtterance();
+    this.streamIdle = 0; // keep the stream open a bit: you might keep going
+    const voiced = energy.length;
+    const level = voiced ? energy[Math.floor(voiced * 0.7)] : 0;
+    this.voicedFrames = Math.max(voiced, Math.round((text.split(/\s+/).length * 0.35 * RATE) / FRAME));
+    this.lastLevel = level;
+    const tooFar = this.mode === "always" && this.userLevel > 0 && voiced > 0 && level < this.userLevel * 0.45;
+    this.onDebug("end", { reason: forced ? "flux_forced" : "flux_end_of_turn", seconds, level: +level.toFixed(4), userLevel: +this.userLevel.toFixed(4), mode: this.mode, text });
+    if (!text.trim() || tooFar) {
+      this.onDebug("dropped", { why: !text.trim() ? "no_words" : "too_quiet_not_you", seconds });
+      this.onState("waiting");
+      return;
+    }
+    const once = this.mode === "once";
+    if (once) this.idleFrames = Math.max(0, ONCE_TIMEOUT - FOLLOW_FRAMES);
+    this.onState("waiting");
+    this.onTranscript(text.trim(), once, forced, encodeWav(frames, RATE));
+  }
 
   async setMode(mode: EarMode) {
     this.mode = mode;
     this.resetUtterance();
     this.idleFrames = 0;
     if (mode === "off") {
+      this.stopStream();
       this.close();
       this.onState("off");
       return;
@@ -93,6 +201,7 @@ export class Ears {
     this.bargeRun = 0;
     this.bargeOk = allowBargeIn;
     if (on) {
+      this.stopStream();
       this.echo = 0.01;
       this.warmup = 1e9; // no interrupting until his voice actually starts (see started())
       this.resetUtterance();
@@ -151,7 +260,10 @@ export class Ears {
 
   /** Push-to-talk: "I'm done talking", send what we have now. */
   flush() {
-    if (this.speaking && this.speech.length > 4) this.finish(true, "push_to_talk_send");
+    if (this.speaking && this.streaming) {
+      this.forcing = true;
+      window.milo.fluxForce(); // Flux ends the turn on what it has and sends the words back
+    } else if (this.speaking && this.speech.length > 4) this.finish(true, "push_to_talk_send");
     else if (this.mode === "once") this.setMode("off");
   }
 
@@ -210,6 +322,10 @@ export class Ears {
         this.speech = [...this.ring];
         this.ring = [];
         this.quietRun = 0;
+        if (this.smart) {
+          this.startStream();
+          this.send(this.speech);
+        }
         this.onState("hearing");
       }
       return;
@@ -226,15 +342,23 @@ export class Ears {
     if (!this.speaking) {
       this.ring.push(data);
       if (this.ring.length > PRE_ROLL) this.ring.shift();
+      if (this.streaming) {
+        this.send([data]); // keep Flux hearing the room so it can catch the start of your next turn
+        if (++this.streamIdle > STREAM_IDLE) this.stopStream();
+      }
       if (rms > on) this.loudRun++;
       else {
         this.loudRun = 0;
         this.floor = this.floor * 0.95 + rms * 0.05; // learn the room's background noise
       }
       if (this.loudRun >= START_FRAMES) {
-        this.onDebug("start", { mode: this.mode, rms: +rms.toFixed(4), on: +on.toFixed(4), floor: +this.floor.toFixed(4) });
+        this.onDebug("start", { mode: this.mode, rms: +rms.toFixed(4), on: +on.toFixed(4), floor: +this.floor.toFixed(4), smart: this.smart });
         this.speaking = true;
         this.speech = [...this.ring];
+        if (this.smart && !this.streaming) {
+          this.startStream();
+          this.send(this.speech); // the ~0.8 s before you were "loud enough", so first words aren't lost
+        }
         this.ring = [];
         this.quietRun = 0;
         this.onState("hearing");
@@ -249,6 +373,22 @@ export class Ears {
     this.uttEnergy.push(rms);
     this.uttPeak = Math.max(this.uttPeak * 0.985, rms);
     this.quietRun = rms < off ? this.quietRun + 1 : 0;
+    if (this.smart && this.streaming) {
+      // Flux decides when you're done. We only step in if it goes quiet for a long time or runs too long.
+      this.send([data]);
+      this.streamIdle = 0;
+      this.onPause(0);
+      const capS = this.mode === "always" ? MAX_FRAMES_HF : MAX_FRAMES;
+      if (this.speech.length >= capS && !this.forcing) {
+        this.forcing = true;
+        window.milo.fluxForce();
+      } else if (this.quietRun >= END_SILENCE + FLUX_GRACE) {
+        this.onDebug("flux_no_end", { quietS: +((this.quietRun * FRAME) / RATE).toFixed(1) });
+        this.stopStream();
+        this.finish(false, "flux_silent_fallback");
+      }
+      return;
+    }
     // "Your voice" = clearly as loud as you were talking. Other people, quieter, don't reset the timer.
     const yours = rms > Math.max(off * 1.3, this.uttPeak * 0.3);
     this.noVoiceRun = yours ? 0 : this.noVoiceRun + 1;
@@ -264,6 +404,7 @@ export class Ears {
   }
 
   private finish(forced = false, reason = "silence") {
+    if (this.smart) this.fallbackAt = Date.now();
     const frames = this.speech;
     const seconds = +((frames.length * FRAME) / RATE).toFixed(2);
     const peak = +this.uttPeak.toFixed(4);

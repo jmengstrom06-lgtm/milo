@@ -1,6 +1,14 @@
 export {};
 
 declare global {
+  type MiloFluxEvent =
+    | { type: "open" }
+    | { type: "start"; turn: number }
+    | { type: "update"; turn: number; text: string }
+    | { type: "resumed"; turn: number }
+    | { type: "end"; turn: number; text: string; confidence: number; trigger?: string }
+    | { type: "closed"; reason: string }
+    | { type: "error"; text: string };
   type MiloRoute = {
     kind: "chat" | "look" | "task" | "research" | "move" | "close" | "open_result" | "sweep" | "build" | "quiz" | "brief" | "watch" | "checkwork";
     mode?: MiloMode;
@@ -58,6 +66,14 @@ declare global {
       log: (src: string, ev: string, data?: Record<string, unknown>) => void;
       flag: (note?: string) => Promise<{ file: string; dir: string }>;
       openLogs: () => void;
+      fluxAvailable: () => Promise<boolean>;
+      fluxOpen: () => Promise<boolean>;
+      fluxAudio: (pcm: ArrayBuffer) => void;
+      fluxForce: () => void;
+      fluxClose: () => void;
+      onFlux: (fn: (e: MiloFluxEvent) => void) => () => void;
+      saveClip: (wav: ArrayBuffer, note?: string) => void;
+      macSay: (text: string) => Promise<{ ok: true; audio: string } | { ok: false; text: string }>;
       onFlag: (fn: () => void) => () => void;
       setClickable: (clickable: boolean) => void;
       ask: (history: { role: "user" | "assistant"; content: string }[]) => Promise<{ ok: boolean; text: string }>;

@@ -10,6 +10,18 @@ contextBridge.exposeInMainWorld("milo", {
   log: (src: string, ev: string, data: Record<string, unknown> = {}) => ipcRenderer.send("milo:log", src, ev, data),
   flag: (note?: string) => ipcRenderer.invoke("milo:log-flag", note ?? ""),
   openLogs: () => ipcRenderer.send("milo:open-logs"),
+  fluxAvailable: () => ipcRenderer.invoke("milo:flux-available"),
+  fluxOpen: () => ipcRenderer.invoke("milo:flux-open"),
+  fluxAudio: (pcm: ArrayBuffer) => ipcRenderer.send("milo:flux-audio", pcm),
+  fluxForce: () => ipcRenderer.send("milo:flux-force"),
+  fluxClose: () => ipcRenderer.send("milo:flux-close"),
+  onFlux: (fn: (e: unknown) => void) => {
+    const l = (_e: unknown, ev: unknown) => fn(ev);
+    ipcRenderer.on("milo:flux-event", l);
+    return () => ipcRenderer.removeListener("milo:flux-event", l);
+  },
+  saveClip: (wav: ArrayBuffer, note?: string) => ipcRenderer.send("milo:save-clip", wav, note ?? ""),
+  macSay: (text: string) => ipcRenderer.invoke("milo:mac-say", text),
   onFlag: (fn: () => void) => {
     const l = () => fn();
     ipcRenderer.on("milo:flag", l);

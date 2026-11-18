@@ -14,6 +14,8 @@ import path from "node:path";
 import dotenv from "dotenv";
 import { speak } from "./voice";
 import { log as bb, saveClip, timer, LOG_DIR, LOG_FILE } from "./blackbox";
+import { closeFlux, fluxAvailable, forceEndTurn, onFlux, openFlux, sendAudio } from "./flux";
+import { macSpeak } from "./macvoice";
 import { transcribe } from "./ears";
 import { click, ensureBrowser, frontApp, openApp, openFolder, openLatestDownload, openUrl, pressKeys, typeText } from "./hands";
 import { plan } from "./quick";
@@ -605,6 +607,20 @@ ipcMain.handle("milo:log-flag", (_e, note?: string) => {
   return { file: LOG_FILE, dir: LOG_DIR };
 });
 ipcMain.on("milo:open-logs", () => shell.showItemInFolder(LOG_FILE));
+
+// ---------- smart ears (Deepgram Flux) + free voice rendered to audio ----------
+onFlux((ev) => overlay?.webContents.send("milo:flux-event", ev));
+ipcMain.handle("milo:flux-available", () => fluxAvailable());
+ipcMain.handle("milo:flux-open", () => openFlux());
+ipcMain.on("milo:flux-audio", (_e, pcm: ArrayBuffer) => {
+  if (pcm instanceof ArrayBuffer || ArrayBuffer.isView(pcm)) sendAudio(pcm instanceof ArrayBuffer ? pcm : (pcm as Uint8Array).buffer as ArrayBuffer);
+});
+ipcMain.on("milo:flux-force", () => forceEndTurn());
+ipcMain.on("milo:flux-close", () => closeFlux());
+ipcMain.on("milo:save-clip", (_e, wav: ArrayBuffer, note?: string) => {
+  if (wav instanceof ArrayBuffer) bb("ears", "clip", { clip: saveClip(wav), note: typeof note === "string" ? note.slice(0, 200) : "" });
+});
+ipcMain.handle("milo:mac-say", (_e, text: string) => macSpeak(String(text ?? "")));
 ipcMain.handle("milo:hands-access", () =>
   process.platform === "darwin" ? systemPreferences.isTrustedAccessibilityClient(true) : true
 );
