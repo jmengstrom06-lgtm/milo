@@ -1,0 +1,35 @@
+# Runs on every push: nothing reaches Jake's Mac unless it passes.
+name: checks
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Router evals (real AI)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: npm run eval
+      - name: Save eval results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: router-eval
+          path: evals/results/
+          if-no-files-found: ignore

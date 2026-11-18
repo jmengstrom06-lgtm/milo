@@ -39,7 +39,7 @@ export const clean = (text: string) =>
   text
     .toLowerCase()
     .replace(/[.!?]+$/, "")
-    .replace(/^(?:(?:hey |ok(?:ay)? |so |uh+|um+|cool|alright|all right|yeah|well|now|and|milo|can you|could you|would you|will you|please|just)[,.]?\s+)+/, "")
+    .replace(/^(?:(?:hey|ok(?:ay)?|so|uh+|um+|cool|alright|all right|yeah|well|now|and|milo|can you|could you|would you|will you|please|just)\b[,.]?\s*)+/, "")
     .trim();
 
 const NUM: Record<string, number> = { one: 1, a: 1, an: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twelve: 12, fifteen: 15, twenty: 20 };
