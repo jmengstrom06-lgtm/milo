@@ -637,3 +637,45 @@ body,
   line-height: 14px;
   color: #fff;
 }
+
+/* "Got it" card: what Milo heard, waiting for go / cancel */
+.got-it {
+  position: fixed;
+  z-index: 46;
+  box-sizing: border-box;
+  width: 270px;
+  padding: 10px 12px 9px;
+  background: #fff;
+  border: 2px solid var(--accent);
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  animation: pop 0.16s ease-out;
+}
+.got-it__label { font-size: 11px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); }
+.got-it__text { margin: 4px 0 8px; font-family: "Caveat", cursive; font-size: 22px; line-height: 1.15; color: #1f2a44; }
+.got-it__row { display: flex; gap: 8px; }
+.got-it__go {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  border: 0;
+  border-radius: 10px;
+  padding: 8px;
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  font-size: 14px;
+  cursor: pointer;
+}
+.got-it__fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); opacity: 0.35; transition: width 0.08s linear; }
+.got-it__go b { position: relative; }
+.got-it__cancel {
+  border: 1.5px solid #ccc;
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: #fff;
+  color: #666;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.got-it__hint { margin-top: 6px; font-size: 10.5px; color: #8a8a8a; text-align: center; }

@@ -117,7 +117,10 @@ export default function App() {
   const pendingTask = useRef<string | null>(null);
   const lastCommand = useRef<string | null>(null);
   const lastCommandAt = useRef(0);
-  const partial = useRef<{ text: string; timer: number } | null>(null); // a sentence you haven't finished yet // last thing you asked for (so a bare "go" can redo it)
+  // The "Got it" card: what Milo heard, waiting for go / cancel / more.
+  const [pending, setPending] = useState<{ text: string; progress: number; unfinished: boolean } | null>(null);
+  const pendingRef = useRef<{ text: string; started: number; unfinished: boolean } | null>(null);
+  const earStateRef = useRef<string>("off"); // last thing you asked for (so a bare "go" can redo it)
   const restoreHandsFree = useRef(false);
   const lastStepSay = useRef("");
   const lastStepPoint = useRef<{ x: number; y: number } | null>(null); // a task waiting on the student's yes/no
@@ -130,6 +133,7 @@ export default function App() {
   lessonModeRef.current = lessonMode;
   boxRef.current = box;
   finishedRef.current = finished;
+  earStateRef.current = earState;
 
   // Apply the character's colors to the whole UI and tell the brain who Milo is.
   useEffect(() => {
@@ -621,11 +625,11 @@ export default function App() {
       }
     };
     let inFlight = false;
-    let queued: { wav: ArrayBuffer; pushToTalk: boolean; forced: boolean } | null = null; // newest waiting utterance (never drop yours)
+    const queued: { wav: ArrayBuffer; pushToTalk: boolean; forced: boolean }[] = []; // waiting utterances, in order (never drop any)
     e.onPause = (p) => setPause(p);
     e.onUtterance = async (wav, pushToTalk, forced) => {
       if (inFlight) {
-        queued = { wav, pushToTalk, forced };
+        queued.push({ wav, pushToTalk, forced });
         return;
       }
       inFlight = true;
@@ -633,15 +637,12 @@ export default function App() {
         await handle(wav, pushToTalk, forced);
       } finally {
         inFlight = false;
-        if (queued) {
-          const q = queued;
-          queued = null;
-          e.onUtterance(q.wav, q.pushToTalk, q.forced);
-        }
+        const q = queued.shift();
+        if (q) e.onUtterance(q.wav, q.pushToTalk, q.forced);
       }
     };
     const handle = async (wav: ArrayBuffer, pushToTalk: boolean, forced: boolean) => {
-      const direct = pushToTalk || !!partial.current || Date.now() < followUntil.current; // you were clearly talking to Milo
+      const direct = pushToTalk || !!pendingRef.current || Date.now() < followUntil.current; // you were clearly talking to Milo
       const longEnough = e.voicedFrames * 1024 > 16000 * 1.0; // over ~1s of real talking
       if (direct) {
         setEarState("thinking");
@@ -685,54 +686,116 @@ export default function App() {
       }
       if (!text) return;
 
-      // Join with the start of a sentence you paused in the middle of.
-      if (partial.current) {
-        text = `${partial.current.text} ${text}`.trim();
-        window.clearTimeout(partial.current.timer);
-        partial.current = null;
-      }
-      // Sounds unfinished ("go", "open the", "go to chrome and")? Keep listening for the rest.
-      if (!forced && soundsUnfinished(stripGo(text)) && !(isBareGo(text) && Date.now() - lastCommandAt.current < 30000)) {
-        const sofar = text;
-        partial.current = {
-          text: sofar,
-          // If nothing else comes, go with what we have.
-          timer: window.setTimeout(() => {
-            if (partial.current?.text !== sofar) return;
-            partial.current = null;
-            setHeard(sofar);
-            routeRef.current(stripGo(sofar));
-          }, 6000),
-        };
-        followUntil.current = Date.now() + 8000;
-        setHeard(`${sofar}…`);
-        setMood("listening");
-        if (e.mode === "off") listen();
-        return;
-      }
-      followUntil.current = 0;
-      // A bare "go" means: do the last thing I asked (if it didn't happen).
-      if (isBareGo(text)) {
-        if (lastCommand.current) text = lastCommand.current;
-        else {
-          await say("Go where? Tell me what to do.");
-          setBubble(null);
-          listen();
+      // ---- A command is waiting on the "Got it" card: go / cancel / keep adding.
+      const P = pendingRef.current;
+      if (P) {
+        if (isBareGo(text) || /^(yes|yeah|yep|do it|send it|run it|start|okay|ok)\b[.!]*$/i.test(text.trim())) {
+          confirmPending();
           return;
         }
-      } else {
-        text = stripGo(text);
-        lastCommand.current = text;
-        lastCommandAt.current = Date.now();
+        if (/^(cancel|no|nope|never ?mind|forget it|scratch that|stop)\b/i.test(text.trim())) {
+          cancelPending();
+          return;
+        }
+        const added = stripGo(text);
+        setPendingCmd(`${P.text} ${added}`.trim(), added !== text.trim()); // ended with "go" -> run now
+        return;
       }
-      setHeard(text);
-      setBubble(null);
-      routeRef.current(text);
+
+      followUntil.current = 0;
+      // A bare "go" with nothing waiting: redo the last command if it was recent.
+      if (isBareGo(text)) {
+        if (lastCommand.current && Date.now() - lastCommandAt.current < 60000) {
+          routeRef.current(lastCommand.current);
+        } else {
+          setBubble("Tell me what to do first, then say go.");
+          setTimeout(() => setBubble(null), 3000);
+          listen();
+        }
+        return;
+      }
+
+      // Quick, reversible things happen right away (answers, yes/no, stop, notebook controls).
+      const inLesson = !!lessonRef.current;
+      const awaitingAnswer = inLesson && finishedRef.current && lessonModeRef.current !== "do" && !!lessonRef.current?.check_question;
+      const kind = parse(stripGo(text), { inLesson, awaitingAnswer, pendingAsk: !!pendingTask.current }).kind;
+      const instant = ["answer", "yes", "no", "hush", "close", "show", "copy", "practice", "skip", "repeat", "mode", "goto", "fill"].includes(kind);
+      if (forced || instant) {
+        const t = stripGo(text);
+        lastCommand.current = t;
+        lastCommandAt.current = Date.now();
+        setHeard(t);
+        setBubble(null);
+        routeRef.current(t);
+        return;
+      }
+
+      // Everything else goes on the "Got it" card first.
+      const cleaned = stripGo(text);
+      setPendingCmd(cleaned, cleaned !== text.trim());
     };
     return () => {
       e.setMode("off");
     };
   }, [say, listen]);
+
+  // ---- "Got it" card --------------------------------------------------------------
+  const AUTO_GO_MS = 3000;
+  const runPending = (text: string) => {
+    pendingRef.current = null;
+    setPending(null);
+    followUntil.current = 0;
+    lastCommand.current = text;
+    lastCommandAt.current = Date.now();
+    setHeard(text);
+    setBubble(null);
+    routeRef.current(text);
+  };
+  function setPendingCmd(text: string, goNow = false) {
+    if (!text) return;
+    if (goNow && !soundsUnfinished(text)) return runPending(text);
+    const unfinished = soundsUnfinished(text);
+    pendingRef.current = { text, started: Date.now(), unfinished };
+    setPending({ text, progress: 0, unfinished });
+    setHeard(null);
+    setBubble(null);
+    setMood("listening");
+    followUntil.current = Date.now() + 15000; // no need to say "Milo" again while the card is up
+    if (ears.current?.mode === "off") listen();
+  }
+  function confirmPending() {
+    const P = pendingRef.current;
+    if (P) runPending(P.text);
+  }
+  function cancelPending() {
+    pendingRef.current = null;
+    setPending(null);
+    followUntil.current = 0;
+    setMood("idle");
+    setBubble("Okay, cancelled.");
+    setTimeout(() => setBubble((b) => (b === "Okay, cancelled." ? null : b)), 1800);
+  }
+  // Countdown: pauses while you're talking; unfinished sentences don't auto-run.
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      const P = pendingRef.current;
+      if (!P) return;
+      if (earStateRef.current === "hearing" || earStateRef.current === "thinking") {
+        P.started = Date.now(); // you're still talking: hold
+        setPending((p) => (p ? { ...p, progress: 0 } : p));
+        return;
+      }
+      if (P.unfinished) {
+        if (Date.now() - P.started > 15000) cancelPending(); // gave up waiting for the rest
+        return;
+      }
+      const prog = (Date.now() - P.started) / AUTO_GO_MS;
+      if (prog >= 1) runPending(P.text);
+      else setPending((p) => (p ? { ...p, progress: prog } : p));
+    }, 80);
+    return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const talk = useCallback(() => {
     const e = ears.current!;
@@ -916,16 +979,26 @@ export default function App() {
           <div className="ear-ring" style={{ transform: `scale(${1 + level * 0.6})` }} />
         )}
         <Milo mood={mood} facing={facing} speaking={speaking} character={character} />
-        {pause > 0.05 && earState === "hearing" && (
-          <div className="send-bar">
-            <span style={{ width: `${Math.round(pause * 100)}%` }} />
-            <em>sending…</em>
-          </div>
-        )}
-        {handsFree && !working && pause <= 0.05 && <div className={`ears-on ${earState === "hearing" ? "ears-on--hot" : ""}`}>Say "Hey Milo"</div>}
+        {handsFree && !working && !pending && <div className={`ears-on ${earState === "hearing" ? "ears-on--hot" : ""}`}>Say "Hey Milo"</div>}
       </div>
 
       {bubble && <Bubble text={short(bubble)} style={bStyle} />}
+      {pending && (
+        <div className="got-it" style={bStyle} onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)}>
+          <div className="got-it__label">{pending.unfinished ? "Keep going…" : "Got it"}</div>
+          <div className="got-it__text">“{short(pending.text)}{pending.unfinished ? "…" : ""}”</div>
+          <div className="got-it__row">
+            <button className="got-it__go" onClick={confirmPending}>
+              <span className="got-it__fill" style={{ width: pending.unfinished ? 0 : `${Math.round(pending.progress * 100)}%` }} />
+              <b>Go</b>
+            </button>
+            <button className="got-it__cancel" onClick={cancelPending}>
+              Cancel
+            </button>
+          </div>
+          <div className="got-it__hint">Say “go”, keep talking to add, or “cancel”</div>
+        </div>
+      )}
       {working && (
         <button
           className="stop-pill"
@@ -937,8 +1010,8 @@ export default function App() {
           Stop (Esc)
         </button>
       )}
-      {!bubble && heard && <Bubble text={`“${short(heard)}”`} style={bStyle} heard />}
-      {!bubble && !heard && earState === "thinking" && <Bubble text="…" style={bStyle} heard />}
+      {!bubble && !pending && heard && <Bubble text={`“${short(heard)}”`} style={bStyle} heard />}
+      {!bubble && !pending && !heard && earState === "thinking" && <Bubble text="…" style={bStyle} heard />}
       {confetti && <Confetti key={confetti.seed} {...confetti} />}
 
       {chatOpen && (
