@@ -6,6 +6,8 @@ import { isBareGo, parse, soundsUnfinished, stripGo, stripWake } from "./command
 import { Bubble, Confetti, Highlight } from "./Effects";
 import * as tts from "./voice";
 import ResearchPanel, { PanelSize } from "./ResearchPanel";
+import { Pin, SweepHUD, SweepState, SweepSummary, WorkCard } from "./Sweep";
+import { sfx } from "./sfx";
 
 type Msg = { role: "user" | "assistant"; content: string };
 type Pos = { x: number; y: number };
@@ -28,29 +30,6 @@ function detectMode(text: string, fallback: MiloMode): MiloMode {
   if (/(teach|explain|how do|walk me|show me how)/.test(t)) return "teach";
   return fallback;
 }
-// A tiny two-note "I'm listening" chime (no speech, so the mic stays open).
-let chimeCtx: AudioContext | null = null;
-function chime() {
-  try {
-    chimeCtx = chimeCtx ?? new AudioContext();
-    const t = chimeCtx.currentTime;
-    [880, 1320].forEach((f, i) => {
-      const o = chimeCtx!.createOscillator();
-      const g = chimeCtx!.createGain();
-      o.frequency.value = f;
-      o.type = "sine";
-      g.gain.setValueAtTime(0, t + i * 0.09);
-      g.gain.linearRampToValueAtTime(0.12, t + i * 0.09 + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.09 + 0.16);
-      o.connect(g).connect(chimeCtx!.destination);
-      o.start(t + i * 0.09);
-      o.stop(t + i * 0.09 + 0.18);
-    });
-  } catch {
-    /* no audio */
-  }
-}
-
 // Accept the lock-on result only if it overlaps the first guess (guards against jumping to a different question).
 function closeEnough(a: MiloBox, b: MiloBox) {
   const ix = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
@@ -101,6 +80,8 @@ export default function App() {
   const [working, setWorking] = useState(false); // Milo is using the computer
   const [researchQ, setResearchQ] = useState<{ q: string; id: number } | null>(null);
   const [rpSize, setRpSize] = useState<PanelSize>("compact");
+  const [sweep, setSweep] = useState<SweepState | null>(null);
+  const sweepStop = useRef(false);
 
   const posRef = useRef(pos);
   const animRef = useRef<number | null>(null);
@@ -183,6 +164,7 @@ export default function App() {
         setPos(next);
         if (k >= 1) {
           animRef.current = null;
+          if (style === "jump") sfx.hop();
           setMood("idle");
           resolve();
           return;
@@ -339,6 +321,7 @@ export default function App() {
         if (rb && id === runId.current) {
           setBox(rb);
           setLocked(true);
+          sfx.lock();
         }
       })]);
       if (id !== runId.current) return;
@@ -394,6 +377,7 @@ export default function App() {
   const onFeedback = async (text: string, correct: boolean) => {
     if (correct) {
       setMood("celebrating");
+      sfx.success();
       setConfetti({ x: posRef.current.x + MILO_W / 2, y: posRef.current.y + 40, seed: Date.now() });
     } else setMood("thinking");
     await say(text);
@@ -507,6 +491,97 @@ export default function App() {
     [moveTo]
   );
 
+  // ---- Worksheet Sweep: every question, solved and filled in --------------------------
+  const runSweep = async () => {
+    runId.current++;
+    hush();
+    setChatOpen(false);
+    setLesson(null);
+    setBox(null);
+    setResearchQ(null);
+    hover(false);
+    sweepStop.current = false;
+    const results: SweepState["results"] = [];
+    let state: SweepState = { items: [], index: -1, status: "scanning", results };
+    const show = (patch: Partial<SweepState>) => {
+      state = { ...state, ...patch, results: [...results] };
+      setSweep(state);
+    };
+    show({});
+    setMood("looking");
+    say("Reading the whole page.").then(() => setBubble(null));
+
+    for (let page = 0; page < 3; page++) {
+      const plan = await window.milo.sweepPlan(results.map((r) => r.label));
+      if (sweepStop.current) return show({ status: "stopped" });
+      if (!plan.ok) {
+        setMood("idle");
+        return show({ status: "error", message: plan.text });
+      }
+      const items = plan.items;
+      if (!items.length && page === 0) {
+        setMood("idle");
+        await say("I don't see any questions to answer on this page.");
+        setBubble(null);
+        return setSweep(null);
+      }
+      for (let i = 0; i < items.length; i++) {
+        if (sweepStop.current) return show({ status: "stopped" });
+        const it = items[i];
+        show({ items, index: i, status: "working" });
+        // 1) lock onto the question
+        setBox(it.box);
+        setLocked(true);
+        sfx.lock();
+        await moveTo({ x: it.box.x + it.box.width + 12, y: it.box.y - MILO_H * 0.35 }, "jump");
+        setMood("writing");
+        await sleep(900); // time to read the work card
+        if (sweepStop.current) return show({ status: "stopped" });
+        // 2) put the answer in
+        let filled = false;
+        if (it.kind !== "none" && it.screen) {
+          setMood("pointing");
+          const r = await window.milo.sweepFill(it);
+          filled = r.ok;
+          if (r.ok) sfx.tick();
+        }
+        results.push({ label: it.label, answer: it.answer, filled });
+        show({});
+        await sleep(250);
+      }
+      if (!plan.more) break;
+      show({ status: "scrolling" });
+      setBox(null);
+      await window.milo.scrollPage();
+    }
+    setBox(null);
+    show({ status: "done" });
+    moveTo(home(), "jump");
+    setMood("celebrating");
+    sfx.success();
+    const filled = results.filter((r) => r.filled).length;
+    await say(
+      `Done. ${results.length} question${results.length === 1 ? "" : "s"}` +
+        (filled ? `, ${filled} filled in` : "") +
+        (results.length - filled ? `, ${results.length - filled} shown on screen` : "") +
+        "."
+    );
+    setBubble(null);
+    setMood("happy");
+  };
+  const stopSweep = () => {
+    sweepStop.current = true;
+    window.milo.stopTask();
+    hush();
+  };
+  const closeSweep = () => {
+    sweepStop.current = true;
+    setSweep(null);
+    setBox(null);
+    setLocked(false);
+    hover(false);
+  };
+
   // ---- research panel -------------------------------------------------------------
   const startResearch = (q: string, spoken = true) => {
     runId.current++;
@@ -579,6 +654,7 @@ export default function App() {
     switch (intent.kind) {
       case "hush":
         hush();
+        sweepStop.current = true;
         window.milo.stopTask();
         setBubble(null);
         return;
@@ -587,6 +663,9 @@ export default function App() {
         return;
       case "research":
         startResearch(intent.question, spoken);
+        return;
+      case "sweep":
+        runSweep();
         return;
       case "fill": {
         const L = lessonRef.current;
@@ -726,7 +805,7 @@ export default function App() {
           // Just "Hey Milo": chime and show "Yeah?" without talking, so his ears stay open for your command.
           setMood("listening");
           followUntil.current = Date.now() + 10000;
-          chime();
+          sfx.chime();
           setHeard(null);
           setBubble("Yeah?");
           setTimeout(() => setBubble((b) => (b === "Yeah?" ? null : b)), 4000);
@@ -926,13 +1005,16 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      if (researchQ) closeResearch();
+      if (sweep) {
+        if (sweep.status === "done" || sweep.status === "stopped" || sweep.status === "error") closeSweep();
+        else stopSweep();
+      } else if (researchQ) closeResearch();
       else if (lesson) closeLesson();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lesson, closeLesson, researchQ]);
+  }, [lesson, closeLesson, researchQ, sweep]);
 
   const send = async () => {
     const text = input.trim();
@@ -997,6 +1079,31 @@ export default function App() {
 
   return (
     <>
+      {sweep && (
+        <>
+          <SweepHUD s={sweep} onStop={stopSweep} hover={hover} />
+          {sweep.items.slice(0, sweep.status === "working" ? sweep.index : sweep.items.length).map((it, i) => {
+            const r = sweep.results.find((x) => x.label === it.label);
+            return r ? <Pin key={`${it.label}-${i}`} item={it} filled={r.filled} /> : null;
+          })}
+          {sweep.status === "working" && sweep.items[sweep.index] && (
+            <WorkCard
+              item={sweep.items[sweep.index]}
+              style={(() => {
+                const b = sweep.items[sweep.index].box;
+                const w = 300;
+                const right = b.x + b.width + MILO_W + 30;
+                const left = right + w < W - 16 ? right : Math.max(16, b.x - w - 20);
+                return { left, top: clamp(b.y, 70, H - 200), width: w };
+              })()}
+            />
+          )}
+          {(sweep.status === "done" || sweep.status === "stopped") && sweep.results.length > 0 && (
+            <SweepSummary s={sweep} onClose={closeSweep} hover={hover} style={{ ...rpStyle, height: "auto", maxHeight: H - 32 }} />
+          )}
+        </>
+      )}
+
       {researchQ && (
         <ResearchPanel
           key={researchQ.id}
@@ -1010,7 +1117,7 @@ export default function App() {
         />
       )}
 
-      {box && <Highlight key={locked ? "locked" : "guess"} box={box} dim={!lesson} locked={locked} />}
+      {box && <Highlight key={locked ? "locked" : "guess"} box={box} dim={!lesson && !sweep} locked={locked} />}
 
       {box &&
         others.map((o, i) => (
@@ -1064,7 +1171,7 @@ export default function App() {
           <div className="ear-ring" style={{ transform: `scale(${1 + level * 0.6})` }} />
         )}
         <Milo mood={mood} facing={facing} speaking={speaking} character={character} />
-        {handsFree && !working && !pending && <div className={`ears-on ${earState === "hearing" ? "ears-on--hot" : ""}`}>Say "Hey Milo"</div>}
+        {handsFree && !working && !pending && !sweep && <div className={`ears-on ${earState === "hearing" ? "ears-on--hot" : ""}`}>Say "Hey Milo"</div>}
       </div>
 
       {bubble && <Bubble text={short(bubble)} style={bStyle} />}

@@ -16,7 +16,7 @@ import { transcribe } from "./ears";
 import { click, ensureBrowser, frontApp, openApp, openFolder, openLatestDownload, openUrl, pressKeys, typeText } from "./hands";
 import { plan } from "./quick";
 import { research } from "./research";
-import { Action, askMilo, classify, ChatMessage, checkAnswer, locateInCrop, nextAction, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
+import { Action, askMilo, classify, sweepPlan, ChatMessage, checkAnswer, locateInCrop, nextAction, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
 dotenv.config({ path: path.join(app.getAppPath(), ".env") });
 
@@ -397,6 +397,74 @@ ipcMain.handle("milo:task", async (_e, task: string) => {
     taskRunning = false;
     overlay?.setFocusable(true);
     globalShortcut.unregister("Escape");
+  }
+});
+
+// ---------- worksheet sweep -------------------------------------------------------------
+ipcMain.handle("milo:sweep-plan", async (_e, skip: string[]) => {
+  const cap = await captureScreen();
+  if (!cap.ok) return cap;
+  const { shot } = cap;
+  const small = toJpeg(shot.full, 1568);
+  const k = small.k * shot.pxPerPt;
+  const r = await sweepPlan(small.b64, small.size, skip ?? []);
+  if (!r.ok) return r;
+  const { bounds, workArea } = shot;
+  const toOverlay = (x: number, y: number) => ({ x: bounds.x + x / k - workArea.x, y: bounds.y + y / k - workArea.y });
+  const items = (r.data.questions ?? [])
+    .filter((q) => q && q.box && q.answer)
+    .map((q) => {
+      const tl = toOverlay(q.box.x, q.box.y);
+      const hasPt = q.input?.kind !== "none" && q.input?.x !== undefined && q.input?.y !== undefined;
+      const inOverlay = hasPt ? toOverlay(q.input.x!, q.input.y!) : null;
+      return {
+        label: String(q.label ?? "").slice(0, 8),
+        work: q.work ?? "",
+        answer: q.answer,
+        box: { x: tl.x, y: tl.y, width: q.box.width / k, height: q.box.height / k },
+        kind: hasPt ? q.input.kind : "none",
+        point: inOverlay, // overlay coords (for Milo to hop to)
+        screen: hasPt ? { x: bounds.x + q.input.x! / k, y: bounds.y + q.input.y! / k } : null, // for the click
+      };
+    });
+  return { ok: true, items, more: !!r.data.more_below };
+});
+
+ipcMain.handle(
+  "milo:sweep-fill",
+  async (_e, item: { kind: string; screen: { x: number; y: number } | null; answer: string }) => {
+    if (!item.screen) return { ok: true };
+    overlay?.setFocusable(false);
+    overlay?.blur();
+    overlay?.setIgnoreMouseEvents(true, { forward: true });
+    try {
+      await click(item.screen.x, item.screen.y);
+      if (item.kind === "type") {
+        await sleep(150);
+        await pressKeys("cmd+a"); // replace anything already in the box
+        await typeText(item.answer);
+      }
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, text: (err as Error).message };
+    } finally {
+      overlay?.setFocusable(true);
+    }
+  }
+);
+
+ipcMain.handle("milo:scroll-page", async () => {
+  overlay?.setFocusable(false);
+  overlay?.blur();
+  try {
+    await pressKeys("escape"); // leave any text box so the page itself scrolls
+    await pressKeys("pagedown");
+    await sleep(700);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, text: (err as Error).message };
+  } finally {
+    overlay?.setFocusable(true);
   }
 });
 

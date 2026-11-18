@@ -868,3 +868,102 @@ body,
 .rp-page__view { flex: 1; min-height: 0; display: flex; }
 .rp-webview { flex: 1; display: flex; width: 100%; min-height: 200px; }
 .rp--compact .rp-page { min-height: 240px; }
+
+/* ======================= Worksheet Sweep ======================= */
+.hud {
+  position: fixed;
+  z-index: 47;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 340px;
+  padding: 9px 10px 9px 14px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(20, 21, 31, 0.96), rgba(12, 13, 20, 0.96));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  color: #e9e9f1;
+  animation: rpIn 0.25s ease-out;
+}
+.hud-orb { width: 9px; height: 9px; border-radius: 50%; background: #8b5cf6; box-shadow: 0 0 10px #8b5cf6, 0 0 20px #38bdf8; animation: orb 1.2s infinite; flex: none; }
+.hud-orb--done { background: #6ee7b7; box-shadow: 0 0 10px #6ee7b7; animation: none; }
+.hud-orb--err { background: #f87171; box-shadow: 0 0 10px #f87171; animation: none; }
+.hud-text { min-width: 0; }
+.hud-kicker { font: 600 10px/1.2 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: 0.1em; text-transform: uppercase; color: #8b8ba3; }
+.hud-label { font-size: 13.5px; font-weight: 600; color: #fff; white-space: nowrap; }
+.hud-segs { display: flex; gap: 3px; margin-left: auto; }
+.hud-segs span { width: 14px; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.12); transition: background 0.3s; }
+.hud-segs .seg--done { background: #6ee7b7; }
+.hud-segs .seg--now { background: #a78bfa; animation: orb 1s infinite; }
+.hud-stop {
+  margin-left: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 5px 10px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #fca5a5;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.workcard {
+  position: fixed;
+  z-index: 43;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(20, 21, 31, 0.97), rgba(12, 13, 20, 0.97));
+  border: 1px solid rgba(139, 92, 246, 0.45);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35);
+  color: #e9e9f1;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  animation: rpIn 0.22s ease-out;
+  pointer-events: none;
+}
+.workcard-k { font: 600 10px/1.2 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: 0.1em; text-transform: uppercase; color: #a78bfa; }
+.workcard-work { display: block; margin: 6px 0 8px; font-size: 13px; color: #c9c9da; }
+.workcard-work .katex { color: #e4e4f0; font-size: 1em; }
+.workcard-ans { display: flex; align-items: baseline; gap: 8px; font-size: 16px; font-weight: 700; color: #fff; }
+.workcard-ans > span:first-child { font: 600 10px "SF Mono", ui-monospace, monospace; letter-spacing: 0.1em; text-transform: uppercase; color: #6ee7b7; }
+
+.pin {
+  position: fixed;
+  z-index: 16;
+  pointer-events: none;
+  animation: chipIn 0.25s ease-out forwards;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+.pin--check {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #10b981;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.5);
+}
+.pin--ans {
+  padding: 4px 9px;
+  border-radius: 8px;
+  background: rgba(17, 18, 27, 0.92);
+  border: 1px solid rgba(110, 231, 183, 0.6);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+}
+
+.sum-list { display: flex; flex-direction: column; gap: 6px; }
+.sum-row { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 10px; background: rgba(255, 255, 255, 0.04); font-size: 13px; }
+.sum-label { font: 700 12px "SF Mono", ui-monospace, monospace; color: #a78bfa; min-width: 22px; }
+.sum-ans { flex: 1; color: #fff; font-weight: 600; }
+.sum-tag { font-size: 10.5px; color: #8b8ba3; }
+.sum-tag--ok { color: #6ee7b7; }

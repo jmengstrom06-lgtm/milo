@@ -473,3 +473,81 @@ export async function classify(text: string): Promise<Route> {
   );
   return r.ok ? r.data : { kind: "chat" };
 }
+
+// ---------------------------------------------------------------------------
+// Worksheet Sweep: every question on screen, its answer, and where the answer goes.
+export type SweepItem = {
+  label: string;
+  box: { x: number; y: number; width: number; height: number };
+  work: string;
+  answer: string;
+  input: { kind: "type" | "choose" | "none"; x?: number; y?: number };
+};
+
+const SWEEP_TOOL = {
+  name: "worksheet",
+  description: "Every question on screen, solved, with where to put each answer.",
+  input_schema: {
+    type: "object",
+    properties: {
+      questions: {
+        type: "array",
+        description: "All visible, unanswered questions, top to bottom.",
+        items: {
+          type: "object",
+          properties: {
+            label: { type: "string", description: "The number/letter printed on the page, e.g. '4' or 'b'." },
+            box: {
+              type: "object",
+              description: "Pixel box around the whole question (and its answer area).",
+              properties: { x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" } },
+              required: ["x", "y", "width", "height"],
+            },
+            work: { type: "string", description: "One short line showing the key step. LaTeX between $...$ allowed." },
+            answer: {
+              type: "string",
+              description: "The final answer exactly as it should be typed (plain text, no LaTeX), or the exact text of the correct choice.",
+            },
+            input: {
+              type: "object",
+              description:
+                "Where the answer goes. kind=type: an empty text box/blank you can type into (x,y = point inside it). kind=choose: multiple choice (x,y = the radio button/circle/box of the correct option). kind=none: no field (printed page, PDF, image).",
+              properties: { kind: { type: "string", enum: ["type", "choose", "none"] }, x: { type: "number" }, y: { type: "number" } },
+              required: ["kind"],
+            },
+          },
+          required: ["label", "box", "work", "answer", "input"],
+        },
+      },
+      more_below: { type: "boolean", description: "True if the page clearly continues below the visible area (more questions off screen)." },
+    },
+    required: ["questions", "more_below"],
+  },
+};
+
+export async function sweepPlan(
+  jpegBase64: string,
+  size: { width: number; height: number },
+  skip: string[]
+): Promise<ApiOk<{ questions: SweepItem[]; more_below: boolean }> | ApiErr> {
+  return callTool(
+    {
+      max_tokens: 6000,
+      system: `${persona()}
+You are completing a student's worksheet that is open on their screen. Find every visible question that still needs an answer, solve each one carefully, and say exactly where its answer goes. Coordinates are pixels in the screenshot. Be precise with input points: the center of the empty field, or the center of the correct option's radio button/checkbox.
+Skip questions that already have an answer filled in.${skip.length ? ` Also skip these, already done: ${skip.join(", ")}.` : ""}`,
+      tools: [SWEEP_TOOL],
+      tool_choice: { type: "auto" },
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: jpegBase64 } },
+            { type: "text", text: `Screenshot is ${size.width}x${size.height} pixels. Do the whole worksheet.` },
+          ],
+        },
+      ],
+    },
+    SWEEP_TOOL.name
+  );
+}

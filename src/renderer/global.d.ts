@@ -15,6 +15,15 @@ declare global {
     others?: unknown[];
   };
   type MiloOther = { label: string; box: MiloBox };
+  type SweepItem = {
+    label: string;
+    work: string;
+    answer: string;
+    box: MiloBox;
+    kind: "type" | "choose" | "none";
+    point: { x: number; y: number } | null;
+    screen: { x: number; y: number } | null;
+  };
   type MiloBox = { x: number; y: number; width: number; height: number };
   type Err = { ok: false; text: string };
   type ResearchEvent =
@@ -54,6 +63,9 @@ declare global {
       stopResearch: () => void;
       openUrl: (url: string) => void;
       onResearch: (cb: (ev: ResearchEvent) => void) => () => void;
+      sweepPlan: (skip: string[]) => Promise<{ ok: true; items: SweepItem[]; more: boolean } | Err>;
+      sweepFill: (item: SweepItem) => Promise<{ ok: true } | Err>;
+      scrollPage: () => Promise<{ ok: true } | Err>;
       copy: (text: string) => void;
       onSummon: (cb: () => void) => () => void;
       onTeachScreen: (cb: () => void) => () => void;

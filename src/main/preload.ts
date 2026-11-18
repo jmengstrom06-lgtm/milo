@@ -33,6 +33,9 @@ contextBridge.exposeInMainWorld("milo", {
     ipcRenderer.on("milo:research-event", l);
     return () => ipcRenderer.removeListener("milo:research-event", l);
   },
+  sweepPlan: (skip: string[]) => ipcRenderer.invoke("milo:sweep-plan", skip),
+  sweepFill: (item: unknown) => ipcRenderer.invoke("milo:sweep-fill", item),
+  scrollPage: () => ipcRenderer.invoke("milo:scroll-page"),
   copy: (text: string) => ipcRenderer.send("milo:copy", text),
   onSummon: (cb: () => void) => on("milo:summon", cb),
   onTeachScreen: (cb: () => void) => on("milo:teach-screen", cb),

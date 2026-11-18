@@ -14,6 +14,7 @@ export type Intent =
   | { kind: "look"; mode: MiloMode; request: string } // start helping with something on screen
   | { kind: "task"; task: string } // do something on the computer: open, click, type…
   | { kind: "research"; question: string } // look something up live (research panel)
+  | { kind: "sweep" } // do every question on the page
   | { kind: "fill" } // type the lesson's answer into the blank
   | { kind: "yes" }
   | { kind: "no" }
@@ -54,10 +55,14 @@ const NOT_RESEARCH = /\b(youtube|amazon|spotify|my (doc|email|gmail|screen|homew
 const TASK =
   /\b(type|typing|click|press|open( up)?|launch|paste|search|google|fill (in|out)|enter (my|the|this|it|in)|go (in|on)to|navigate|scroll|select all)\b|\b(write|put|add) .*\b(in|into|on|inside) (my|the|a|this)\b|\b(in|into|on) (my|the) (google doc|doc|document|notes|word|chrome|safari|browser|email|gmail|claude|chatgpt|search bar|spreadsheet|sheet)\b|\b(go to|pull up|bring up|switch to|take me to|new tab|new window|close (this |the )?tab|next tab|previous tab|go back|go forward|refresh|reload|look up|make a new|create a new|new google|play)\b/;
 
+const SWEEP =
+  /\b(do|finish|complete|answer|solve|fill (out|in))\b.*\b(whole|entire|all|every|everything)\b.*\b(worksheet|assignment|homework|page|quiz|questions|problems|them|these|it)?|\b(do|finish|complete|fill out) (this|the|my) (worksheet|assignment|homework|problem set)\b|\bworksheet sweep\b/;
+
 export function parse(raw: string, ctx: { inLesson: boolean; awaitingAnswer: boolean; pendingAsk?: boolean }): Intent {
   const text = raw.trim().replace(/[.!?]+$/, "");
   const t = text.toLowerCase();
   if (!t) return { kind: "chat", text };
+  if (SWEEP.test(t)) return { kind: "sweep" };
 
   if (ctx.pendingAsk) {
     if (/^(yes|yeah|yep|yup|sure|go ahead|do it|ok|okay|send it|please do|go for it|confirm)\b/.test(t)) return { kind: "yes" };
