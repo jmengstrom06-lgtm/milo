@@ -519,20 +519,29 @@ export default function App() {
     e.onLevel = (l) => setLevel(l);
     e.onState = (st) => {
       setEarState(st);
-      if (st === "hearing") setMood("listening");
+      if (st === "hearing" && (e.mode !== "always" || Date.now() < followUntil.current)) setMood("listening");
       if (st === "timeout") {
         setHeard(null);
         setMood((m) => (m === "listening" ? "idle" : m));
       }
     };
+    let inFlight = false;
     e.onUtterance = async (wav) => {
-      setEarState("thinking");
-      setMood("thinking");
+      const direct = e.mode !== "always" || Date.now() < followUntil.current; // you were clearly talking to Milo
+      if (inFlight) return; // one at a time; drop extra background chatter
+      inFlight = true;
+      if (direct) {
+        setEarState("thinking");
+        setMood("thinking");
+      }
       const r = await window.milo.stt(wav);
+      inFlight = false;
       setEarState(e.mode === "off" ? "off" : "waiting");
       if (!r.ok) {
-        setMood("idle");
-        say(r.text).then(() => setBubble(null));
+        setMood((m) => (m === "thinking" ? "idle" : m));
+        // Only complain if you were talking to him directly; stay quiet about background noise.
+        if (direct) say(r.text === "busy" ? "Sorry, say that one more time?" : r.text).then(() => setBubble(null));
+        if (direct && r.text === "busy") listen();
         return;
       }
       let text = r.text;
@@ -543,6 +552,7 @@ export default function App() {
           setMood((m) => (m === "thinking" || m === "listening" ? "idle" : m));
           return;
         }
+        e.learnVoice(); // that was you, so remember how loud you are
         if (!w.rest) {
           setMood("happy");
           followUntil.current = Date.now() + 10000;
@@ -552,6 +562,7 @@ export default function App() {
         text = w.rest;
       } else {
         text = stripWake(text).rest || text;
+        if (text) e.learnVoice();
       }
       followUntil.current = 0;
       if (!text) return;
@@ -562,7 +573,7 @@ export default function App() {
     return () => {
       e.setMode("off");
     };
-  }, [say]);
+  }, [say, listen]);
 
   const talk = useCallback(() => {
     hush();

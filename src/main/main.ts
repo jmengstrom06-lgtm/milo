@@ -318,7 +318,7 @@ ipcMain.handle("milo:mic-access", async () => {
   if (systemPreferences.getMediaAccessStatus("microphone") === "granted") return true;
   return systemPreferences.askForMediaAccess("microphone");
 });
-ipcMain.handle("milo:tts", (_e, text: string) => speak(text));
+ipcMain.handle("milo:tts", (_e, text: string, urgent?: boolean) => speak(text, !!urgent));
 ipcMain.on("milo:copy", (_e, text: string) => clipboard.writeText(text));
 ipcMain.on("milo:set-character", (_e, desc: string) => setCharacter(desc));
 ipcMain.on("milo:quit", () => app.quit());

@@ -14,14 +14,14 @@ function b64ToUrl(b64: string) {
 }
 
 /** Start generating audio for a line now, so it's ready when Milo needs it. */
-export function prefetch(text: string): Promise<Clip> {
+export function prefetch(text: string, urgent = false): Promise<Clip> {
   const key = text.trim();
   if (!key || elevenDown) return Promise.resolve({ ok: false });
   let p = cache.get(key);
   if (!p) {
-    p = window.milo.tts(key).then((r) => {
+    p = window.milo.tts(key, urgent).then((r) => {
       if (r.ok) return { ok: true as const, url: b64ToUrl(r.audio) };
-      if (r.text === "no-key" || r.text.startsWith("voice-error-4")) elevenDown = true;
+      if (r.text === "no-key" || r.text === "voice-error-401" || r.text === "voice-error-403") elevenDown = true;
       return { ok: false as const };
     });
     cache.set(key, p);
@@ -76,7 +76,7 @@ function systemSpeak(text: string, onStart: () => void): Promise<void> {
 /** Speak a line. Resolves when Milo finishes talking. */
 export async function play(text: string, onStart: () => void): Promise<void> {
   stop();
-  const clip = await prefetch(text);
+  const clip = await prefetch(text, true);
   if (clip.ok) {
     await new Promise<void>((resolve) => {
       const a = new Audio(clip.url);

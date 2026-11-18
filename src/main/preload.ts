@@ -15,7 +15,7 @@ contextBridge.exposeInMainWorld("milo", {
   practice: (lesson: unknown) => ipcRenderer.invoke("milo:practice", lesson),
   stt: (audio: ArrayBuffer) => ipcRenderer.invoke("milo:stt", audio),
   micAccess: () => ipcRenderer.invoke("milo:mic-access"),
-  tts: (text: string) => ipcRenderer.invoke("milo:tts", text),
+  tts: (text: string, urgent?: boolean) => ipcRenderer.invoke("milo:tts", text, !!urgent),
   task: (task: string) => ipcRenderer.invoke("milo:task", task),
   stopTask: () => ipcRenderer.send("milo:task-stop"),
   handsAccess: () => ipcRenderer.invoke("milo:hands-access"),

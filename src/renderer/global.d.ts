@@ -28,7 +28,7 @@ declare global {
       practice: (lesson: MiloLesson) => Promise<{ ok: true; data: { problems: { question: string; answer: string }[] } } | Err>;
       stt: (audio: ArrayBuffer) => Promise<{ ok: true; text: string } | Err>;
       micAccess: () => Promise<boolean>;
-      tts: (text: string) => Promise<{ ok: true; audio: string } | Err>;
+      tts: (text: string, urgent?: boolean) => Promise<{ ok: true; audio: string } | Err>;
       task: (task: string) => Promise<{ ok: true; status: "done" | "ask" | "stopped"; text: string } | Err>;
       stopTask: () => void;
       handsAccess: () => Promise<boolean>;

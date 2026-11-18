@@ -12,7 +12,9 @@ export type EarState = "off" | "waiting" | "hearing" | "timeout";
 const RATE = 16000;
 const FRAME = 1024; // 64 ms per frame at 16 kHz
 const PRE_ROLL = 6; // ~380 ms kept from before speech starts
-const START_FRAMES = 3; // ~190 ms of voice to count as speech
+const START_FRAMES = 4; // ~256 ms of voice to count as speech
+const MIN_VOICED_S = 0.5; // shorter than this is a cough/click, not words
+const VOICE_RATIO = 0.45; // share of energy that must sit in the human-voice band (300-3400 Hz)
 const END_SILENCE = 14; // ~900 ms of quiet ends the utterance
 const MAX_FRAMES = Math.round((15 * RATE) / FRAME); // 15 s cap
 const ONCE_TIMEOUT = Math.round((7 * RATE) / FRAME); // give up after 7 s of nothing
@@ -31,6 +33,10 @@ export class Ears {
   private quietRun = 0;
   private idleFrames = 0;
   private floor = 0.008;
+  private uttEnergy: number[] = []; // per-frame loudness of the current utterance
+  private lastLevel = 0; // loudness of the last finished utterance
+  /** How loud YOU are when you talk to Milo (learned). Quieter, farther voices are ignored in hands-free. */
+  private userLevel = Number(localStorage.getItem("milo.userLevel") || 0);
 
   onLevel: (level: number) => void = () => {};
   onState: (s: EarState) => void = () => {};
@@ -62,9 +68,19 @@ export class Ears {
     });
     this.ctx = new AudioContext({ sampleRate: RATE });
     const src = this.ctx.createMediaStreamSource(this.stream);
-    this.proc = this.ctx.createScriptProcessor(FRAME, 1, 1);
-    this.proc.onaudioprocess = (e) => this.frame(e.inputBuffer.getChannelData(0));
-    src.connect(this.proc);
+    // Channel 0: raw mic. Channel 1: the same audio through a human-voice band filter.
+    const hp = this.ctx.createBiquadFilter();
+    hp.type = "highpass";
+    hp.frequency.value = 300;
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 3400;
+    const merge = this.ctx.createChannelMerger(2);
+    src.connect(merge, 0, 0);
+    src.connect(hp).connect(lp).connect(merge, 0, 1);
+    this.proc = this.ctx.createScriptProcessor(FRAME, 2, 1);
+    this.proc.onaudioprocess = (e) => this.frame(e.inputBuffer.getChannelData(0), e.inputBuffer.getChannelData(1));
+    merge.connect(this.proc);
     this.proc.connect(this.ctx.destination); // outputs silence; needed to keep the processor running
   }
 
@@ -77,19 +93,39 @@ export class Ears {
     this.ctx = null;
   }
 
+  /** Call when an utterance turned out to be the student talking to Milo, so he learns their voice level. */
+  learnVoice() {
+    if (!this.lastLevel) return;
+    this.userLevel = this.userLevel ? this.userLevel * 0.7 + this.lastLevel * 0.3 : this.lastLevel;
+    try {
+      localStorage.setItem("milo.userLevel", String(this.userLevel));
+    } catch {
+      /* ignore */
+    }
+  }
+
   private resetUtterance() {
+    this.uttEnergy = [];
     this.speech = [];
     this.speaking = false;
     this.loudRun = 0;
     this.quietRun = 0;
   }
 
-  private frame(input: Float32Array) {
+  private frame(input: Float32Array, band: Float32Array) {
     if (this.mode === "off") return;
     const data = new Float32Array(input); // copy: the browser reuses the buffer
     let sum = 0;
-    for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
-    const rms = Math.sqrt(sum / data.length);
+    let bsum = 0;
+    for (let i = 0; i < data.length; i++) {
+      sum += data[i] * data[i];
+      bsum += band[i] * band[i];
+    }
+    const rawRms = Math.sqrt(sum / data.length);
+    const bandRms = Math.sqrt(bsum / data.length);
+    // Only energy in the voice band counts. Hum, fans, thumps and hiss mostly fall outside it.
+    const voicey = rawRms > 0 && bandRms / rawRms > VOICE_RATIO;
+    const rms = voicey ? bandRms : bandRms * 0.4;
     this.onLevel(this.muted ? 0 : Math.min(1, rms * 12));
 
     if (this.muted) {
@@ -97,7 +133,9 @@ export class Ears {
       return;
     }
 
-    const on = Math.max(0.018, this.floor * 3);
+    // Hands-free is stricter: you have to be clearly louder than the room (close to the mic).
+    const strict = this.mode === "always";
+    const on = Math.max(strict ? 0.028 : 0.018, this.floor * (strict ? 4 : 3));
     const off = Math.max(0.011, this.floor * 1.8);
 
     if (!this.speaking) {
@@ -122,15 +160,23 @@ export class Ears {
     }
 
     this.speech.push(data);
+    this.uttEnergy.push(rms);
     this.quietRun = rms < off ? this.quietRun + 1 : 0;
     if (this.quietRun >= END_SILENCE || this.speech.length >= MAX_FRAMES) this.finish();
   }
 
   private finish() {
     const frames = this.speech;
+    const energy = this.uttEnergy.filter((e) => e > 0.011).sort((a, b) => a - b);
     this.resetUtterance();
-    const voiced = frames.length - END_SILENCE;
-    if (voiced * FRAME < RATE * 0.35) {
+    const voiced = energy.length;
+    // Typical loudness while talking (upper-middle of the voiced frames).
+    const level = voiced ? energy[Math.floor(voiced * 0.7)] : 0;
+    this.lastLevel = level;
+    const tooShort = voiced * FRAME < RATE * MIN_VOICED_S;
+    // Voice focus: in hands-free, ignore voices much quieter than yours (TV, people across the room).
+    const tooFar = this.mode === "always" && this.userLevel > 0 && level < this.userLevel * 0.45;
+    if (tooShort || tooFar) {
       // too short to be words; keep listening
       this.onState("waiting");
       return;
