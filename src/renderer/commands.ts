@@ -55,7 +55,7 @@ const GOTO =
 
 // Things that mean "look it up": people, weather, news, prices, facts that change.
 const RESEARCH =
-  /^(look up|research|find out|search( the web| online)?( for)?|google|who('s| is| was| are| were)|what('s| is| was) the (weather|temperature|forecast|score|price|news|population|latest)|weather|forecast|news (on|about)|latest (news|on)|how (much|many|old|tall|far|long) (is|are|was|does|did)|when (is|was|did|does|are)|where (is|was|are)|is it going to (rain|snow)|what happened)\b/;
+  /^(look up|research|find out|tell me (more |some )?(about|info|information|more|the (news|story|details))|(find|get|give) me (some )?(info|information|details|the latest)|what about|how about|why (is|was|did|does)|who did|search( the web| online)?( for)?|google|who('s| is| was| are| were)|what('s| is| was) the (weather|temperature|forecast|score|price|news|population|latest)|weather|forecast|news (on|about)|latest (news|on)|how (much|many|old|tall|far|long) (is|are|was|does|did)|when (is|was|did|does|are)|where (is|was|are)|is it going to (rain|snow)|what happened)\b/;
 const NOT_RESEARCH = /\b(youtube|amazon|spotify|my (doc|email|gmail|screen|homework)|on (my|the) screen|number \d+|question \d+)\b/;
 
 // Things that mean "use the computer": open apps, click, type into something.

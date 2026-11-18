@@ -16,13 +16,23 @@ Search the web as needed (be quick: 1 to 3 searches is usually enough). Do not w
 Then answer in this exact shape:
 - First line: the direct answer in ONE short sentence (this is read aloud, so no symbols or links).
 - Then 2 to 5 short bullet points with the key facts (numbers, dates, names).
-No preamble, no "according to my search", no closing questions.`;
+No preamble, no "according to my search", no closing questions.
+This may be a follow-up in an ongoing research thread: use the earlier questions and answers to work out who or what "he", "she", "it", "that" refers to, and search for the new part specifically.`;
+
+export type Turn = { q: string; a: string };
+const thread = (history: Turn[], question: string) => [
+  ...history.slice(-4).flatMap((t) => [
+    { role: "user", content: t.q },
+    { role: "assistant", content: t.a || "(no answer)" },
+  ]),
+  { role: "user", content: question },
+];
 
 function model() {
   return process.env.MILO_MODEL || "claude-sonnet-5-5";
 }
 
-export async function research(question: string, emit: (e: ResearchEvent) => void, signal?: AbortSignal) {
+export async function research(question: string, emit: (e: ResearchEvent) => void, signal?: AbortSignal, history: Turn[] = []) {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return emit({ type: "error", text: "I need my Anthropic key to research." });
 
@@ -37,7 +47,7 @@ export async function research(question: string, emit: (e: ResearchEvent) => voi
       stream: true,
       system: SYSTEM,
       tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 4 }],
-      messages: [{ role: "user", content: question }],
+      messages: thread(history, question),
     }),
   }).catch((e) => e as Error);
 
@@ -45,7 +55,7 @@ export async function research(question: string, emit: (e: ResearchEvent) => voi
   if (!res.ok || !res.body) {
     const detail = await res.text().catch(() => "");
     // Web search not turned on for this account: answer from memory instead.
-    if (res.status === 400 && /web_search|web search|tool/i.test(detail)) return fallback(question, emit, key);
+    if (res.status === 400 && /web_search|web search|tool/i.test(detail)) return fallback(question, emit, key, history);
     return emit({ type: "error", text: `Research hit an error (${res.status}).` });
   }
 
@@ -146,12 +156,12 @@ export async function research(question: string, emit: (e: ResearchEvent) => voi
   emit({ type: "done", answer: answer.trim(), top: top ?? firstSource, live: true });
 }
 
-async function fallback(question: string, emit: (e: ResearchEvent) => void, key: string) {
+async function fallback(question: string, emit: (e: ResearchEvent) => void, key: string, history: Turn[] = []) {
   emit({ type: "status", text: "Answering from what I know" });
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model: model(), max_tokens: 900, system: SYSTEM, messages: [{ role: "user", content: question }] }),
+    body: JSON.stringify({ model: model(), max_tokens: 900, system: SYSTEM, messages: thread(history, question) }),
   });
   if (!res.ok) return emit({ type: "error", text: `Research hit an error (${res.status}).` });
   const data = (await res.json()) as { content?: { type: string; text?: string }[] };

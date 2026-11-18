@@ -530,10 +530,11 @@ ipcMain.handle("milo:brief", async (_e, dataUrl: string) => {
 
 // ---------- research ----------------------------------------------------------------
 let researchAbort: AbortController | null = null;
-ipcMain.handle("milo:research", async (_e, question: string) => {
+ipcMain.handle("milo:research", async (_e, question: string, history?: { q: string; a: string }[]) => {
   researchAbort?.abort();
   researchAbort = new AbortController();
-  await research(question, (ev) => overlay?.webContents.send("milo:research-event", ev), researchAbort.signal);
+  const h = Array.isArray(history) ? history.filter((t) => t && typeof t.q === "string").map((t) => ({ q: String(t.q).slice(0, 2000), a: String(t.a ?? "").slice(0, 4000) })) : [];
+  await research(question, (ev) => overlay?.webContents.send("milo:research-event", ev), researchAbort.signal, h);
   return true;
 });
 ipcMain.on("milo:research-stop", () => researchAbort?.abort());

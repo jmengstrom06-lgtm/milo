@@ -35,6 +35,7 @@ function Answer({ text, streaming }: { text: string; streaming: boolean }) {
 
 export default function ResearchPanel({
   question,
+  history = [],
   style,
   size,
   onSize,
@@ -43,11 +44,12 @@ export default function ResearchPanel({
   hover,
 }: {
   question: string;
+  history?: { q: string; a: string }[];
   style: React.CSSProperties;
   size: PanelSize;
   onSize: (s: PanelSize) => void;
   onClose: () => void;
-  onDone: (answer: string) => void;
+  onDone: (answer: string, top: string | null) => void;
   hover: (on: boolean) => void;
 }) {
   const [status, setStatus] = useState("Thinking about where to look");
@@ -89,7 +91,7 @@ export default function ResearchPanel({
           setLive(ev.live);
           setPhase("done");
           setElapsed(Math.round((Date.now() - started.current) / 100) / 10);
-          onDone(ev.answer || "");
+          onDone(ev.answer || "", ev.top);
           break;
         case "error":
           setStatus(ev.text);
@@ -142,6 +144,15 @@ export default function ResearchPanel({
         </div>
 
         <div className="rp-body">
+          {/* earlier questions in this thread */}
+          {history.length > 0 && (
+            <div className="rp-thread">
+              {history.map((t, i) => (
+                <Earlier key={i} turn={t} />
+              ))}
+              <div className="rp-thread__now">Follow-up</div>
+            </div>
+          )}
           {/* live timeline */}
           {working && (
             <div className="rp-timeline">
@@ -203,6 +214,17 @@ export default function ResearchPanel({
         </div>
       </div>
     </div>
+  );
+}
+
+function Earlier({ turn }: { turn: { q: string; a: string } }) {
+  const [open, setOpen] = useState(false);
+  const lead = (turn.a.split("\n").map((l) => l.trim()).find(Boolean) ?? "").replace(/^[-•]\s*/, "").replace(/\*\*/g, "");
+  return (
+    <button className={`rp-turn ${open ? "rp-turn--open" : ""}`} onClick={() => setOpen((o) => !o)} title={open ? "Collapse" : "Expand"}>
+      <div className="rp-turn__q">{turn.q}</div>
+      {open ? <Answer text={turn.a} streaming={false} /> : <div className="rp-turn__a">{lead}</div>}
+    </button>
   );
 }
 

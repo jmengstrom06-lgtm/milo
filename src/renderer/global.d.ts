@@ -60,7 +60,7 @@ declare global {
       stopTask: () => void;
       handsAccess: () => Promise<boolean>;
       onTaskStep: (cb: (step: { say: string; action: string; point?: { x: number; y: number } | null }) => void) => () => void;
-      research: (q: string) => Promise<boolean>;
+      research: (q: string, history?: { q: string; a: string }[]) => Promise<boolean>;
       stopResearch: () => void;
       openUrl: (url: string) => void;
       onResearch: (cb: (ev: ResearchEvent) => void) => () => void;

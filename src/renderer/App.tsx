@@ -138,7 +138,11 @@ export default function App() {
   const finishedRef = useRef(false);
   const lastSaid = useRef("");
   const researchStart = useRef<{ q: string; at: number } | null>(null); // so a second half can be added
-  const startResearchRef = useRef<(q: string, spoken?: boolean) => void>(() => {});
+  const startResearchRef = useRef<(q: string, spoken?: boolean, followUp?: boolean) => void>(() => {});
+  const researchThread = useRef<{ q: string; a: string }[]>([]); // earlier questions in this research box
+  const researchTop = useRef<string | null>(null); // the page showing in the box
+  const [researchTurns, setResearchTurns] = useState<{ q: string; a: string }[]>([]);
+  const [rpAnchor, setRpAnchor] = useState<{ x: number; y: number } | null>(null); // box stays put once open
   const followUntil = useRef(0); // hands-free: no need to say "Milo" until this time
   const voiceSession = useRef(false); // the current lesson was started by voice
   const routeRef = useRef<(text: string, spoken?: boolean) => void>(() => {});
@@ -233,7 +237,7 @@ export default function App() {
 
   // Wander along the bottom when nothing is going on.
   useEffect(() => {
-    if (chatOpen || lesson || busy || working) return;
+    if (chatOpen || lesson || busy || working || researchQ) return; // stay put while the research box is open
     const t = window.setInterval(() => {
       if (animRef.current) return;
       const r = Math.random();
@@ -243,7 +247,7 @@ export default function App() {
       } else if (r < 0.65) setMood("sitting");
     }, 7000);
     return () => window.clearInterval(t);
-  }, [chatOpen, lesson, busy, working, moveTo]);
+  }, [chatOpen, lesson, busy, working, moveTo, researchQ]);
 
   // ---- voice ------------------------------------------------------------------
   const say = useCallback(async (text: string, opts: { minMs?: number; noBarge?: boolean } = {}) => {
@@ -921,7 +925,13 @@ export default function App() {
   };
 
   // ---- research panel -------------------------------------------------------------
-  const startResearch = (q: string, spoken = true) => {
+  const startResearch = (q: string, spoken = true, followUp = false) => {
+    if (!followUp || !researchQ) {
+      researchThread.current = [];
+      setResearchTurns([]);
+      setRpAnchor({ x: pos.x, y: pos.y });
+    } else setResearchTurns([...researchThread.current]);
+    researchTop.current = null;
     runId.current++;
     hush();
     setChatOpen(false);
@@ -933,12 +943,17 @@ export default function App() {
     setBubble(null);
     researchSpoken.current = spoken;
     // Let the panel mount (and start listening for events) before research begins.
-    setTimeout(() => window.milo.research(q), 60);
+    const history = researchThread.current.slice(-4);
+    setTimeout(() => window.milo.research(q, history), 60);
     researchStart.current = { q, at: Date.now() };
   };
   startResearchRef.current = startResearch;
   const closeResearch = () => {
     researchStart.current = null;
+    researchThread.current = [];
+    researchTop.current = null;
+    setResearchTurns([]);
+    setRpAnchor(null);
     window.milo.stopResearch();
     tts.stop();
     setResearchQ(null);
@@ -946,7 +961,13 @@ export default function App() {
     setMood("idle");
     setBubble(null);
   };
-  const onResearchDone = async (answer: string) => {
+  const onResearchDone = async (answer: string, top: string | null) => {
+    researchTop.current = top;
+    const q = researchStart.current?.q;
+    if (q) {
+      researchThread.current = [...researchThread.current, { q, a: answer }].slice(-6);
+      researchStart.current = { q, at: 0 }; // finished: later speech is a follow-up, not a correction
+    }
     const lead = answer
       .split("\n")
       .map((l) => l.trim())
@@ -1020,6 +1041,26 @@ export default function App() {
       if (/(full ?screen|make it (big|bigger|full)|expand( it)?|maximi[sz]e)/.test(t)) return setRpSize("full");
       if (/(half|split) ?screen|make it half/.test(t)) return setRpSize("half");
       if (/(smaller|shrink|minimi[sz]e|compact)/.test(t)) return setRpSize("compact");
+    }
+    // ---- Research box is open: follow-ups stay in the box. Chrome only when you ask for it.
+    if (researchQ && !tool) {
+      const t = text.toLowerCase().trim();
+      const wantsPageInChrome =
+        /(open|show|pull up|put).*(it|this|that|the (page|article|site|source|link)).*(chrome|browser|tab)/.test(t) ||
+        /^open (it|this|that)( up)?$/.test(t);
+      if (wantsPageInChrome && researchTop.current) {
+        window.milo.openUrl(researchTop.current);
+        say("Opened it in Chrome.").then(() => setBubble(null));
+        return;
+      }
+      const explicitComputer =
+        /(open|launch|start|pull up|bring up|switch to|go to|take me to).*(chrome|safari|browser|tab|window|app|docs?|google (doc|sheet|slide)s?|notes|spotify|finder|downloads?|youtube|gmail|email|\w+\.(com|org|edu|net))/.test(t) ||
+        /(type|click|scroll|paste|fill (in|out))/.test(t) ||
+        /(my screen|on (my|the) screen|this (problem|question)|homework|worksheet|quiz me|build (me )?a)/.test(t);
+      if (!explicitComputer && !isBareGo(t)) {
+        startResearch(text, spoken, true);
+        return;
+      }
     }
     const inLesson = !!lessonRef.current;
     const awaitingAnswer = inLesson && finishedRef.current && lessonModeRef.current !== "do" && !!lessonRef.current?.check_question;
@@ -1263,7 +1304,7 @@ export default function App() {
           !/^(close|stop|cancel|done|thanks|thank you|never ?mind|full ?screen|half|smaller|bigger|expand|shrink|make it)\b/i.test(text.trim())) {
         const q = `${R.q.replace(/[?.!\s]+$/, "")}. ${stripGo(text)}`;
         setHeard(q);
-        startResearchRef.current(q, true);
+        startResearchRef.current(q, true, true);
         return;
       }
 
@@ -1518,11 +1559,12 @@ export default function App() {
   else {
     const w = 420;
     const h = Math.min(580, H - 32);
-    const top = clamp(pos.y + MILO_H - h, 16, H - h - 16);
+    const a = rpAnchor ?? pos; // where Milo was when the box opened: it doesn't chase him around
+    const top = clamp(a.y + MILO_H - h, 16, H - h - 16);
     rpStyle =
-      pos.x > W / 2
-        ? { left: clamp(pos.x - w - 12, 16, W - w - 16), top, width: w, height: h }
-        : { left: clamp(pos.x + MILO_W + 12, 16, W - w - 16), top, width: w, height: h };
+      a.x > W / 2
+        ? { left: clamp(a.x - w - 12, 16, W - w - 16), top, width: w, height: h }
+        : { left: clamp(a.x + MILO_W + 12, 16, W - w - 16), top, width: w, height: h };
   }
 
   // Speech bubble: never on top of Milo. Above him (growing upward) if there's room,
@@ -1639,6 +1681,7 @@ export default function App() {
         <ResearchPanel
           key={researchQ.id}
           question={researchQ.q}
+          history={researchTurns}
           style={rpStyle}
           size={rpSize}
           onSize={setRpSize}

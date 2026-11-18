@@ -455,7 +455,7 @@ const ROUTE_TOOL = {
         type: "string",
         enum: ["chat", "look", "task", "research"],
         description:
-          "look = help with a homework question/problem that is (or will be) on screen. task = do something on the computer (open files/apps/sites, click, type, navigate). research = look up current or real-world facts on the web (people, weather, news, scores, prices, events, anything that may have changed). chat = just talk or explain a general concept.",
+          "look = help with a homework question/problem that is (or will be) on screen. task = ONLY when the student explicitly asks to operate the computer (open an app, a site or a tab, click, type, navigate). Asking for information is never a task, even if it mentions the web. research = any question about real-world facts, people, events, news, scores, prices, or asking to be told about or find info on something. chat = just talk or explain a general concept.",
       },
       mode: { type: "string", enum: ["teach", "help", "do"], description: "For look: teach (explain), help (hint), do (solve/complete it)." },
     },

@@ -25,7 +25,7 @@ contextBridge.exposeInMainWorld("milo", {
     ipcRenderer.on("milo:task-step", l);
     return () => ipcRenderer.removeListener("milo:task-step", l);
   },
-  research: (q: string) => ipcRenderer.invoke("milo:research", q),
+  research: (q: string, history?: { q: string; a: string }[]) => ipcRenderer.invoke("milo:research", q, history ?? []),
   stopResearch: () => ipcRenderer.send("milo:research-stop"),
   openUrl: (url: string) => ipcRenderer.send("milo:open-url", url),
   onResearch: (cb: (ev: unknown) => void) => {
