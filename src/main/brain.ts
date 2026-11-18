@@ -403,6 +403,7 @@ How to work:
 - For Google Docs or any document: click inside the page where the text should go (usually at the end of the existing text), then type.
 - Use key for shortcuts and Enter. Use scroll if what you need is off screen.
 - After an action, check the new screenshot to confirm it worked before moving on. If something didn't work, try a different way.
+- Clicking a text box often changes nothing visible. If the log shows you just clicked a text box, assume it worked and type next. Never click the same spot twice in a row.
 - Do exactly what was asked, nothing extra. If asked to type something, type it but don't press Enter or send it unless they asked.
 - NEVER do anything that sends, submits, posts, publishes, buys, pays, deletes, or changes account settings without asking first: use action "ask" with the question instead.
 - Never type passwords or payment details. If a login is needed, use "ask".

@@ -235,6 +235,7 @@ ipcMain.handle("milo:task", async (_e, task: string) => {
   taskAbort = false;
   globalShortcut.register("Escape", () => (taskAbort = true));
   const history: string[] = [];
+  let lastClick: { x: number; y: number } | null = null; // screen point of the previous action if it was a click
   try {
     for (let step = 0; step < 14; step++) {
       if (taskAbort) return { ok: true, status: "stopped", text: "Stopped!" };
@@ -254,6 +255,14 @@ ipcMain.handle("milo:task", async (_e, task: string) => {
       const overlayPt = screenPt ? { x: screenPt.x - shot.workArea.x, y: screenPt.y - shot.workArea.y } : null;
 
       if (a.action === "done") return { ok: true, status: "done", text: a.text || a.say || "All done!" };
+
+      // Don't click the same spot twice in a row: the first click already worked (text fields look the same after).
+      if ((a.action === "click" || a.action === "double_click") && screenPt && lastClick &&
+          Math.hypot(screenPt.x - lastClick.x, screenPt.y - lastClick.y) < 25) {
+        history.push("(Skipped a repeat click on the same spot: it's already selected. Do the next thing, e.g. type.)");
+        lastClick = null;
+        continue;
+      }
       if (a.action === "ask") return { ok: true, status: "ask", text: a.text || a.say || "Should I go ahead?" };
 
       sendStep({ say: a.say, action: a.action, point: overlayPt });
@@ -261,6 +270,7 @@ ipcMain.handle("milo:task", async (_e, task: string) => {
       if (taskAbort) return { ok: true, status: "stopped", text: "Stopped!" };
 
       overlay?.setIgnoreMouseEvents(true, { forward: true }); // never click on Milo himself
+      lastClick = a.action === "click" || a.action === "double_click" ? screenPt : null;
       switch (a.action) {
         case "open_app":
           if (!a.app) throw new Error("No app name");

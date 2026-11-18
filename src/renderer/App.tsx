@@ -91,7 +91,9 @@ export default function App() {
   const voiceSession = useRef(false); // the current lesson was started by voice
   const routeRef = useRef<(text: string, spoken?: boolean) => void>(() => {});
   const pendingTask = useRef<string | null>(null);
-  const restoreHandsFree = useRef(false); // a task waiting on the student's yes/no
+  const restoreHandsFree = useRef(false);
+  const lastStepSay = useRef("");
+  const lastStepPoint = useRef<{ x: number; y: number } | null>(null); // a task waiting on the student's yes/no
   const voiceRef = useRef(voice);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -379,6 +381,8 @@ export default function App() {
       hover(false);
       setWorking(true);
       pendingTask.current = null;
+      lastStepSay.current = "";
+      lastStepPoint.current = null;
       setMood("looking");
       setBubble("On it!");
       const r = await window.milo.task(task);
@@ -412,10 +416,18 @@ export default function App() {
   useEffect(
     () =>
       window.milo.onTaskStep((st) => {
-        setBubble(st.say);
-        tts.play(st.say, () => setSpeaking(true)).then(() => setSpeaking(false));
+        // Never repeat the same line back to back; it sounds glitchy.
+        const norm = st.say.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
+        if (norm && norm !== lastStepSay.current) {
+          lastStepSay.current = norm;
+          setBubble(st.say);
+          tts.play(st.say, () => setSpeaking(true)).then(() => setSpeaking(false));
+        }
         if (st.action === "typing" || st.action === "type") setMood("writing");
-        if (st.point) {
+        if (st.point && lastStepPoint.current && Math.hypot(st.point.x - lastStepPoint.current.x, st.point.y - lastStepPoint.current.y) < 30) {
+          setMood("pointing"); // already standing there
+        } else if (st.point) {
+          lastStepPoint.current = st.point;
           // Stand just to the left of the spot (or right if no room) so he never covers it.
           const left = st.point.x - MILO_W - 18;
           const x = left > MARGIN ? left : st.point.x + 18;
