@@ -137,6 +137,8 @@ export default function App() {
   const boxRef = useRef<MiloBox | null>(null);
   const finishedRef = useRef(false);
   const lastSaid = useRef("");
+  const researchStart = useRef<{ q: string; at: number } | null>(null); // so a second half can be added
+  const startResearchRef = useRef<(q: string, spoken?: boolean) => void>(() => {});
   const followUntil = useRef(0); // hands-free: no need to say "Milo" until this time
   const voiceSession = useRef(false); // the current lesson was started by voice
   const routeRef = useRef<(text: string, spoken?: boolean) => void>(() => {});
@@ -932,8 +934,11 @@ export default function App() {
     researchSpoken.current = spoken;
     // Let the panel mount (and start listening for events) before research begins.
     setTimeout(() => window.milo.research(q), 60);
+    researchStart.current = { q, at: Date.now() };
   };
+  startResearchRef.current = startResearch;
   const closeResearch = () => {
+    researchStart.current = null;
     window.milo.stopResearch();
     tts.stop();
     setResearchQ(null);
@@ -1252,6 +1257,16 @@ export default function App() {
       }
       if (!text) return;
 
+      // ---- You kept talking right after a research question started: add it to the question.
+      const R = researchStart.current;
+      if (!pendingRef.current && R && Date.now() - R.at < 15000 && !isBareGo(text) &&
+          !/^(close|stop|cancel|done|thanks|thank you|never ?mind|full ?screen|half|smaller|bigger|expand|shrink|make it)\b/i.test(text.trim())) {
+        const q = `${R.q.replace(/[?.!\s]+$/, "")}. ${stripGo(text)}`;
+        setHeard(q);
+        startResearchRef.current(q, true);
+        return;
+      }
+
       // ---- A command is waiting on the "Got it" card: go / cancel / keep adding.
       const P = pendingRef.current;
       if (P) {
@@ -1310,7 +1325,7 @@ export default function App() {
   const runPending = (text: string) => {
     pendingRef.current = null;
     setPending(null);
-    followUntil.current = 0;
+    followUntil.current = Date.now() + 8000; // if you keep talking, the rest still counts (no "Milo" needed)
     lastCommand.current = text;
     lastCommandAt.current = Date.now();
     setHeard(text);

@@ -17,10 +17,11 @@ const BARGE_FRAMES = 7; // ~450 ms of you talking over him to interrupt
 const START_FRAMES = 4; // ~256 ms of voice to count as speech
 const MIN_VOICED_S = 0.5; // shorter than this is a cough/click, not words
 const VOICE_RATIO = 0.45; // share of energy that must sit in the human-voice band (300-3400 Hz)
-const END_SILENCE = 24; // ~1.5 s of quiet ends the utterance (plain quiet room)
-const END_NO_VOICE = 34; // ~2.2 s without YOUR voice ends it, even if other people keep talking
-const MAX_FRAMES = Math.round((15 * RATE) / FRAME); // 15 s cap (push-to-talk)
-const MAX_FRAMES_HF = Math.round((10 * RATE) / FRAME); // 8 s cap in hands-free so background chatter can't hang him
+const END_SILENCE = 28; // ~1.8 s of quiet ends the utterance (plain quiet room)
+const END_NO_VOICE = 38; // ~2.4 s without YOUR voice ends it, even if other people keep talking
+const MAX_FRAMES = Math.round((25 * RATE) / FRAME); // 25 s cap (push-to-talk)
+const MAX_FRAMES_HF = Math.round((20 * RATE) / FRAME); // 20 s cap in hands-free so background chatter can't hang him
+const FOLLOW_FRAMES = Math.round((5 * RATE) / FRAME); // after you finish a sentence, keep listening 5 s more for the rest
 const ONCE_TIMEOUT = Math.round((7 * RATE) / FRAME); // give up after 7 s of nothing
 
 export class Ears {
@@ -216,7 +217,7 @@ export class Ears {
     // Once Milo knows how loud you are, quieter voices (other people, the TV) can't start a recording.
     if (strict && this.userLevel > 0) on = Math.max(on, this.userLevel * 0.5);
     // End of your sentence = when it drops well below YOUR level, even if others keep talking.
-    const off = Math.max(0.011, this.floor * 1.8, this.uttPeak * 0.35);
+    const off = Math.max(0.011, this.floor * 1.8, this.uttPeak * 0.2); // only real quiet ends it, not a softer phrase
 
     if (!this.speaking) {
       this.ring.push(data);
@@ -244,7 +245,7 @@ export class Ears {
     this.uttPeak = Math.max(this.uttPeak * 0.985, rms);
     this.quietRun = rms < off ? this.quietRun + 1 : 0;
     // "Your voice" = clearly as loud as you were talking. Other people, quieter, don't reset the timer.
-    const yours = rms > Math.max(off * 1.3, this.uttPeak * 0.5);
+    const yours = rms > Math.max(off * 1.3, this.uttPeak * 0.3);
     this.noVoiceRun = yours ? 0 : this.noVoiceRun + 1;
     const quietP = this.quietRun / END_SILENCE;
     const voiceP = this.noVoiceRun / END_NO_VOICE;
@@ -274,8 +275,9 @@ export class Ears {
     }
     const wav = encodeWav(frames, RATE);
     const once = this.mode === "once";
-    if (once) this.setMode("off");
-    else this.onState("waiting");
+    // Push-to-talk: DON'T close the mic yet. Keep it open a few more seconds in case you keep going.
+    if (once) this.idleFrames = Math.max(0, ONCE_TIMEOUT - FOLLOW_FRAMES);
+    this.onState("waiting");
     this.onUtterance(wav, once, forced);
   }
 }
