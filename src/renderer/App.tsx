@@ -1109,6 +1109,15 @@ export default function App() {
       say("Here's what I can open.").then(() => setBubble(null));
       return;
     }
+    // "My classes are stats, English comp, bio..." / "set up my classes"
+    if (/^(my (\w+ )?classes are|i'?m taking|this (semester|term) i'?m taking|my (five|5|four|4|six|6) classes are)\b/.test(kt)) {
+      kitRef.current?.setupClasses(text.replace(/^.*?\b(are|taking)\b[:,]?\s*/i, ""));
+      return;
+    }
+    if (/^(set ?up|add|edit|change|update) (my |your )?classes$|^(what are )?my classes\??$/.test(kt)) {
+      kitRef.current?.setupClasses();
+      return;
+    }
     if (/^(hold|grab|keep) (this|that|it|onto (this|that|it))( for me)?$|^put (this|that|it) in your pocket$/.test(kt)) {
       kitRef.current?.hold();
       return;

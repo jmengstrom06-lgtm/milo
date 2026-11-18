@@ -2,7 +2,7 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from "react";
 import MathText from "../MathText";
-import type { Note } from "./types";
+import type { Note, Klass } from "./types";
 
 export type NotesHandle = {
   add: (draft: { title: string; course: string; body: string }) => Promise<Note>;
@@ -30,7 +30,8 @@ const NotesView = forwardRef<NotesHandle, {
   answer?: string | null;
   say: (t: string) => Promise<void>;
   onStudy: (note: Note, mode: "practice" | "cards" | "test") => void;
-}>(function NotesView({ focusId, answer, say, onStudy }, ref) {
+  cls?: Klass | null;
+}>(function NotesView({ focusId, answer, say, onStudy, cls }, ref) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [openId, setOpenId] = useState<string | null>(focusId ?? null);
   const [editing, setEditing] = useState(false);
@@ -52,9 +53,14 @@ const NotesView = forwardRef<NotesHandle, {
   const open = notes.find((n) => n.id === openId) ?? null;
   const byCourse = useMemo(() => {
     const m = new Map<string, Note[]>();
-    for (const n of notes) m.set(n.course || "General", [...(m.get(n.course || "General") ?? []), n]);
+    const mine = (n: Note) => {
+      if (!cls) return true;
+      const c = (n.course || "").toLowerCase();
+      return [cls.name, cls.code].filter(Boolean).some((w) => c.includes(w.toLowerCase()) || w.toLowerCase().includes(c) && c.length > 2);
+    };
+    for (const n of notes.filter(mine)) m.set(n.course || "General", [...(m.get(n.course || "General") ?? []), n]);
     return [...m.entries()];
-  }, [notes]);
+  }, [notes, cls]);
 
   const flash = (t: string) => {
     setToast(t);
@@ -147,9 +153,9 @@ const NotesView = forwardRef<NotesHandle, {
   return (
     <div className="nt">
       {answer && <div className="nt-answer">{answer}</div>}
-      {notes.length === 0 ? (
+      {byCourse.length === 0 ? (
         <div className="kit-empty">
-          <p>No notes yet.</p>
+          <p>{cls && notes.length ? `No notes for ${cls.name} yet.` : "No notes yet."}</p>
           <p className="kit-sub">Try “Milo, make notes on this page” or “Milo, add to my notes: exam 3 is Nov 25.”</p>
         </div>
       ) : (
@@ -169,7 +175,7 @@ const NotesView = forwardRef<NotesHandle, {
         <button
           className="kit-btn kit-btn--primary"
           onClick={async () => {
-            const n = await window.milo.kit.saveNote({ title: "New note", course: "General", body: "" });
+            const n = await window.milo.kit.saveNote({ title: "New note", course: cls?.name ?? "General", body: "" });
             await refresh();
             setOpenId(n.id);
             setDraft(n);

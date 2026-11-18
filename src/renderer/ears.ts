@@ -104,6 +104,8 @@ export class Ears {
       if (!ok && this.streaming) {
         this.onDebug("flux_open_failed", {});
         this.streaming = false; // the built-in pause detection takes over for this one
+        this.quietRun = 0;
+        this.noVoiceRun = 0;
       }
     });
   }
@@ -149,8 +151,13 @@ export class Ears {
       case "closed":
         if (this.streaming) {
           this.streaming = false;
-          // Mid-sentence when the stream dropped: finish it the old way so nothing is lost.
-          if (this.speaking && this.speech.length > 8) this.finish(false, "flux_dropped");
+          // Stream dropped mid-sentence (Deepgram hiccup): DON'T cut you off. Keep recording with the
+          // built-in pause detection and transcribe the whole thing when you actually stop.
+          if (this.speaking) {
+            this.quietRun = 0;
+            this.noVoiceRun = 0;
+            this.onDebug("flux_dropped_keep_listening", { seconds: +((this.speech.length * FRAME) / RATE).toFixed(2) });
+          }
         }
         break;
     }

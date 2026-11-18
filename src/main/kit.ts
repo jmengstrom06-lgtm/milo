@@ -3,6 +3,12 @@
 import { callClaude, callTool, persona, type ApiErr, type ApiOk } from "./brain";
 import { log as bb } from "./blackbox";
 
+/** Set before each Kit request: the class it's for (see classes.ts). */
+let classCtx = "";
+export function setClassCtx(s: string) {
+  classCtx = s;
+}
+
 // ---------------------------------------------------------------------------
 // Graphs (drawn by Milo in code: crisp, instant, free)
 export type GraphSpec =
@@ -11,7 +17,9 @@ export type GraphSpec =
   | { type: "bar"; labels: string[]; values: number[]; xlabel?: string; ylabel?: string }
   | { type: "line"; labels: string[]; values: number[]; xlabel?: string; ylabel?: string }
   | { type: "scatter"; points: { x: number; y: number }[]; fit?: boolean; xlabel?: string; ylabel?: string }
-  | { type: "histogram"; values: number[]; bins?: number; xlabel?: string };
+  | { type: "histogram"; values: number[]; bins?: number; xlabel?: string; stats?: boolean }
+  | { type: "box"; groups: { label: string; values: number[] }[]; xlabel?: string }
+  | { type: "pie"; labels: string[]; values: number[] };
 
 const GRAPH_SCHEMA = {
   type: "object",
@@ -51,7 +59,7 @@ export async function makeSketch(request: string, context = ""): Promise<ApiOk<S
   const r = await callTool<Sketch>(
     {
       max_tokens: 12000,
-      system: `${persona()}
+      system: `${persona()}${classCtx}
 The student wants to SEE something. Pick the best way:
 1. graph: anything plottable (functions, probability, statistics, data). Precise numbers. For "how does a/b/c change the curve" questions, add params (sliders).
 2. svg: everything else (a house, a plant cell, the water cycle, a timeline, a flowchart, a free body diagram, a map, a concept). YOU draw it as an SVG illustration or a labeled diagram:
@@ -196,7 +204,7 @@ export async function makeStudySet(
   const r = await callTool<StudySet>(
     {
       max_tokens: 8000,
-      system: `${persona()}
+      system: `${persona()}${classCtx}
 You make study material for a college student. Be accurate: double-check every number and answer. Use realistic numbers. Graphs only when they genuinely help (normal curves for probability questions, functions for algebra/calculus, charts for data).`,
       tools: [STUDY_TOOL],
       tool_choice: { type: "auto" },
@@ -220,7 +228,7 @@ export async function checkStudy(item: { prompt: string; answer: string }, stude
     {
       max_tokens: 600,
       model: process.env.MILO_FAST_MODEL || "claude-haiku-5-5",
-      system: `${persona()}
+      system: `${persona()}${classCtx}
 Check a student's answer. Accept equivalent forms, reasonable rounding, and spoken math ("point six nine" = 0.69). feedback = one short sentence: if right, a quick confirmation; if wrong, what went wrong (don't give the full answer). If they showed their work, name the exact line where it first went wrong and why (e.g. "Line 2: you subtracted the mean from the wrong value.").`,
       tools: [
         {
@@ -238,14 +246,28 @@ Check a student's answer. Accept equivalent forms, reasonable rounding, and spok
 
 // ---------------------------------------------------------------------------
 // Sheet
-export type Table = { title: string; columns: string[]; rows: (string | number)[][]; say: string };
+export type Table = { title: string; columns: string[]; rows: (string | number)[][]; say: string; chart?: ChartPick | null };
+
+const CHART_SCHEMA = {
+  type: ["object", "null"],
+  description: "A chart to draw from the table (Milo computes it from the columns). histogram/box: y = a numeric column. bar/line/pie: x = labels column, y = values column. scatter: x and y numeric columns.",
+  properties: {
+    kind: { type: "string", enum: ["histogram", "bar", "line", "scatter", "box", "pie"] },
+    x: { type: "string" },
+    y: { type: "string" },
+    bins: { type: "number" },
+  },
+  required: ["kind", "y"],
+};
 
 export async function makeTable(request: string, context = ""): Promise<ApiOk<Table> | ApiErr> {
   return callTool<Table>(
     {
       max_tokens: 4000,
-      system: `${persona()}
-Turn the request into a clean table. Use the student's numbers exactly if they gave any (or the data on their screen). Numbers as numbers. No totals row (Milo computes stats himself). say = one short sentence.`,
+      system: `${persona()}${classCtx}
+Turn the request into a clean table. Use the student's numbers exactly if they gave any (or the data on their screen / clipboard). Numbers as numbers. No totals row (Milo computes stats himself).
+If they want an EXAMPLE (e.g. "make me an example histogram", "show me what a skewed distribution looks like"), invent a realistic data set that fits their class: 20-40 rows, believable values, with the shape they asked for.
+If they asked for a chart/graph/plot/histogram (or one would obviously help), set chart. Column names should be short and clear (include units). say = one short sentence.`,
       tools: [
         {
           name: "table",
@@ -257,6 +279,7 @@ Turn the request into a clean table. Use the student's numbers exactly if they g
               columns: { type: "array", items: { type: "string" } },
               rows: { type: "array", items: { type: "array", items: { type: ["string", "number"] } } },
               say: { type: "string" },
+              chart: CHART_SCHEMA,
             },
             required: ["title", "columns", "rows", "say"],
           },
@@ -283,7 +306,7 @@ export async function makeNote(request: string, opts: { pageText?: string; jpeg?
   return callTool<NoteDraft>(
     {
       max_tokens: 3000,
-      system: `${persona()}
+      system: `${persona()}${classCtx}
 Write a study note. If they dictated something, keep their words. If they asked to summarize their screen, write tight study notes: short headings (lines starting with "## "), bullets (lines starting with "- "), key formulas in $...$. course = the class it belongs to (reuse an existing class name if it fits). say = under 10 words.`,
       tools: [
         {
@@ -315,7 +338,7 @@ export async function makePlan(request: string, today: string, items: { title: s
   return callTool<Plan>(
     {
       max_tokens: 4000,
-      system: `${persona()}
+      system: `${persona()}${classCtx}
 Build a realistic study plan. Today is ${today}. Spread studying out before each exam/deadline (short sessions, harder topics earlier, review the day before). Mark deadlines (kind due) and exams (kind exam) on their day. 7 to 14 days max. Each study task names a concrete topic (used to open practice problems). say = one short sentence, like "Exam 3 is in 7 days. Here's your plan."`,
       tools: [
         {
@@ -380,7 +403,7 @@ export async function askNotes(question: string, notes: { id: string; title: str
   return callTool(
     {
       max_tokens: 600,
-      system: `${persona()}
+      system: `${persona()}${classCtx}
 Answer the student's question using ONLY their own notes below. One or two short spoken sentences. note_id = the note it came from (or null). If the notes don't cover it, say so plainly.`,
       tools: [
         {
@@ -406,19 +429,27 @@ export type TableOp =
   | { op: "remove_column"; column: string }
   | { op: "rename_column"; column: string; to: string }
   | { op: "add_row"; values: (string | number)[] }
-  | { op: "graph"; kind: "bar" | "scatter" | "histogram" | "line"; x?: string; y: string };
+  | { op: "graph"; kind: ChartKind; x?: string; y: string; bins?: number }
+  | { op: "set_table"; title?: string; columns: string[]; rows: (string | number)[][] }
+  | { op: "sample"; name: string; dist: "normal" | "uniform" | "skewed_right" | "skewed_left" | "bimodal"; n: number; mean?: number; sd?: number; min?: number; max?: number; decimals?: number };
+export type ChartKind = "histogram" | "bar" | "line" | "scatter" | "box" | "pie";
+export type ChartPick = { kind: ChartKind; x?: string; y: string; bins?: number };
 
-export async function tableOps(request: string, t: { columns: string[]; rows: (string | number)[][] }, stats: string): Promise<ApiOk<{ ops: TableOp[]; say: string }> | ApiErr> {
+export async function tableOps(request: string, t: { columns: string[]; rows: (string | number)[][] }, stats: string, extra = ""): Promise<ApiOk<{ ops: TableOp[]; say: string }> | ApiErr> {
+  const empty = t.rows.every((r) => r.every((v) => v === "" || v === null || v === undefined));
   const vars = t.columns.map((c, k) => `c${k} = "${c}"`).join(", ");
   const rows = t.rows.slice(0, 200).map((r) => r.join(" | ")).join("\n");
   return callTool(
     {
-      max_tokens: 1500,
-      system: `${persona()}
+      max_tokens: 5000,
+      system: `${persona()}${classCtx}
 You operate a small spreadsheet for a student. Turn their request into operations; Milo computes everything himself.
 Column variables: ${vars}. For each numeric column ck you can also use mean_ck, sd_ck (sample), median_ck, min_ck, max_ck, sum_ck, n_ck.
 add_column.expr is a math expression over those (+ - * / ^, sqrt, abs, ln, log, exp), e.g. z-score of c1: "(c1 - mean_c1)/sd_c1". Use column NAMES (not ck) in sort/filter/graph/remove/rename. filter.value can be a number or one of mean/median/min/max.
-If they just asked a question about the data, use no ops and answer in say (read the data carefully). say = one short spoken sentence.`,
+If they just asked a question about the data, use no ops and answer in say (read the data carefully). say = one short spoken sentence.
+CHARTS: graph op with kind histogram (one numeric column, y), box (numeric y; x = optional group column), bar/line/pie (x = labels column, y = numbers), scatter (x and y numeric). bins only if they ask.
+DATA: set_table replaces the whole table (use it for numbers they give you, or when the sheet is empty/blank and they want a chart or example: write a realistic 20-40 row data set that fits their class, THEN add a graph op). sample adds a generated numeric column Milo computes himself (dist normal/uniform/skewed_right/skewed_left/bimodal, n, mean, sd or min/max, decimals) - great for "an example of a right-skewed histogram". Graph ops can name columns created earlier in the same list.
+Never say you can't because the sheet is empty: make example data.`,
       tools: [
         {
           name: "table_ops",
@@ -432,7 +463,18 @@ If they just asked a question about the data, use no ops and answer in say (read
                 items: {
                   type: "object",
                   properties: {
-                    op: { type: "string", enum: ["add_column", "sort", "filter", "remove_column", "rename_column", "add_row", "graph"] },
+                    op: { type: "string", enum: ["add_column", "sort", "filter", "remove_column", "rename_column", "add_row", "graph", "set_table", "sample"] },
+                    title: { type: "string" },
+                    columns: { type: "array", items: { type: "string" } },
+                    rows: { type: "array", items: { type: "array", items: { type: ["string", "number"] } } },
+                    dist: { type: "string", enum: ["normal", "uniform", "skewed_right", "skewed_left", "bimodal"] },
+                    n: { type: "number" },
+                    mean: { type: "number" },
+                    sd: { type: "number" },
+                    min: { type: "number" },
+                    max: { type: "number" },
+                    decimals: { type: "number" },
+                    bins: { type: "number" },
                     name: { type: "string" },
                     expr: { type: "string" },
                     column: { type: "string" },
@@ -441,7 +483,7 @@ If they just asked a question about the data, use no ops and answer in say (read
                     value: { type: "string" },
                     to: { type: "string" },
                     values: { type: "array", items: { type: ["string", "number"] } },
-                    kind: { type: "string", enum: ["bar", "scatter", "histogram", "line"] },
+                    kind: { type: "string", enum: ["histogram", "bar", "line", "scatter", "box", "pie"] },
                     x: { type: "string" },
                     y: { type: "string" },
                   },
@@ -454,7 +496,12 @@ If they just asked a question about the data, use no ops and answer in say (read
         },
       ],
       tool_choice: { type: "auto" },
-      messages: [{ role: "user", content: `Request: "${request}"\n\nColumns: ${t.columns.join(" | ")}\n${rows}\n\nStats: ${stats}` }],
+      messages: [
+        {
+          role: "user",
+          content: `Request: "${request}"\n\n${empty ? "THE SHEET IS EMPTY (blank cells only)." : `Columns: ${t.columns.join(" | ")}\n${rows}\n\nStats: ${stats}`}${extra ? `\n\nThey copied / have on screen:\n${extra.slice(0, 6000)}` : ""}`,
+        },
+      ],
     },
     "table_ops"
   );

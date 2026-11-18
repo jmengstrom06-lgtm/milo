@@ -102,6 +102,51 @@ function erf(x: number) {
   return x >= 0 ? y : -y;
 }
 export const normCdf = (x: number, m: number, s: number) => 0.5 * (1 + erf((x - m) / (s * Math.SQRT2)));
+/** Quantile of a sorted array (linear interpolation, like Excel's QUARTILE.INC). */
+export function quantile(sorted: number[], q: number) {
+  if (!sorted.length) return NaN;
+  const pos = (sorted.length - 1) * q, lo = Math.floor(pos), hi = Math.ceil(pos);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+}
+
+const KEEP = ["fill", "fill-opacity", "stroke", "stroke-width", "stroke-opacity", "stroke-linecap", "stroke-linejoin", "opacity", "font-size", "font-family", "font-weight", "text-anchor"];
+/** Turn a drawn chart into a PNG (dark background, 2x) for copying or saving. */
+export async function svgToPng(svg: SVGSVGElement, title = ""): Promise<string> {
+  const clone = svg.cloneNode(true) as SVGSVGElement;
+  const src = svg.querySelectorAll("*"), dst = clone.querySelectorAll("*");
+  src.forEach((el, i) => {
+    const cs = getComputedStyle(el);
+    const out = dst[i] as SVGElement;
+    out.removeAttribute("class");
+    const style = KEEP.map((k) => `${k}:${cs.getPropertyValue(k)}`).join(";");
+    const dash = el.classList.contains("gr-dash") || el.classList.contains("gr-zero") || el.classList.contains("gr-median") ? `;stroke-dasharray:${cs.getPropertyValue("stroke-dasharray")}` : ";stroke-dasharray:none";
+    out.setAttribute("style", `${style}${dash};animation:none${el.hasAttribute("transform") ? "" : ";transform:none"}`);
+  });
+  const vb = svg.viewBox.baseVal;
+  const top = title ? 34 : 0;
+  const w = vb.width, h = vb.height + top;
+  clone.setAttribute("width", String(w));
+  clone.setAttribute("height", String(vb.height));
+  const xml = new XMLSerializer().serializeToString(clone);
+  const img = new Image();
+  img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(xml);
+  await img.decode();
+  const k = 2;
+  const c = document.createElement("canvas");
+  c.width = w * k;
+  c.height = h * k;
+  const g = c.getContext("2d")!;
+  g.scale(k, k);
+  g.fillStyle = "#17131f";
+  g.fillRect(0, 0, w, h);
+  if (title) {
+    g.fillStyle = "#ece9f5";
+    g.font = "600 16px Inter, -apple-system, sans-serif";
+    g.fillText(title, 16, 24);
+  }
+  g.drawImage(img, 0, top, w, vb.height);
+  return c.toDataURL("image/png");
+}
 
 function Axes({ x0, x1, y0, y1, xl, yl, xticks, yticks, xLabels }: { x0: number; x1: number; y0: number; y1: number; xl?: string; yl?: string; xticks: number[]; yticks: number[]; xLabels?: string[] }) {
   const sx = (v: number) => PAD.l + ((v - x0) / (x1 - x0 || 1)) * IW;
@@ -148,7 +193,7 @@ function slidersFor(spec: GraphSpec): Slider[] {
   return [];
 }
 
-export default function Graph({ spec, animate = true, interactive = false }: { spec: GraphSpec; animate?: boolean; interactive?: boolean }) {
+export default function Graph({ spec, animate = true, interactive = false, svgRef }: { spec: GraphSpec; animate?: boolean; interactive?: boolean; svgRef?: React.Ref<SVGSVGElement> }) {
   const sliders = useMemo(() => (interactive ? slidersFor(spec) : []), [spec, interactive]);
   const [vals, setVals] = useState<Record<string, number>>({});
   const [touched, setTouched] = useState(false);
@@ -165,7 +210,7 @@ export default function Graph({ spec, animate = true, interactive = false }: { s
   const body = useMemo(() => render(live, scope), [live, scope]);
   return (
     <div className="graph-wrap">
-      <svg className={`graph ${animate && !touched ? "graph--draw" : ""}`} viewBox={`0 0 ${W} ${H}`} role="img">
+      <svg ref={svgRef} className={`graph ${animate && !touched ? "graph--draw" : ""}`} viewBox={`0 0 ${W} ${H}`} role="img">
         {body ?? <text x={W / 2} y={H / 2} textAnchor="middle" className="gr-label">Couldn't draw that one.</text>}
       </svg>
       {sliders.length > 0 && (
@@ -351,18 +396,115 @@ function render(spec: GraphSpec, scope: Record<string, number> = {}): JSX.Elemen
       case "histogram": {
         const v = spec.values.map(Number).filter(Number.isFinite);
         if (!v.length) return null;
-        const bins = Math.max(3, Math.min(30, spec.bins ?? Math.ceil(Math.sqrt(v.length))));
-        const lo = Math.min(...v), hi = Math.max(...v), w = (hi - lo) / bins || 1;
+        // Clean bin edges (40, 50, 60... not 41, 54.3, 67.6) like a textbook histogram.
+        const want = Math.max(3, Math.min(30, spec.bins ?? Math.max(5, Math.ceil(Math.log2(v.length)) + 1)));
+        const vmin = Math.min(...v), vmax = Math.max(...v);
+        const rawW = (vmax - vmin) / want || 1;
+        const mag = Math.pow(10, Math.floor(Math.log10(rawW)));
+        const w = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((x) => x >= rawW * 0.92) ?? 10 * mag;
+        const lo = Math.floor(vmin / w) * w;
+        const bins = Math.max(1, Math.floor((vmax - lo) / w + 1e-9) + 1);
+        const hi = lo + bins * w;
         const counts = Array(bins).fill(0);
-        v.forEach((x) => counts[Math.min(bins - 1, Math.floor((x - lo) / w))]++);
-        const top = Math.max(...counts) * 1.12;
+        v.forEach((x) => counts[Math.min(bins - 1, Math.floor((x - lo) / w + 1e-9))]++);
+        const top = Math.max(...counts) * 1.25;
         const sx = (x: number) => PAD.l + ((x - lo) / (hi - lo || 1)) * IW;
         const sy = (c: number) => PAD.t + IH - (c / top) * IH;
+        const sorted = [...v].sort((a, b) => a - b);
+        const mean = v.reduce((a, b) => a + b, 0) / v.length;
+        const median = quantile(sorted, 0.5);
         return (
           <>
-            <Axes x0={lo} x1={hi} y0={0} y1={top} xl={spec.xlabel} yl="count" xticks={niceTicks(lo, hi)} yticks={niceTicks(0, top, 4)} />
+            <Axes x0={lo} x1={hi} y0={0} y1={top} xl={spec.xlabel} yl="count" xticks={bins <= 12 ? Array.from({ length: bins + 1 }, (_, k) => +(lo + k * w).toFixed(6)) : niceTicks(lo, hi)} yticks={niceTicks(0, top, 4)} />
             {counts.map((c, i) => (
-              <rect key={i} className="gr-bar" style={{ animationDelay: `${i * 40}ms` }} x={sx(lo + i * w) + 1} y={sy(c)} width={Math.max(1, sx(lo + (i + 1) * w) - sx(lo + i * w) - 2)} height={sy(0) - sy(c)} rx={2} />
+              <g key={i}>
+                <rect className="gr-bar" style={{ animationDelay: `${i * 40}ms` }} x={sx(lo + i * w) + 1} y={sy(c)} width={Math.max(1, sx(lo + (i + 1) * w) - sx(lo + i * w) - 2)} height={sy(0) - sy(c)} rx={2} />
+                {c > 0 && bins <= 16 && <text className="gr-count" x={(sx(lo + i * w) + sx(lo + (i + 1) * w)) / 2} y={sy(c) - 5} textAnchor="middle">{c}</text>}
+              </g>
+            ))}
+            {spec.stats && (
+              <>
+                <line x1={sx(mean)} x2={sx(mean)} y1={PAD.t + 24} y2={sy(0)} className="gr-mean" />
+                <line x1={sx(median)} x2={sx(median)} y1={PAD.t + 24} y2={sy(0)} className="gr-median" />
+                <text x={W - PAD.r - 4} y={PAD.t + 10} textAnchor="end" className="gr-key"><tspan className="gr-key-mean">— mean {fmt(+mean.toFixed(2))}</tspan>   <tspan className="gr-key-median">┆ median {fmt(+median.toFixed(2))}</tspan></text>
+              </>
+            )}
+          </>
+        );
+      }
+      case "box": {
+        const groups = spec.groups.map((g) => ({ label: g.label, v: g.values.map(Number).filter(Number.isFinite).sort((a, b) => a - b) })).filter((g) => g.v.length);
+        if (!groups.length) return null;
+        const all = groups.flatMap((g) => g.v);
+        const lo = Math.min(...all), hi = Math.max(...all), pad = (hi - lo) * 0.08 || 1;
+        const y0 = lo - pad, y1 = hi + pad;
+        const sy = (x: number) => PAD.t + IH - ((x - y0) / (y1 - y0)) * IH;
+        const n = groups.length;
+        const cx = (i: number) => PAD.l + ((i + 0.5) / n) * IW;
+        const bw = Math.min(110, (IW / n) * 0.45);
+        return (
+          <>
+            <Axes x0={0} x1={1} y0={y0} y1={y1} xl={spec.xlabel} xticks={[]} yticks={niceTicks(y0, y1, 5)} xLabels={n > 1 ? groups.map((g) => g.label) : [groups[0].label]} />
+            {groups.map((g, i) => {
+              const q1 = quantile(g.v, 0.25), q2 = quantile(g.v, 0.5), q3 = quantile(g.v, 0.75), iqr = q3 - q1;
+              const fenceLo = q1 - 1.5 * iqr, fenceHi = q3 + 1.5 * iqr;
+              const inside = g.v.filter((x) => x >= fenceLo && x <= fenceHi);
+              const wLo = Math.min(...inside), wHi = Math.max(...inside);
+              const outliers = g.v.filter((x) => x < fenceLo || x > fenceHi);
+              const x = cx(i);
+              return (
+                <g key={i} className="gr-box" style={{ animationDelay: `${i * 90}ms` }}>
+                  <line x1={x} x2={x} y1={sy(wLo)} y2={sy(q1)} />
+                  <line x1={x} x2={x} y1={sy(q3)} y2={sy(wHi)} />
+                  <line x1={x - bw / 4} x2={x + bw / 4} y1={sy(wLo)} y2={sy(wLo)} />
+                  <line x1={x - bw / 4} x2={x + bw / 4} y1={sy(wHi)} y2={sy(wHi)} />
+                  <rect x={x - bw / 2} y={sy(q3)} width={bw} height={Math.max(1, sy(q1) - sy(q3))} rx={4} />
+                  <line x1={x - bw / 2} x2={x + bw / 2} y1={sy(q2)} y2={sy(q2)} className="gr-box-med" />
+                  {outliers.map((o, k) => <circle key={k} cx={x} cy={sy(o)} r={4} className="gr-outlier" />)}
+                  {n === 1 && (
+                    <g className="gr-box-labels">
+                      {[["min", wLo], ["Q1", q1], ["median", q2], ["Q3", q3], ["max", wHi]].map(([l, val]) => (
+                        <text key={l as string} x={x + bw / 2 + 10} y={sy(val as number) + 4}>{l} {fmt(+(val as number).toFixed(2))}</text>
+                      ))}
+                      {outliers.length > 0 && <text x={x - bw / 2 - 10} y={sy(outliers[0]) + 4} textAnchor="end">outlier{outliers.length > 1 ? "s" : ""}</text>}
+                    </g>
+                  )}
+                </g>
+              );
+            })}
+          </>
+        );
+      }
+      case "pie": {
+        const vals = spec.values.map(Number).map((v) => (Number.isFinite(v) && v > 0 ? v : 0));
+        const total = vals.reduce((a, b) => a + b, 0);
+        if (!total) return null;
+        const cx = W * 0.36, cy = H / 2, r = H * 0.4;
+        const PIE = ["#a78bfa", "#38bdf8", "#34d399", "#f472b6", "#fbbf24", "#fb923c", "#60a5fa", "#c084fc", "#2dd4bf", "#f87171"];
+        let a0 = -Math.PI / 2;
+        return (
+          <>
+            {vals.map((v, i) => {
+              const a1 = a0 + (v / total) * Math.PI * 2;
+              const large = a1 - a0 > Math.PI ? 1 : 0;
+              const d = vals.filter((x) => x > 0).length === 1
+                ? `M${cx},${cy - r}A${r},${r} 0 1 1 ${cx - 0.01},${cy - r}Z`
+                : `M${cx},${cy}L${cx + r * Math.cos(a0)},${cy + r * Math.sin(a0)}A${r},${r} 0 ${large} 1 ${cx + r * Math.cos(a1)},${cy + r * Math.sin(a1)}Z`;
+              const mid = (a0 + a1) / 2;
+              a0 = a1;
+              const pct = (v / total) * 100;
+              return (
+                <g key={i} className="gr-slice" style={{ animationDelay: `${Math.min(i, 10) * 60}ms` }}>
+                  <path d={d} style={{ fill: PIE[i % PIE.length] }} />
+                  {pct >= 6 && <text x={cx + r * 0.64 * Math.cos(mid)} y={cy + r * 0.64 * Math.sin(mid) + 4} textAnchor="middle" className="gr-slice-pct">{pct.toFixed(0)}%</text>}
+                </g>
+              );
+            })}
+            {spec.labels.slice(0, 10).map((l, i) => (
+              <g key={`k${i}`} className="gr-pie-key">
+                <rect x={W * 0.7} y={PAD.t + 10 + i * 24} width={12} height={12} rx={3} style={{ fill: PIE[i % PIE.length] }} />
+                <text x={W * 0.7 + 20} y={PAD.t + 21 + i * 24}>{l.length > 18 ? l.slice(0, 17) + "…" : l} · {fmt(vals[i])}</text>
+              </g>
             ))}
           </>
         );

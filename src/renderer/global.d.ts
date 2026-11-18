@@ -90,6 +90,14 @@ declare global {
         plan: (request: string, items: { title: string; course: string; due: string }[]) => Promise<import("./kit/types").Res<import("./kit/types").Plan>>;
         copy: (text: string) => Promise<boolean>;
         planToCalendar: (plan: import("./kit/types").Plan) => Promise<boolean>;
+        copyImage: (dataUrl: string) => Promise<boolean>;
+        saveImage: (dataUrl: string, name: string) => Promise<string | null>;
+        openCsv: (title: string, columns: string[], rows: (string | number)[][]) => Promise<boolean>;
+        classes: () => Promise<import("./kit/types").ClassStore>;
+        saveClasses: (classes: import("./kit/types").Klass[], active: string | null) => Promise<import("./kit/types").ClassStore>;
+        setActiveClass: (id: string | null) => Promise<import("./kit/types").ClassStore>;
+        classFor: (text: string) => Promise<import("./kit/types").Klass | null>;
+        parseClasses: (text: string, useScreen: boolean) => Promise<import("./kit/types").Res<{ classes: { name: string; code?: string; subject: import("./kit/types").Subject }[]; say: string }>>;
       };
       log: (src: string, ev: string, data?: Record<string, unknown>) => void;
       flag: (note?: string) => Promise<{ file: string; dir: string }>;

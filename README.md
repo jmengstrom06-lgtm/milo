@@ -110,3 +110,7 @@ Say **"Milo, what can you do?"** (or click **Kit** in the chat panel) to see the
 - **Sheet**: "put these scores in a table", then talk to it: "add a z-score column", "sort by score", "only show above average", "graph hours vs score", "who's above average?". Milo computes every number himself. **Copy for Excel**.
 - **Planner**: "plan my week for Exam 3" (uses your D2L due dates). Check blocks off, **Practice** any block, **Add to Calendar** (with reminders).
 - **Pocket**: select text, "hold this"; later "drop it in ChatGPT" or "paste what you're holding".
+
+### Charts and classes
+- **Sheet charts:** histogram, box plot, bar, line, scatter, pie. Say "make me an example histogram", give numbers ("here are my scores 72 85 90..."), or "make a chart of what I copied". Charts are live: edit a cell and the chart redraws. Copy chart pastes a PNG into Docs/Word/Slides.
+- **Your classes:** "Milo, my classes are STAT 2023, English Comp, Bio, US History, Spanish 2." Tap a class chip in any app (or say "switch to my English class") and every app tailors itself: prompts, starter buttons, notes filter.

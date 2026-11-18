@@ -15,6 +15,7 @@ export default function KitPanel({
   style,
   hover,
   actions,
+  sub,
   children,
 }: {
   app: KitApp;
@@ -27,6 +28,7 @@ export default function KitPanel({
   style: React.CSSProperties;
   hover: (on: boolean) => void;
   actions?: React.ReactNode;
+  sub?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -61,6 +63,7 @@ export default function KitPanel({
             </button>
           </div>
         </div>
+        {sub}
         <div className="rp-body kit-body">{children}</div>
       </div>
     </div>

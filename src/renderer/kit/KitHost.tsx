@@ -1,6 +1,6 @@
 // Runs Milo's Kit: opens the right app, loads what you asked for, and handles voice inside each app.
 
-import { forwardRef, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { PanelSize } from "../ResearchPanel";
 import { stripMath } from "../MathText";
 import KitPanel, { KitLoading } from "./KitPanel";
@@ -10,7 +10,9 @@ import PocketView from "./PocketView";
 import SheetView, { type SheetHandle } from "./SheetView";
 import SketchView from "./SketchView";
 import StudyDeck, { type StudyHandle } from "./StudyDeck";
-import { KIT_APPS, type GraphSpec, type KitApp, type Plan, type PocketItem, type Sketch, type StudyMode, type StudySet, type Table } from "./types";
+import { ClassBar, ClassesEditor } from "./Classes";
+import { startersFor } from "./subjects";
+import { KIT_APPS, SUBJECT_NAMES, type ClassStore, type GraphSpec, type KitApp, type Plan, type PocketItem, type Sketch, type StudyMode, type StudySet, type Subject, type Table } from "./types";
 
 export type KitHandle = {
   open: (app: KitApp, request?: string) => void;
@@ -24,6 +26,8 @@ export type KitHandle = {
   drop: (target?: string) => Promise<void>;
   /** "save that to my notes" */
   saveToNotes: (body: string, title?: string) => Promise<void>;
+  /** "my classes are stats, English comp, ..." (or no text: open the setup) */
+  setupClasses: (text?: string) => void;
 };
 
 const NUM: Record<string, number> = { one: 1, a: 1, an: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twelve: 12, fifteen: 15, twenty: 20 };
@@ -74,6 +78,20 @@ const KitHost = forwardRef<KitHandle, {
   const [notesFocus, setNotesFocus] = useState<string | null>(null);
   const [notesAnswer, setNotesAnswer] = useState<string | null>(null);
   const [pocketV, setPocketV] = useState(0);
+  const [classes, setClasses] = useState<ClassStore>({ classes: [], active: null });
+  const [editClasses, setEditClasses] = useState<{ seed?: string } | null>(null);
+  useEffect(() => {
+    window.milo.kit.classes().then(setClasses).catch(() => {});
+  }, []);
+  const activeClass = classes.classes.find((c) => c.id === classes.active) ?? null;
+  const subject: Subject | undefined = activeClass?.subject;
+  const starters = startersFor(subject);
+  const pickClass = (id: string | null) => window.milo.kit.setActiveClass(id).then(setClasses);
+  /** "for my English class": light up that class before the app loads. */
+  const noteClass = (request: string) =>
+    window.milo.kit.classFor(request).then((c) => {
+      if (c && c.id !== classes.active) pickClass(c.id);
+    });
   const studyRef = useRef<StudyHandle>(null);
   const notesRef = useRef<NotesHandle>(null);
   const sheetRef = useRef<SheetHandle>(null);
@@ -170,6 +188,8 @@ const KitHost = forwardRef<KitHandle, {
 
   const open = (a: KitApp, request = "") => {
     const r = request.trim();
+    setEditClasses(null);
+    if (r) noteClass(r);
     const meaningful = r && !/^(open |show |pull up |bring up )?(up )?(your |my |the )?(notes|study( deck)?|sketch( ?pad)?|sheet|spreadsheet|planner|pocket|kit|tool ?box|tools)( app)?$/i.test(r);
     setError(null);
     if (!meaningful) {
@@ -204,6 +224,19 @@ const KitHost = forwardRef<KitHandle, {
     voice: (text) => {
       if (!app) return false;
       const t = text.toLowerCase().replace(/[.!?]+$/, "").trim();
+      if (editClasses && !/^(close|stop|go|never ?mind|cancel)\b/.test(t)) {
+        setEditClasses({ seed: text });
+        return true;
+      }
+      if (/^(switch to|change to|go to|use|i'?m (working on|doing|studying)( for)?|let'?s do|now) (my |the )?.{2,40}\b(class|course)$/.test(t) || /^(switch|change) (it )?to (my )?.{2,30}$/.test(t)) {
+        window.milo.kit.classFor(text).then((c) => {
+          if (c) {
+            pickClass(c.id);
+            p.say(`${c.name}. Everything fits it now.`);
+          } else p.say("I don't have that class yet. Say: my classes are, then list them.");
+        });
+        return true;
+      }
       if (app === "study" && study && studyRef.current) {
         const s = studyRef.current;
         if (/^(next|next one|next problem|keep going|continue|go on)$/.test(t)) return s.next(), true;
@@ -265,6 +298,13 @@ const KitHost = forwardRef<KitHandle, {
       if (target && target.trim()) await p.runTask(`Paste what's on the clipboard into ${target}: click into its text box or the right spot, then press cmd+v. Don't send it.`);
       else await p.runTask(`switch to ${it.from && !/milo|electron/i.test(it.from) ? it.from : "the app I was just using"} and paste`);
     },
+    setupClasses: (text) => {
+      req.current++;
+      setLoading(null);
+      setError(null);
+      setEditClasses({ seed: text && text.trim() ? text : undefined });
+      if (!app) show("study");
+    },
     saveToNotes: async (body, title) => {
       const n = await window.milo.kit.saveNote({ title: title || body.split(/[.\n]/)[0].slice(0, 60) || "Note", course: "General", body });
       setNotesFocus(n.id);
@@ -279,7 +319,20 @@ const KitHost = forwardRef<KitHandle, {
     app === "study" && study ? study.set.title : app === "sketch" && sketch ? sketch.title : app === "sheet" && table ? table.title : app === "planner" && plan ? plan.title : meta.hint;
 
   let body: React.ReactNode;
-  if (loading) body = <KitLoading text={loading} />;
+  if (editClasses)
+    body = (
+      <ClassesEditor
+        store={classes}
+        seed={editClasses.seed}
+        courses={[...new Set(p.briefItems().map((i) => i.course).filter(Boolean))]}
+        say={(t) => void p.say(t)}
+        onSave={(s2) => {
+          setClasses(s2);
+          setEditClasses(null);
+        }}
+      />
+    );
+  else if (loading) body = <KitLoading text={loading} />;
   else if (error) body = <div className="rp-error">{error}</div>;
   else if (app === "study") {
     body = study ? (
@@ -292,40 +345,56 @@ const KitHost = forwardRef<KitHandle, {
         onMore={(r, m) => loadStudy(r, m)}
       />
     ) : (
-      <StudyStart onGo={(r, m) => loadStudy(r, m)} />
+      <StudyStart subject={subject} onGo={(r, m) => loadStudy(r, m)} />
     );
   } else if (app === "sketch") {
-    body = sketch ? <SketchView sketch={sketch} onAsk={(r) => loadSketch(editRequest(r))} /> : <AskBox placeholder="Graph y = x^2, shade P(X > 75) for N(70, 5), show a plant cell…" onGo={loadSketch} />;
+    body = sketch ? (
+      <SketchView sketch={sketch} onAsk={(r) => loadSketch(editRequest(r))} />
+    ) : (
+      <>
+        <AskBox placeholder={starters.sketchHint} onGo={loadSketch} />
+        <Starters label={activeClass ? `For ${activeClass.code || activeClass.name}` : "Try"} items={starters.sketch} onGo={loadSketch} />
+      </>
+    );
   } else if (app === "sheet") {
     body = table ? (
       <SheetView
         ref={sheetRef}
         table={table}
         say={(t) => p.say(t)}
-        onGraph={(spec: GraphSpec, t: string) => {
+        needRoom={() => {
+          if (p.size === "compact") p.onSize("half");
+        }}
+        onBig={(spec: GraphSpec, t: string) => {
           setSketch({ title: t, say: "Here's your data.", graph: spec, image_prompt: null });
           show("sketch");
+          p.onSize("full");
         }}
       />
     ) : (
-      <AskBox placeholder="Put these test scores in a table: 72, 85, 90, 64…" onGo={loadTable} />
+      <>
+        <AskBox placeholder={starters.sheetHint} onGo={loadTable} />
+        <Starters label={activeClass ? `For ${activeClass.code || activeClass.name}` : "Try"} items={starters.sheet} onGo={loadTable} />
+      </>
     );
   } else if (app === "planner") {
     body = plan ? <PlannerView plan={plan} say={(t) => p.say(t)} onPractice={(topic) => loadStudy(`practice problems: ${topic}`, "practice")} onRebuild={() => loadPlan("Rebuild my study plan")} /> : <AskBox placeholder="Plan my week for Exam 3 on Nov 25…" onGo={loadPlan} />;
-  } else if (app === "notes") body = <NotesView ref={notesRef} focusId={notesFocus} answer={notesAnswer} say={(t) => p.say(t)} onStudy={studyNote} />;
+  } else if (app === "notes") body = <NotesView ref={notesRef} cls={activeClass} focusId={notesFocus} answer={notesAnswer} say={(t) => p.say(t)} onStudy={studyNote} />;
   else body = <PocketView version={pocketV} onDrop={(it: PocketItem) => (async () => { await window.milo.kit.pocketCopy(it.id); show(null); await p.runTask(`switch to ${it.from && !/milo|electron/i.test(it.from) ? it.from : "the app I was just using"} and paste`); })()} />;
 
   return (
     <KitPanel
       app={app}
-      kicker={study && app === "study" ? `Study · ${study.set.subject}` : meta.name}
-      title={stripMath(title)}
+      kicker={editClasses ? "Your classes" : `${meta.name}${activeClass ? ` · ${activeClass.code || activeClass.name}` : study && app === "study" ? ` · ${study.set.subject}` : ""}`}
+      sub={editClasses ? null : <ClassBar store={classes} onPick={pickClass} onEdit={() => setEditClasses({})} />}
+      title={editClasses ? "Every app fits the class you pick" : stripMath(title)}
       working={!!loading}
       size={p.size}
       onSize={p.onSize}
       onClose={() => {
         req.current++;
         setLoading(null);
+        setEditClasses(null);
         show(null);
       }}
       style={p.style}
@@ -352,10 +421,26 @@ function AskBox({ placeholder, onGo }: { placeholder: string; onGo: (q: string) 
   );
 }
 
-function StudyStart({ onGo }: { onGo: (q: string, mode?: StudyMode) => void }) {
+function Starters({ label, items, onGo }: { label: string; items: { label: string; request: string }[]; onGo: (r: string) => void }) {
+  if (!items.length) return null;
+  return (
+    <div className="kit-starters">
+      <span className="kit-starters__lab">{label}</span>
+      {items.map((it) => (
+        <button key={it.label} className="kit-btn" onClick={() => onGo(it.request)}>
+          {it.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function StudyStart({ onGo, subject }: { onGo: (q: string, mode?: StudyMode) => void; subject?: Subject }) {
+  const st = startersFor(subject);
   return (
     <div className="sd-start">
-      <AskBox placeholder="Stats: normal distribution problems, Bio 101 flashcards…" onGo={(q) => onGo(q)} />
+      <AskBox placeholder={st.studyHint} onGo={(q) => onGo(q)} />
+      <Starters label={subject ? SUBJECT_NAMES[subject] : "Try"} items={st.study} onGo={(r) => onGo(r)} />
       <div className="sd-quick">
         <button className="kit-btn" onClick={() => onGo("practice problems on what's on my screen", "practice")}>Problems from my screen</button>
         <button className="kit-btn" onClick={() => onGo("flashcards on what's on my screen", "cards")}>Flashcards from my screen</button>

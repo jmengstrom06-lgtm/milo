@@ -1,12 +1,13 @@
 // IPC for Milo's Kit + its storage (notes, pocket, study memory) in the app's data folder.
 
-import { app, clipboard, ipcMain } from "electron";
+import { app, clipboard, ipcMain, nativeImage } from "electron";
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { log as bb } from "./blackbox";
 import { bridgeConnected, call as ext } from "./bridge";
-import { askNotes, tableOps, checkStudy, generateImage, makeNote, makePlan, makeSketch, makeStudySet, makeTable } from "./kit";
+import { classFor, classLine, loadClasses, parseClasses, saveClasses, type Klass } from "./classes";
+import { askNotes, tableOps, checkStudy, generateImage, makeNote, makePlan, makeSketch, makeStudySet, makeTable, setClassCtx } from "./kit";
 
 type Deps = {
   captureJpeg: () => Promise<string | null>;
@@ -39,6 +40,15 @@ type Memory = { skills: Record<string, { right: number; wrong: number; last: num
 const REFERS_TO_SCREEN = /\b(this|these|that|screen|page|on here|my notes|the notes|lecture|slides?|chapter|reading|pdf|from (my|the) (screen|page|class)|what'?s open|d2l|canvas)\b/i;
 
 export function registerKit(d: Deps) {
+  /** Every Kit request is tailored to its class: the one it names ("for my English class"), else the active one. */
+  const handle = (ch: string, fn: (e: Electron.IpcMainInvokeEvent, ...a: any[]) => unknown) =>
+    ipcMain.handle(ch, (e, ...a) => {
+      const c = classFor(typeof a[0] === "string" ? a[0] : "");
+      setClassCtx(classLine(c));
+      if (c) bb("kit", "class", { ch, class: c.name });
+      return fn(e, ...a);
+    });
+
   /** Page text (via the Chrome extension) + a screenshot, when the request is about what's on screen. */
   async function screen(request: string, force = false) {
     if (!force && !REFERS_TO_SCREEN.test(request)) return {};
@@ -53,7 +63,7 @@ export function registerKit(d: Deps) {
   }
 
   // ---- Study Deck
-  ipcMain.handle("kit:study", async (_e, request: string, mode: "worked" | "practice" | "cards" | "test" | "learn", count: number, context?: string) => {
+  handle("kit:study", async (_e, request: string, mode: "worked" | "practice" | "cards" | "test" | "learn", count: number, context?: string) => {
     const mem = load<Memory>("study-memory.json", { skills: {} });
     const weak = Object.entries(mem.skills)
       .filter(([, s]) => s.wrong > s.right * 0.5)
@@ -64,7 +74,7 @@ export function registerKit(d: Deps) {
     const n = Math.max(1, Math.min(20, Number(count) || (mode === "worked" ? 1 : mode === "test" ? 8 : mode === "learn" ? 3 : 5)));
     return makeStudySet(String(request ?? ""), { mode, count: n, weak, ...src, context: typeof context === "string" ? context : undefined });
   });
-  ipcMain.handle("kit:check", async (_e, item: { prompt: string; answer: string; skill?: string }, student: string) => {
+  handle("kit:check", async (_e, item: { prompt: string; answer: string; skill?: string }, student: string) => {
     const r = await checkStudy(item, String(student ?? ""));
     if (r.ok && item.skill) {
       const mem = load<Memory>("study-memory.json", { skills: {} });
@@ -76,7 +86,7 @@ export function registerKit(d: Deps) {
     }
     return r;
   });
-  ipcMain.handle("kit:mark", (_e, skill: string, correct: boolean) => {
+  handle("kit:mark", (_e, skill: string, correct: boolean) => {
     const mem = load<Memory>("study-memory.json", { skills: {} });
     const s = (mem.skills[String(skill)] ??= { right: 0, wrong: 0, last: 0 });
     if (correct) s.right++;
@@ -85,8 +95,8 @@ export function registerKit(d: Deps) {
     save("study-memory.json", mem);
     return true;
   });
-  ipcMain.handle("kit:mastery", () => load<Memory>("study-memory.json", { skills: {} }).skills);
-  ipcMain.handle("kit:weak", () => {
+  handle("kit:mastery", () => load<Memory>("study-memory.json", { skills: {} }).skills);
+  handle("kit:weak", () => {
     const mem = load<Memory>("study-memory.json", { skills: {} });
     return Object.entries(mem.skills)
       .filter(([, s]) => s.wrong > 0)
@@ -96,26 +106,79 @@ export function registerKit(d: Deps) {
   });
 
   // ---- Sketch
-  ipcMain.handle("kit:sketch", async (_e, request: string) => {
+  handle("kit:sketch", async (_e, request: string) => {
     const src = await screen(String(request ?? ""));
     return makeSketch(String(request ?? ""), src.pageText ?? "");
   });
-  ipcMain.handle("kit:image", (_e, prompt: string) => generateImage(String(prompt ?? "")));
-  ipcMain.handle("kit:has-images", () => !!process.env.OPENAI_API_KEY);
+  handle("kit:image", (_e, prompt: string) => generateImage(String(prompt ?? "")));
+  handle("kit:has-images", () => !!process.env.OPENAI_API_KEY);
 
   // ---- Sheet
-  ipcMain.handle("kit:table", async (_e, request: string) => {
-    const src = await screen(String(request ?? ""));
-    return makeTable(String(request ?? ""), src.pageText ?? "");
+  const COPIED_T = /\b(copied|clipboard|what i copied|pasted?)\b/i;
+  handle("kit:table", async (_e, request: string) => {
+    const q = String(request ?? "");
+    if (COPIED_T.test(q)) return makeTable(q, clipboard.readText().slice(0, 8000));
+    const src = await screen(q);
+    return makeTable(q, src.pageText ?? "");
   });
 
-  ipcMain.handle("kit:table-ops", (_e, request: string, t: { columns: string[]; rows: (string | number)[][] }, stats: string) =>
-    tableOps(String(request ?? ""), { columns: Array.isArray(t?.columns) ? t.columns.slice(0, 30) : [], rows: Array.isArray(t?.rows) ? t.rows.slice(0, 500) : [] }, String(stats ?? "").slice(0, 3000))
-  );
+  const COPIED = /\b(copied|clipboard|i copied|what i copied|pasted?)\b/i;
+  handle("kit:table-ops", async (_e, request: string, t: { columns: string[]; rows: (string | number)[][] }, stats: string) => {
+    const q = String(request ?? "");
+    let extra = COPIED.test(q) ? clipboard.readText().slice(0, 8000) : "";
+    if (!extra && /\b(screen|this page|on here|from (the|my) (page|screen))\b/i.test(q)) extra = (await screen(q, true)).pageText ?? "";
+    return tableOps(q, { columns: Array.isArray(t?.columns) ? t.columns.slice(0, 30) : [], rows: Array.isArray(t?.rows) ? t.rows.slice(0, 500) : [] }, String(stats ?? "").slice(0, 3000), extra);
+  });
+
+  // ---- Charts out of Milo: copy as an image (paste into Docs, Word, Slides) or save a PNG.
+  handle("kit:copy-image", (_e, dataUrl: string) => {
+    const img = nativeImage.createFromDataURL(String(dataUrl ?? ""));
+    if (img.isEmpty()) return false;
+    clipboard.writeImage(img);
+    return true;
+  });
+  handle("kit:save-image", (_e, dataUrl: string, name: string) => {
+    const img = nativeImage.createFromDataURL(String(dataUrl ?? ""));
+    if (img.isEmpty()) return null;
+    const safe = String(name || "Milo chart").replace(/[\\/:*?"<>|]+/g, " ").trim().slice(0, 80) || "Milo chart";
+    const file = path.join(app.getPath("downloads"), `${safe}.png`);
+    fs.writeFileSync(file, img.toPNG());
+    execFile("open", ["-R", file]);
+    return file;
+  });
+  // Open the table in Excel / Numbers (CSV in Downloads, opened with the default app).
+  handle("kit:open-csv", (_e, title: string, columns: string[], rows: (string | number)[][]) => {
+    const cell = (v: unknown) => {
+      const t = String(v ?? "");
+      return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+    };
+    const csv = [columns, ...rows].map((r) => (r ?? []).map(cell).join(",")).join("\n");
+    const safe = String(title || "Milo sheet").replace(/[\\/:*?"<>|]+/g, " ").trim().slice(0, 80) || "Milo sheet";
+    const file = path.join(app.getPath("downloads"), `${safe}.csv`);
+    fs.writeFileSync(file, csv);
+    return new Promise((resolve) => execFile("open", [file], (err) => resolve(!err)));
+  });
+
+  // ---- Your classes
+  ipcMain.handle("kit:classes", () => loadClasses());
+  ipcMain.handle("kit:classes-save", (_e, classes: Klass[], active: string | null) => saveClasses({ classes: Array.isArray(classes) ? classes : [], active: active ?? null }));
+  ipcMain.handle("kit:class-active", (_e, id: string | null) => {
+    const s = loadClasses();
+    return saveClasses({ ...s, active: id || null });
+  });
+  ipcMain.handle("kit:class-for", (_e, text: string) => classFor(String(text ?? "")));
+  ipcMain.handle("kit:classes-parse", async (_e, text: string, useScreen: boolean) => {
+    let t = String(text ?? "");
+    if (useScreen) {
+      const src = await screen(t, true);
+      if (src.pageText) t += `\n\nOn their screen (course list):\n${src.pageText.slice(0, 6000)}`;
+    }
+    return parseClasses(t);
+  });
 
   // ---- Notes (saved in the app's data folder)
-  ipcMain.handle("kit:notes", () => load<Note[]>("notes.json", []));
-  ipcMain.handle("kit:note-save", (_e, n: Note) => {
+  handle("kit:notes", () => load<Note[]>("notes.json", []));
+  handle("kit:note-save", (_e, n: Note) => {
     const notes = load<Note[]>("notes.json", []);
     const clean: Note = {
       id: String(n.id || Date.now().toString(36)),
@@ -131,17 +194,18 @@ export function registerKit(d: Deps) {
     save("notes.json", notes);
     return clean;
   });
-  ipcMain.handle("kit:note-delete", (_e, id: string) => {
+  handle("kit:note-delete", (_e, id: string) => {
     save("notes.json", load<Note[]>("notes.json", []).filter((x) => x.id !== id));
     return true;
   });
-  ipcMain.handle("kit:note-make", async (_e, request: string) => {
+  handle("kit:note-make", async (_e, request: string) => {
     const notes = load<Note[]>("notes.json", []);
     const src = await screen(String(request ?? ""), /\b(summar|notes? (on|from|about) (this|my screen|the page))/i.test(String(request)));
-    return makeNote(String(request ?? ""), { ...src, existingCourses: [...new Set(notes.map((n) => n.course))] });
+    const classes = loadClasses().classes.map((c) => c.name);
+    return makeNote(String(request ?? ""), { ...src, existingCourses: [...new Set([...classes, ...notes.map((n) => n.course)])] });
   });
-  ipcMain.handle("kit:notes-ask", (_e, q: string) => askNotes(String(q ?? ""), load<Note[]>("notes.json", [])));
-  ipcMain.handle("kit:note-export", (_e, n: Note) => {
+  handle("kit:notes-ask", (_e, q: string) => askNotes(String(q ?? ""), load<Note[]>("notes.json", [])));
+  handle("kit:note-export", (_e, n: Note) => {
     // Copy into Apple Notes (a real note the student keeps).
     const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;").replace(/\\/g, "\\\\");
     const html = `<h1>${esc(n.title)}</h1>` + esc(n.body).split("\n").map((l) => `<div>${l || "<br>"}</div>`).join("");
@@ -151,8 +215,8 @@ export function registerKit(d: Deps) {
   });
 
   // ---- Pocket: "hold this" / "drop it"
-  ipcMain.handle("kit:pocket", () => load<PocketItem[]>("pocket.json", []));
-  ipcMain.handle("kit:hold", async (_e, text?: string) => {
+  handle("kit:pocket", () => load<PocketItem[]>("pocket.json", []));
+  handle("kit:hold", async (_e, text?: string) => {
     let t = typeof text === "string" ? text : "";
     let from = "Milo";
     if (!t) {
@@ -173,26 +237,26 @@ export function registerKit(d: Deps) {
     save("pocket.json", [item, ...items].slice(0, 12));
     return { ok: true, item };
   });
-  ipcMain.handle("kit:pocket-copy", (_e, id: string) => {
+  handle("kit:pocket-copy", (_e, id: string) => {
     const it = load<PocketItem[]>("pocket.json", []).find((x) => x.id === id);
     if (!it) return false;
     clipboard.writeText(it.text);
     return true;
   });
-  ipcMain.handle("kit:pocket-remove", (_e, id: string) => {
+  handle("kit:pocket-remove", (_e, id: string) => {
     save("pocket.json", load<PocketItem[]>("pocket.json", []).filter((x) => x.id !== id));
     return true;
   });
 
   // ---- Planner
-  ipcMain.handle("kit:plan", async (_e, request: string, items: { title: string; course: string; due: string }[]) => {
+  handle("kit:plan", async (_e, request: string, items: { title: string; course: string; due: string }[]) => {
     const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
     const src = await screen(String(request ?? ""));
     return makePlan(String(request ?? ""), today, Array.isArray(items) ? items.slice(0, 40) : [], src.pageText ?? "");
   });
 
   // Study plan -> Apple Calendar: write an .ics file and open it (Calendar asks which calendar to add to).
-  ipcMain.handle("kit:plan-ics", async (_e, plan: { title: string; days: { date: string; tasks: { text: string; kind: string; minutes?: number }[] }[] }) => {
+  handle("kit:plan-ics", async (_e, plan: { title: string; days: { date: string; tasks: { text: string; kind: string; minutes?: number }[] }[] }) => {
     const esc = (t: string) => String(t).replace(/\\/g, "\\\\").replace(/[,;]/g, (m) => "\\" + m).replace(/\n/g, "\\n");
     const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
     const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Milo//Study Plan//EN", "CALSCALE:GREGORIAN"];
@@ -223,7 +287,7 @@ export function registerKit(d: Deps) {
   });
 
   // ---- copy any text (tables as TSV paste straight into Excel / Google Sheets)
-  ipcMain.handle("kit:copy", (_e, text: string) => {
+  handle("kit:copy", (_e, text: string) => {
     clipboard.writeText(String(text ?? ""));
     return true;
   });
