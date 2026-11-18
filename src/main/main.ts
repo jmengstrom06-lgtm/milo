@@ -291,6 +291,8 @@ ipcMain.handle("milo:task", async (_e, task: string) => {
   }
 
   let lastClick: { x: number; y: number } | null = null; // screen point of the previous action if it was a click
+  let lastSig = ""; // the previous action, to catch loops ("open Chrome", "open Chrome", "open Chrome"...)
+  let stuck = 0;
   try {
     for (let step = 0; step < 14; step++) {
       if (taskAbort) return { ok: true, status: "stopped", text: "Stopped!" };
@@ -311,6 +313,16 @@ ipcMain.handle("milo:task", async (_e, task: string) => {
 
       if (a.action === "done") return { ok: true, status: "done", text: a.text || a.say || "All done!" };
 
+      // Don't repeat the exact same non-click action: it already happened. Nudge the AI to try something else.
+      const sig = `${a.action}|${a.app ?? ""}|${a.url ?? ""}|${a.keys ?? ""}|${a.text ?? ""}`;
+      if (a.action !== "click" && a.action !== "double_click" && a.action !== "wait" && sig === lastSig) {
+        stuck++;
+        history.push(`(You just did "${a.action}${a.app ? " " + a.app : ""}" already and it worked. Don't repeat it; do the next step or a different approach.)`);
+        if (stuck >= 3) return { ok: false, text: "I got stuck doing the same thing over and over, so I stopped. Can you tell me a bit more?" };
+        continue;
+      }
+      lastSig = sig;
+
       // Don't click the same spot twice in a row: the first click already worked (text fields look the same after).
       if ((a.action === "click" || a.action === "double_click") && screenPt && lastClick &&
           Math.hypot(screenPt.x - lastClick.x, screenPt.y - lastClick.y) < 25) {
@@ -329,8 +341,7 @@ ipcMain.handle("milo:task", async (_e, task: string) => {
       switch (a.action) {
         case "open_app":
           if (!a.app) throw new Error("No app name");
-          await openApp(a.app);
-          history.push(`Opened ${a.app}`);
+          history.push(`Opened ${await openApp(a.app)} (it's now in front with a window)`);
           break;
         case "open_url":
           if (!a.url || !/^https?:\/\//.test(a.url)) throw new Error("Bad URL");

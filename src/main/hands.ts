@@ -128,17 +128,72 @@ export async function typeText(text: string) {
 }
 
 // ---- apps -----------------------------------------------------------------------
-export async function openApp(name: string) {
-  try {
-    await run("open", ["-a", name]);
-  } catch {
+const ALIASES: Record<string, string> = {
+  chrome: "Google Chrome", "google chrome": "Google Chrome", word: "Microsoft Word", excel: "Microsoft Excel",
+  powerpoint: "Microsoft PowerPoint", outlook: "Microsoft Outlook", teams: "Microsoft Teams", zoom: "zoom.us",
+  "vs code": "Visual Studio Code", vscode: "Visual Studio Code", settings: "System Settings", imessage: "Messages",
+  "chat gpt": "ChatGPT", chatgpt: "ChatGPT",
+};
+
+const norm = (s: string) =>
+  s.toLowerCase().replace(/\.app$/, "").replace(/\b(the|my|app|application|browser|program)\b/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+
+let appCache: string[] | null = null;
+function installedApps(): string[] {
+  if (appCache) return appCache;
+  const dirs = ["/Applications", "/System/Applications", "/System/Applications/Utilities", "/Applications/Utilities", path.join(app.getPath("home"), "Applications")];
+  const names = new Set<string>();
+  for (const d of dirs) {
     try {
-      await run("osascript", ["-e", `tell application "${name.replace(/"/g, "")}" to activate`]);
-    } catch (e) {
-      throw new Error(`I couldn't find an app called "${name}".`);
+      for (const f of fs.readdirSync(d)) if (f.endsWith(".app")) names.add(f.slice(0, -4));
+    } catch {
+      /* folder missing */
     }
   }
-  await sleep(900); // let it come to the front
+  appCache = [...names];
+  return appCache;
+}
+
+/** "chrome browser" -> "Google Chrome", "the notes app" -> "Notes", "photoshop" -> "Adobe Photoshop 2026". */
+export function resolveApp(name: string): string {
+  const n = norm(name);
+  if (ALIASES[n]) return ALIASES[n];
+  const apps = installedApps();
+  const exact = apps.find((a) => norm(a) === n);
+  if (exact) return exact;
+  const words = n.split(" ").filter(Boolean);
+  const scored = apps
+    .map((a) => {
+      const an = norm(a);
+      const hits = words.filter((w) => an.split(" ").includes(w)).length;
+      return { a, score: hits * 10 - Math.abs(an.length - n.length) / 10 + (an.includes(n) ? 5 : 0) };
+    })
+    .filter((x) => x.score > 0)
+    .sort((x, y) => y.score - x.score);
+  return scored[0]?.a ?? name;
+}
+
+const isBrowser = (a: string) => /^(Google Chrome|Safari|Arc|Firefox|Microsoft Edge|Brave Browser|Opera)$/.test(a);
+
+export async function openApp(name: string) {
+  const real = resolveApp(name);
+  try {
+    await run("open", ["-a", real]);
+  } catch {
+    throw new Error(`I couldn't find an app called "${name}" on your Mac.`);
+  }
+  await sleep(700);
+  // Browsers can be "open" with no window at all; make sure one is showing.
+  if (isBrowser(real)) {
+    try {
+      await run("osascript", ["-e", `tell application "${real}" to if (count of windows) = 0 then make new window`]);
+    } catch {
+      /* not scriptable (e.g. Arc): fine */
+    }
+    await run("osascript", ["-e", `tell application "${real}" to activate`]).catch(() => {});
+  }
+  await sleep(300);
+  return real;
 }
 
 export async function openUrl(url: string) {
@@ -151,7 +206,6 @@ export async function openUrl(url: string) {
   await sleep(1300);
 }
 
-const BROWSERS = /^(Google Chrome|Safari|Arc|Firefox|Microsoft Edge|Brave Browser|Opera)$/;
 
 export async function frontApp(): Promise<string> {
   try {
@@ -164,7 +218,7 @@ export async function frontApp(): Promise<string> {
 /** Make sure a browser is in front (for tab shortcuts). Opens Chrome if none is. */
 export async function ensureBrowser() {
   const front = await frontApp();
-  if (!BROWSERS.test(front)) await openApp("Google Chrome");
+  if (!isBrowser(front)) await openApp("Google Chrome");
 }
 
 /** Open the newest file in ~/Downloads. Returns its name. */

@@ -9,7 +9,7 @@ export type QuickStep =
   | { kind: "folder"; folder: "downloads" | "desktop" | "documents"; say: string };
 
 const APPS: Record<string, string> = {
-  chrome: "Google Chrome", "google chrome": "Google Chrome", safari: "Safari", firefox: "Firefox", arc: "Arc",
+  chrome: "Google Chrome", "google chrome": "Google Chrome", "chrome browser": "Google Chrome", browser: "Google Chrome", "web browser": "Google Chrome", safari: "Safari", firefox: "Firefox", arc: "Arc",
   word: "Microsoft Word", "microsoft word": "Microsoft Word", excel: "Microsoft Excel", "microsoft excel": "Microsoft Excel",
   powerpoint: "Microsoft PowerPoint", "power point": "Microsoft PowerPoint", outlook: "Microsoft Outlook", teams: "Microsoft Teams",
   notes: "Notes", "apple notes": "Notes", calculator: "Calculator", calendar: "Calendar", reminders: "Reminders",
@@ -45,7 +45,7 @@ const NEW_DOCS: [RegExp, string, string][] = [
 
 const enc = encodeURIComponent;
 const clean = (s: string) =>
-  s.toLowerCase().replace(/[.!?]+$/, "").replace(/^(the|my|a|an|up)\s+/g, "").replace(/\s+(app|application|website|site|page)$/, "").trim();
+  s.toLowerCase().replace(/[.!?]+$/, "").replace(/^(the|my|a|an|up)\s+/g, "").replace(/\s+(app|application|website|site|page|browser)$/, "").trim();
 
 function isNewDocWanted(t: string) {
   return /\b(new|blank)\b/.test(t) || /^(a )?(doc|document|sheet|spreadsheet|slides?|presentation)$/.test(t);
