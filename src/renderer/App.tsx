@@ -134,6 +134,8 @@ export default function App() {
   const pendingRef = useRef<{ text: string; started: number; unfinished: boolean } | null>(null);
   const earStateRef = useRef<string>("off"); // last thing you asked for (so a bare "go" can redo it)
   const restoreHandsFree = useRef(false);
+  const interrupted = useRef(false); // you talked over Milo / stopped him
+  const resumeRef = useRef<(() => void) | null>(null); // how to pick up where he left off
   const researchSpoken = useRef(false);
   const lastStepSay = useRef("");
   const lastStepPoint = useRef<{ x: number; y: number } | null>(null); // a task waiting on the student's yes/no
@@ -376,11 +378,37 @@ export default function App() {
 
       // 3) Open the notebook and write each step while explaining it.
       setLesson(L);
-      for (let i = 0; i < L.steps.length; i++) {
-        if (id !== runId.current) return;
-        setRevealed(i + 1);
-        setMood("writing");
-        await Promise.all([say(L.steps[i].say), sleep(900)]);
+      interrupted.current = false;
+      resumeRef.current = null;
+      let stoppedAt = -1;
+      const teachFrom = async (start: number) => {
+        for (let i = start; i < L.steps.length; i++) {
+          if (id !== runId.current) return false;
+          setRevealed(i + 1);
+          setMood("writing");
+          await Promise.all([say(L.steps[i].say), sleep(900)]);
+          if (interrupted.current) {
+            stoppedAt = i + 1;
+            return false;
+          }
+        }
+        return true;
+      };
+      if (!(await teachFrom(0))) {
+        if (stoppedAt >= 0 && id === runId.current) {
+          // You interrupted: remember the spot so "keep going" continues from here.
+          resumeRef.current = async () => {
+            interrupted.current = false;
+            if (await teachFrom(stoppedAt)) {
+              setFinished(true);
+              setMood("happy");
+              await say(L.check_question ? "Your turn. What do you get?" : "That's the move!");
+              setBubble(null);
+              listen();
+            }
+          };
+        }
+        return;
       }
       if (id !== runId.current) return;
       setFinished(true);
@@ -538,8 +566,7 @@ export default function App() {
         const norm = st.say.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
         if (norm && norm !== lastStepSay.current) {
           lastStepSay.current = norm;
-          setBubble(st.say);
-          tts.play(st.say, () => setSpeaking(true)).then(() => setSpeaking(false));
+          setBubble(st.say); // shown, not spoken: saves voice credits and keeps tasks quick
         }
         if (st.action === "typing" || st.action === "type") {
           // Step aside so the text he's typing isn't hidden behind him:
@@ -1003,6 +1030,14 @@ export default function App() {
       case "chain":
         runChain(intent.steps, spoken);
         return;
+      case "resume": {
+        const r = resumeRef.current;
+        resumeRef.current = null;
+        if (r) r();
+        else if (lastCommand.current) routeRef.current(lastCommand.current);
+        else say("There's nothing to pick back up.").then(() => setBubble(null));
+        return;
+      }
       case "fill": {
         const L = lessonRef.current;
         if (!L) return;
@@ -1074,6 +1109,19 @@ export default function App() {
     }
   };
 
+  // If ElevenLabs stops working, say why once (in the backup voice).
+  useEffect(() => {
+    tts.setVoiceTroubleHandler((why) => {
+      const msg =
+        why === "quota"
+          ? "Heads up: I'm out of ElevenLabs credits, so I'm using my backup voice and can't hear you until they're topped up. You can still type to me."
+          : "Heads up: ElevenLabs rejected my key, so I'm using my backup voice.";
+      setMessages((m) => [...m, { role: "assistant", content: msg }]);
+      setBubble(msg);
+      setTimeout(() => setBubble((b) => (b === msg ? null : b)), 9000);
+    });
+  }, []);
+
   // Wire up the microphone once.
   useEffect(() => {
     const e = ears.current!;
@@ -1095,6 +1143,14 @@ export default function App() {
     let inFlight = false;
     const queued: { wav: ArrayBuffer; pushToTalk: boolean; forced: boolean }[] = []; // waiting utterances, in order (never drop any)
     e.onPause = (p) => setPause(p);
+    e.onBargeIn = () => {
+      interrupted.current = true;
+      tts.stop();
+      setSpeaking(false);
+      setBubble(null);
+      setMood("listening");
+      followUntil.current = Date.now() + 12000; // what you say next is for Milo, no "Hey Milo" needed
+    };
     e.onUtterance = async (wav, pushToTalk, forced) => {
       if (inFlight) {
         queued.push({ wav, pushToTalk, forced });
@@ -1272,6 +1328,7 @@ export default function App() {
       e.flush();
       return;
     }
+    if (speaking) interrupted.current = true;
     hush();
     setHeard(null);
     setBubble("I'm listening… (pause or say \"go\" to send)");
@@ -1341,6 +1398,12 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      if (speaking) {
+        interrupted.current = true;
+        hush();
+        setBubble(null);
+        return;
+      }
       if (tool) {
         closeTool();
         return;
@@ -1364,7 +1427,7 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lesson, closeLesson, researchQ, sweep, tool, quiz, brief, signIn]);
+  }, [lesson, closeLesson, researchQ, sweep, tool, quiz, brief, signIn, speaking]);
 
   const send = async () => {
     const text = input.trim();
@@ -1574,6 +1637,12 @@ export default function App() {
         onMouseEnter={() => hover(true)}
         onMouseLeave={() => !chatOpen && hover(false)}
         onClick={() => {
+          if (speaking) {
+            interrupted.current = true;
+            hush();
+            setBubble(null);
+            return;
+          }
           if (lesson) return;
           chatOpen ? closeChat() : openChat();
         }}

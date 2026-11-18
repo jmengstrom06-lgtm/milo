@@ -188,8 +188,53 @@ export function resolveApp(name: string): string {
 
 const isBrowser = (a: string) => /^(Google Chrome|Safari|Arc|Firefox|Microsoft Edge|Brave Browser|Opera)$/.test(a);
 
+// ---- Chrome without the "Who's using Chrome?" profile picker ---------------------------
+/** The Chrome profile you used last (e.g. "Default" or "Profile 1"). */
+function lastChromeProfile(): string {
+  try {
+    const file = path.join(app.getPath("home"), "Library/Application Support/Google/Chrome/Local State");
+    const state = JSON.parse(fs.readFileSync(file, "utf8"));
+    return state?.profile?.last_used || "Default";
+  } catch {
+    return "Default";
+  }
+}
+async function chromeRunning() {
+  try {
+    await run("pgrep", ["-x", "Google Chrome"]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+/**
+ * Open Chrome (optionally at a URL) straight into your last profile. Launching Chrome with a
+ * profile named skips the picker; if Chrome is already running we just use the window you're in.
+ */
+async function openChrome(url?: string) {
+  const profile = lastChromeProfile();
+  if (!(await chromeRunning())) {
+    await run("open", ["-a", "Google Chrome", "--args", `--profile-directory=${profile}`, ...(url ? [url] : [])]);
+    await sleep(1500);
+    return;
+  }
+  if (url) {
+    await run("open", ["-a", "Google Chrome", url]);
+  } else {
+    // Running but maybe no window: open one in your profile (this path never shows the picker).
+    const hasWindow = await run("osascript", ["-e", 'tell application "Google Chrome" to count of windows']).catch(() => "0");
+    if (Number(hasWindow) === 0) await run("open", ["-na", "Google Chrome", "--args", `--profile-directory=${profile}`]);
+    await run("osascript", ["-e", 'tell application "Google Chrome" to activate']).catch(() => {});
+  }
+  await sleep(600);
+}
+
 export async function openApp(name: string) {
   const real = resolveApp(name);
+  if (real === "Google Chrome") {
+    await openChrome();
+    return real;
+  }
   try {
     await run("open", ["-a", real]);
   } catch {
@@ -210,13 +255,13 @@ export async function openApp(name: string) {
 }
 
 export async function openUrl(url: string) {
-  // Prefer Chrome; fall back to the default browser.
+  // Prefer Chrome (in your profile, no picker); fall back to the default browser.
   try {
-    await run("open", ["-a", "Google Chrome", url]);
+    await openChrome(url);
   } catch {
     await run("open", [url]);
   }
-  await sleep(1300);
+  await sleep(900);
 }
 
 

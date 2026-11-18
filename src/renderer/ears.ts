@@ -47,6 +47,10 @@ export class Ears {
   onState: (s: EarState) => void = () => {};
   /** 0..1 while waiting for you to finish (drives the "sending…" bar). */
   onPause: (progress: number) => void = () => {};
+  /** You started talking over Milo: he should stop and listen. */
+  onBargeIn: () => void = () => {};
+  private echo = 0.01; // how loud Milo's own voice is in the mic while he talks
+  private bargeRun = 0;
   onUtterance: (wav: ArrayBuffer, pushToTalk: boolean, forced: boolean) => void = () => {};
 
   async setMode(mode: EarMode) {
@@ -64,8 +68,13 @@ export class Ears {
 
   /** Ignore the mic while Milo is talking so he doesn't hear himself. */
   mute(on: boolean) {
+    if (on && this.speaking) return; // already listening to you (you talked over Milo): don't cut that off
     this.muted = on;
-    if (on) this.resetUtterance();
+    this.bargeRun = 0;
+    if (on) {
+      this.echo = 0.01;
+      this.resetUtterance();
+    }
   }
 
   private async open() {
@@ -145,7 +154,26 @@ export class Ears {
     this.onLevel(this.muted ? 0 : Math.min(1, rms * 12));
 
     if (this.muted) {
-      this.ring = [];
+      // Milo is talking. Keep a quiet ear open: if YOU talk over him (clearly louder than his own voice
+      // leaking into the mic), stop him and start listening.
+      this.ring.push(data);
+      if (this.ring.length > 6) this.ring.shift();
+      const thresh = Math.max(0.05, this.echo * 2.6, this.userLevel * 0.8);
+      if (rms > thresh) this.bargeRun++;
+      else {
+        this.bargeRun = 0;
+        this.echo = this.echo * 0.95 + rms * 0.05;
+      }
+      if (this.bargeRun >= 5) {
+        this.bargeRun = 0;
+        this.muted = false;
+        this.onBargeIn();
+        this.speaking = true;
+        this.speech = [...this.ring];
+        this.ring = [];
+        this.quietRun = 0;
+        this.onState("hearing");
+      }
       return;
     }
 

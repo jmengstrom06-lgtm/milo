@@ -19,8 +19,11 @@ export async function transcribe(audio: ArrayBuffer | Uint8Array): Promise<{ ok:
     if (!res.ok) {
       const detail = await res.text();
       console.warn(`[ears] ElevenLabs ${res.status}: ${detail.slice(0, 200)}`);
+      if (/quota_exceeded|credits|quota/i.test(detail)) {
+        return { ok: false, text: "I'm out of ElevenLabs credits, so I can't hear you right now. Type to me in the chat, or top up ElevenLabs." };
+      }
       if (res.status === 401 || res.status === 403) {
-        return { ok: false, text: "My ElevenLabs key isn't allowed to listen yet. Turn on Speech to Text for the milo key." };
+        return { ok: false, text: "ElevenLabs rejected my key. Check the ELEVENLABS_API_KEY in .env (it needs Speech to Text access)." };
       }
       if (res.status === 429) return { ok: false, text: "busy" };
       return { ok: false, text: `I couldn't hear that (${res.status}). Try again?` };

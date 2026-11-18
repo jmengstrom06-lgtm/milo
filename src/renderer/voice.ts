@@ -4,7 +4,13 @@
 type Clip = { ok: true; url: string } | { ok: false };
 const cache = new Map<string, Promise<Clip>>();
 let current: HTMLAudioElement | null = null;
-let elevenDown = false; // stop asking ElevenLabs after it fails (no key, out of credits…)
+let elevenDownUntil = 0; // pause ElevenLabs after it fails (no key, out of credits…), then try again
+const elevenDown = () => Date.now() < elevenDownUntil;
+/** Called once when ElevenLabs stops working (e.g. out of credits), so Milo can say so. */
+export let onVoiceTrouble: (reason: "quota" | "key") => void = () => {};
+export function setVoiceTroubleHandler(fn: (reason: "quota" | "key") => void) {
+  onVoiceTrouble = fn;
+}
 
 function b64ToUrl(b64: string) {
   const bin = atob(b64);
@@ -16,12 +22,20 @@ function b64ToUrl(b64: string) {
 /** Start generating audio for a line now, so it's ready when Milo needs it. */
 export function prefetch(text: string, urgent = false): Promise<Clip> {
   const key = text.trim();
-  if (!key || elevenDown) return Promise.resolve({ ok: false });
+  if (!key || elevenDown()) return Promise.resolve({ ok: false });
   let p = cache.get(key);
   if (!p) {
     p = window.milo.tts(key, urgent).then((r) => {
       if (r.ok) return { ok: true as const, url: b64ToUrl(r.audio) };
-      if (r.text === "no-key" || r.text === "voice-error-401" || r.text === "voice-error-403") elevenDown = true;
+      if (r.text === "no-key") elevenDownUntil = Date.now() + 10 * 60_000;
+      else if (r.text === "quota") {
+        if (!elevenDown()) onVoiceTrouble("quota");
+        elevenDownUntil = Date.now() + 5 * 60_000; // check again in a few minutes
+      } else if (r.text === "voice-error-401" || r.text === "voice-error-403") {
+        if (!elevenDown()) onVoiceTrouble("key");
+        elevenDownUntil = Date.now() + 60_000;
+      }
+      cache.delete(key); // don't keep a failed line around
       return { ok: false as const };
     });
     cache.set(key, p);

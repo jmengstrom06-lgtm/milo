@@ -20,6 +20,7 @@ export type Intent =
   | { kind: "checkwork" } // one-time look for mistakes
   | { kind: "quiz"; focus: string } // quiz me on what's on screen
   | { kind: "brief" } // what's due (reads D2L)
+  | { kind: "resume" } // pick up where Milo was interrupted
   | { kind: "chain"; steps: Intent[] } // "open chrome, find a worksheet, and complete it": do in order
   | { kind: "fill" } // type the lesson's answer into the blank
   | { kind: "yes" }
@@ -111,6 +112,8 @@ function parseSingle(raw: string, ctx: Ctx): Intent {
   const text = raw.trim().replace(/[.!?]+$/, "");
   const t = text.toLowerCase();
   if (!t) return { kind: "chat", text };
+  if (/^(keep going|continue|go on|resume|carry on|where were we|pick up where you left off|finish what you were (doing|saying)|ok(ay)? continue)$/.test(t))
+    return { kind: "resume" };
   if (/^(stop watching|stop checking|you can stop watching|quit watching)\b/.test(t)) return { kind: "watch", on: false };
   if (/^(watch me|watch my (work|screen)|keep an eye on (me|my work|this)|watch me work|check my work as i go|watch while i work)\b/.test(t))
     return { kind: "watch", on: true };

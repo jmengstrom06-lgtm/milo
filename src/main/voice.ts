@@ -26,6 +26,7 @@ export async function speak(text: string, urgent = false): Promise<{ ok: true; a
     if (!res.ok) {
       const detail = await res.text();
       console.warn(`[voice] ElevenLabs ${res.status}: ${detail.slice(0, 200)}`);
+      if (/quota_exceeded|credits|quota/i.test(detail)) return { ok: false, text: "quota" };
       return { ok: false, text: `voice-error-${res.status}` };
     }
     const buf = Buffer.from(await res.arrayBuffer());
