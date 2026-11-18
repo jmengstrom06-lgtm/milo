@@ -3,7 +3,9 @@
 // Needs Accessibility permission for Terminal (dev) or Milo (packaged app).
 
 import { execFile } from "node:child_process";
-import { clipboard } from "electron";
+import { app, clipboard } from "electron";
+import fs from "node:fs";
+import path from "node:path";
 
 function run(cmd: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -163,4 +165,23 @@ export async function frontApp(): Promise<string> {
 export async function ensureBrowser() {
   const front = await frontApp();
   if (!BROWSERS.test(front)) await openApp("Google Chrome");
+}
+
+/** Open the newest file in ~/Downloads. Returns its name. */
+export async function openLatestDownload(): Promise<string> {
+  const dir = app.getPath("downloads");
+  const files = fs
+    .readdirSync(dir)
+    .filter((f) => !f.startsWith(".") && !/\.(crdownload|download|part|tmp)$/i.test(f))
+    .map((f) => ({ f, t: fs.statSync(path.join(dir, f)).mtimeMs }))
+    .sort((a, b) => b.t - a.t);
+  if (!files.length) throw new Error("Your Downloads folder is empty.");
+  await run("open", [path.join(dir, files[0].f)]);
+  await sleep(1800); // give Preview / Word / the browser a moment to show it
+  return files[0].f;
+}
+
+export async function openFolder(which: "downloads" | "desktop" | "documents") {
+  await run("open", [app.getPath(which)]);
+  await sleep(700);
 }

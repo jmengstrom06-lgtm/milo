@@ -35,7 +35,7 @@ export function stripWake(text: string, anywhere = false): { woke: boolean; rest
 }
 
 export function modeFrom(t: string): MiloMode | undefined {
-  if (/(do it|for me|just (do|solve|answer|finish)|solve (it|this|that)|finish (it|this)|answer (it|this))/.test(t)) return "do";
+  if (/(do it|for me|just (do|solve|answer|finish)|\b(solve|complete|finish|answer|do) (it|this|that|the|my|all|number|question|problem)|work it out)/.test(t)) return "do";
   if (/(hint|nudge|i'?m stuck|little help)/.test(t)) return "help";
   if (/(teach|explain|walk me|show me how|how do (i|you)|step by step|break it down)/.test(t)) return "teach";
   return undefined;

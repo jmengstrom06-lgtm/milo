@@ -22,6 +22,7 @@ declare global {
     milo: {
       setClickable: (clickable: boolean) => void;
       ask: (history: { role: "user" | "assistant"; content: string }[]) => Promise<{ ok: boolean; text: string }>;
+      route: (text: string) => Promise<{ kind: "chat" | "look" | "task"; mode?: MiloMode }>;
       look: (mode: MiloMode, request: string, focus?: MiloBox | null) => Promise<{ ok: true; lesson: MiloLesson; box: MiloBox | null; others: MiloOther[] } | Err>;
       refine: (box: MiloBox, topic: string) => Promise<{ ok: true; box: MiloBox } | Err>;
       check: (lesson: MiloLesson, answer: string) => Promise<{ ok: true; data: { correct: boolean; feedback: string } } | Err>;
@@ -29,7 +30,7 @@ declare global {
       stt: (audio: ArrayBuffer) => Promise<{ ok: true; text: string } | Err>;
       micAccess: () => Promise<boolean>;
       tts: (text: string, urgent?: boolean) => Promise<{ ok: true; audio: string } | Err>;
-      task: (task: string) => Promise<{ ok: true; status: "done" | "ask" | "stopped" | "quick"; text: string } | Err>;
+      task: (task: string) => Promise<{ ok: true; status: "done" | "ask" | "stopped" | "quick"; text: string; rest?: string | null; did?: string[] } | Err>;
       stopTask: () => void;
       handsAccess: () => Promise<boolean>;
       onTaskStep: (cb: (step: { say: string; action: string; point?: { x: number; y: number } | null }) => void) => () => void;

@@ -4,7 +4,9 @@
 export type QuickStep =
   | { kind: "app"; app: string; say: string }
   | { kind: "url"; url: string; say: string }
-  | { kind: "keys"; keys: string; say: string; browser?: boolean };
+  | { kind: "keys"; keys: string; say: string; browser?: boolean }
+  | { kind: "download"; say: string }
+  | { kind: "folder"; folder: "downloads" | "desktop" | "documents"; say: string };
 
 const APPS: Record<string, string> = {
   chrome: "Google Chrome", "google chrome": "Google Chrome", safari: "Safari", firefox: "Firefox", arc: "Arc",
@@ -67,6 +69,20 @@ export function plan(raw: string): { steps: QuickStep[]; rest: string | null } {
 }
 
 function one(t: string): QuickStep | null {
+  // ---- folders
+  const f = t.match(/\b(downloads?|desktop|documents)( folder)?$/);
+  if (f && /^(open|go to|go into|pull up|show me|bring up)\b/.test(t) && (f[2] || /folder/.test(t) || !/download(ed)?\b/.test(t))) {
+    const folder = f[1].startsWith("download") ? "downloads" : (f[1] as "desktop" | "documents");
+    return { kind: "folder", folder, say: `Opening your ${folder}!` };
+  }
+  // ---- newest download
+  if (
+    /\b(download|downloaded|downloads)\b/.test(t) &&
+    /^(open|go to|go into|pull up|show me|bring up|find|get|look at|check)\b/.test(t) &&
+    !/\bfolder\b/.test(t)
+  )
+    return { kind: "download", say: "Opening your latest download!" };
+
   // ---- tab / browser keys
   if (/^(open |make |start )?(a )?new tab$/.test(t)) return { kind: "keys", keys: "cmd+t", say: "New tab!", browser: true };
   if (/^(open |make )?(a )?new (browser )?window$/.test(t)) return { kind: "keys", keys: "cmd+n", say: "New window!", browser: true };

@@ -398,8 +398,19 @@ export default function App() {
         listen();
         return;
       } else if (r.status === "quick") {
-        // Instant command (open an app, new tab…): no speech or confetti needed, it already happened.
+        // Instant command (open an app, new tab…) already happened. Anything left gets routed:
+        // homework ("…and solve the problem") or more computer work ("…and write a poem").
         setMood("happy");
+        if (r.rest) {
+          const intent = parse(r.rest, { inLesson: false, awaitingAnswer: false });
+          if (intent.kind === "look") {
+            setMode(intent.mode);
+            look(intent.mode, intent.request, null, byVoice);
+          } else {
+            runTask(`${r.rest}\n(Already done: ${(r.did ?? []).join("; ")})`, byVoice);
+          }
+          return;
+        }
         await sleep(1200);
       } else if (r.status === "stopped") {
         setMood("idle");
@@ -413,7 +424,8 @@ export default function App() {
       setMood("happy");
       if (byVoice) listen();
     },
-    [say, hover, listen]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [say, hover, listen, look]
   );
 
   // Follow Milo's hands: hop next to whatever he's about to click, show what he's doing.
@@ -531,6 +543,19 @@ export default function App() {
         if (lastSaid.current) say(lastSaid.current).then(() => setBubble(null));
         return;
       case "chat":
+        // Keywords didn't settle it: ask the router before assuming it's just chat.
+        if (!inLesson) {
+          setMood("thinking");
+          window.milo.route(intent.text).then((rt) => {
+            if (rt.kind === "look") {
+              const m = rt.mode ?? "teach";
+              setMode(m);
+              look(m, intent.text, null, spoken);
+            } else if (rt.kind === "task") runTask(intent.text, spoken);
+            else chat(intent.text, spoken);
+          });
+          return;
+        }
         chat(intent.text, spoken);
         return;
     }

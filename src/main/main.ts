@@ -13,9 +13,9 @@ import path from "node:path";
 import dotenv from "dotenv";
 import { speak } from "./voice";
 import { transcribe } from "./ears";
-import { click, ensureBrowser, openApp, openUrl, pressKeys, typeText } from "./hands";
+import { click, ensureBrowser, openApp, openFolder, openLatestDownload, openUrl, pressKeys, typeText } from "./hands";
 import { plan } from "./quick";
-import { Action, askMilo, ChatMessage, checkAnswer, locateInCrop, nextAction, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
+import { Action, askMilo, classify, ChatMessage, checkAnswer, locateInCrop, nextAction, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
 dotenv.config({ path: path.join(app.getAppPath(), ".env") });
 
@@ -130,6 +130,7 @@ ipcMain.on("milo:set-clickable", (_e, clickable: boolean) => {
 });
 
 ipcMain.handle("milo:ask", (_e, history: ChatMessage[]) => askMilo(history));
+ipcMain.handle("milo:route", (_e, text: string) => classify(text));
 
 type Box = { x: number; y: number; width: number; height: number };
 
@@ -243,8 +244,16 @@ ipcMain.handle("milo:task", async (_e, task: string) => {
   try {
     for (const q of quick.steps) {
       if (taskAbort) return { ok: true, status: "stopped", text: "Stopped!" };
-      sendStep({ say: q.say, action: q.kind === "app" ? "open_app" : q.kind === "url" ? "open_url" : "key", point: null });
-      if (q.kind === "app") {
+      sendStep({ say: q.say, action: q.kind === "app" || q.kind === "download" || q.kind === "folder" ? "open_app" : q.kind === "url" ? "open_url" : "key", point: null });
+      if (q.kind === "folder") {
+        await openFolder(q.folder);
+        history.push(`Opened the ${q.folder} folder in Finder`);
+        newTabJustOpened = false;
+      } else if (q.kind === "download") {
+        const name = await openLatestDownload();
+        history.push(`Opened the newest download: ${name}`);
+        newTabJustOpened = false;
+      } else if (q.kind === "app") {
         await openApp(q.app);
         history.push(`Opened the ${q.app} app`);
         newTabJustOpened = false;
@@ -273,12 +282,13 @@ ipcMain.handle("milo:task", async (_e, task: string) => {
     globalShortcut.unregister("Escape");
     return { ok: false, text: (err as Error).message };
   }
-  if (!quick.rest) {
+  if (quick.steps.length) {
+    // Hand the rest back to the renderer: it decides if it's homework ("…and solve the problem")
+    // or more computer work ("…and write a poem").
     taskRunning = false;
     globalShortcut.unregister("Escape");
-    return { ok: true, status: "quick", text: "" };
+    return { ok: true, status: "quick", text: "", rest: quick.rest, did: history };
   }
-  task = quick.rest; // 2) The AI handles whatever's left ("…and write a story about a frog").
 
   let lastClick: { x: number; y: number } | null = null; // screen point of the previous action if it was a click
   try {

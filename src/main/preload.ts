@@ -9,6 +9,7 @@ function on(channel: string, cb: () => void) {
 contextBridge.exposeInMainWorld("milo", {
   setClickable: (clickable: boolean) => ipcRenderer.send("milo:set-clickable", clickable),
   ask: (history: unknown) => ipcRenderer.invoke("milo:ask", history),
+  route: (text: string) => ipcRenderer.invoke("milo:route", text),
   look: (mode: string, request: string, focus?: unknown) => ipcRenderer.invoke("milo:look", mode, request, focus ?? null),
   refine: (box: unknown, topic: string) => ipcRenderer.invoke("milo:refine", box, topic),
   check: (lesson: unknown, answer: string) => ipcRenderer.invoke("milo:check", lesson, answer),

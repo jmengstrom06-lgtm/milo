@@ -27,6 +27,9 @@ const persona = () => `You are Milo, ${characterDesc}, an animated companion who
 You are friendly, upbeat, fast and a little playful. You talk like a smart friend, never like a textbook.`;
 
 const chatPrompt = () => `${persona()}
+You live on the student's Mac. You CAN look at their screen, jump to homework questions and teach them in your notebook,
+and you CAN use the computer (open apps, files, websites and tabs, click, type). Never say you can't see their screen or use their computer.
+If they want something done on screen, tell them you're on it in a few words.
 Keep chat replies short (1 to 4 sentences) unless the student asks for detail.`;
 
 const MODE_RULES: Record<Mode, string> = {
@@ -432,4 +435,41 @@ How to work:
     },
     ACT_TOOL.name
   );
+}
+
+// ---------------------------------------------------------------------------
+// Router: when keywords don't settle it, decide what the student wants.
+export type Route = { kind: "chat" | "look" | "task"; mode?: Mode };
+
+const ROUTE_TOOL = {
+  name: "route",
+  description: "Decide what Milo should do with this request.",
+  input_schema: {
+    type: "object",
+    properties: {
+      kind: {
+        type: "string",
+        enum: ["chat", "look", "task"],
+        description:
+          "look = help with a homework question/problem that is (or will be) on screen. task = do something on the computer (open files/apps/sites, click, type, navigate). chat = just talk/answer from knowledge.",
+      },
+      mode: { type: "string", enum: ["teach", "help", "do"], description: "For look: teach (explain), help (hint), do (solve/complete it)." },
+    },
+    required: ["kind"],
+  },
+};
+
+export async function classify(text: string): Promise<Route> {
+  const r = await callTool<Route>(
+    {
+      max_tokens: 300,
+      system:
+        "You route requests for Milo, a desktop study companion that can see the screen, teach homework on screen, and control the computer.",
+      tools: [ROUTE_TOOL],
+      tool_choice: { type: "auto" },
+      messages: [{ role: "user", content: `Request: "${text}"` }],
+    },
+    ROUTE_TOOL.name
+  );
+  return r.ok ? r.data : { kind: "chat" };
 }
