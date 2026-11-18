@@ -51,7 +51,9 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Keep spoken wrap-ups short: first sentence only, and never a paragraph. */
 function shortLine(t: string) {
-  const first = (t || "").replace(/\s+/g, " ").trim().match(/^.*?[.!?](?=\s|$)/)?.[0] ?? t.trim();
+  const all = (t || "").replace(/\s+/g, " ").trim();
+  // First sentence, plus the next one if the first is just "Done." / "All set."
+  const first = all.match(/^.{0,14}?[.!?]\s+.*?[.!?](?=\s|$)/)?.[0] ?? all.match(/^.*?[.!?](?=\s|$)/)?.[0] ?? all;
   return first.length > 140 ? first.slice(0, 137).replace(/[ ,;:]+\S*$/, "") + "…" : first;
 }
 /** Black-box log (what Milo decided and why). Lands in ~/Milo Logs on the Mac. */
