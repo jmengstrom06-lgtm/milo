@@ -17,12 +17,28 @@ declare global {
   type MiloOther = { label: string; box: MiloBox };
   type MiloBox = { x: number; y: number; width: number; height: number };
   type Err = { ok: false; text: string };
+  type ResearchEvent =
+    | { type: "status"; text: string }
+    | { type: "query"; text: string }
+    | { type: "sources"; items: { url: string; title: string; age?: string }[] }
+    | { type: "reset" }
+    | { type: "text"; delta: string }
+    | { type: "cite"; url: string; title: string }
+    | { type: "done"; answer: string; top: string | null; live: boolean }
+    | { type: "error"; text: string };
+
+  // Electron <webview> (live web pages inside the research panel)
+  namespace JSX {
+    interface IntrinsicElements {
+      webview: { src?: string; style?: Record<string, string | number>; className?: string; partition?: string; ref?: unknown };
+    }
+  }
 
   interface Window {
     milo: {
       setClickable: (clickable: boolean) => void;
       ask: (history: { role: "user" | "assistant"; content: string }[]) => Promise<{ ok: boolean; text: string }>;
-      route: (text: string) => Promise<{ kind: "chat" | "look" | "task"; mode?: MiloMode }>;
+      route: (text: string) => Promise<{ kind: "chat" | "look" | "task" | "research"; mode?: MiloMode }>;
       look: (mode: MiloMode, request: string, focus?: MiloBox | null) => Promise<{ ok: true; lesson: MiloLesson; box: MiloBox | null; others: MiloOther[] } | Err>;
       refine: (box: MiloBox, topic: string) => Promise<{ ok: true; box: MiloBox } | Err>;
       check: (lesson: MiloLesson, answer: string) => Promise<{ ok: true; data: { correct: boolean; feedback: string } } | Err>;
@@ -34,6 +50,10 @@ declare global {
       stopTask: () => void;
       handsAccess: () => Promise<boolean>;
       onTaskStep: (cb: (step: { say: string; action: string; point?: { x: number; y: number } | null }) => void) => () => void;
+      research: (q: string) => Promise<boolean>;
+      stopResearch: () => void;
+      openUrl: (url: string) => void;
+      onResearch: (cb: (ev: ResearchEvent) => void) => () => void;
       copy: (text: string) => void;
       onSummon: (cb: () => void) => () => void;
       onTeachScreen: (cb: () => void) => () => void;

@@ -15,6 +15,7 @@ import { speak } from "./voice";
 import { transcribe } from "./ears";
 import { click, ensureBrowser, frontApp, openApp, openFolder, openLatestDownload, openUrl, pressKeys, typeText } from "./hands";
 import { plan } from "./quick";
+import { research } from "./research";
 import { Action, askMilo, classify, ChatMessage, checkAnswer, locateInCrop, nextAction, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
 dotenv.config({ path: path.join(app.getAppPath(), ".env") });
@@ -45,6 +46,7 @@ function createOverlay() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      webviewTag: true, // live web pages inside the research panel
     },
   });
 
@@ -398,6 +400,19 @@ ipcMain.handle("milo:task", async (_e, task: string) => {
   }
 });
 
+// ---------- research ----------------------------------------------------------------
+let researchAbort: AbortController | null = null;
+ipcMain.handle("milo:research", async (_e, question: string) => {
+  researchAbort?.abort();
+  researchAbort = new AbortController();
+  await research(question, (ev) => overlay?.webContents.send("milo:research-event", ev), researchAbort.signal);
+  return true;
+});
+ipcMain.on("milo:research-stop", () => researchAbort?.abort());
+ipcMain.on("milo:open-url", (_e, url: string) => {
+  if (/^https?:\/\//.test(url)) openUrl(url);
+});
+
 ipcMain.handle("milo:check", (_e, lesson: TeachResult, answer: string) => checkAnswer(lesson, answer));
 ipcMain.handle("milo:practice", (_e, lesson: TeachResult) => makePractice(lesson));
 ipcMain.handle("milo:stt", (_e, audio: ArrayBuffer) => transcribe(audio));
@@ -415,6 +430,22 @@ ipcMain.on("milo:set-character", (_e, desc: string) => setCharacter(desc));
 ipcMain.on("milo:quit", () => app.quit());
 
 // ---------- app lifecycle -----------------------------------------------------
+
+// Web pages shown in the research panel get no access to Milo's internals; links open in Chrome.
+app.on("web-contents-created", (_e, contents) => {
+  contents.on("will-attach-webview", (_ev, prefs) => {
+    delete (prefs as { preload?: string }).preload;
+    prefs.nodeIntegration = false;
+    prefs.contextIsolation = true;
+    prefs.sandbox = true;
+  });
+  if (contents.getType() === "webview") {
+    contents.setWindowOpenHandler(({ url }) => {
+      if (/^https?:\/\//.test(url)) openUrl(url);
+      return { action: "deny" };
+    });
+  }
+});
 
 app.whenReady().then(() => {
   if (process.platform === "darwin") app.dock?.hide();

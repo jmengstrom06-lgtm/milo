@@ -25,6 +25,14 @@ contextBridge.exposeInMainWorld("milo", {
     ipcRenderer.on("milo:task-step", l);
     return () => ipcRenderer.removeListener("milo:task-step", l);
   },
+  research: (q: string) => ipcRenderer.invoke("milo:research", q),
+  stopResearch: () => ipcRenderer.send("milo:research-stop"),
+  openUrl: (url: string) => ipcRenderer.send("milo:open-url", url),
+  onResearch: (cb: (ev: unknown) => void) => {
+    const l = (_e: unknown, ev: unknown) => cb(ev);
+    ipcRenderer.on("milo:research-event", l);
+    return () => ipcRenderer.removeListener("milo:research-event", l);
+  },
   copy: (text: string) => ipcRenderer.send("milo:copy", text),
   onSummon: (cb: () => void) => on("milo:summon", cb),
   onTeachScreen: (cb: () => void) => on("milo:teach-screen", cb),

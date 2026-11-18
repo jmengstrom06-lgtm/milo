@@ -36,6 +36,12 @@ An animated AI companion that lives on your screen.
 
 "Hey Milo" (hands-free) is on by default; turn it off with the Hands-free chip.
 
+### Research
+- "Hey Milo, look up…", "who is…", "what's the weather in…", "research…", "search for…"
+- A research panel opens next to Milo: each search, the sources he reads, and the answer appear live; he reads the answer out loud
+- The page he found loads live inside the panel. Resize: compact / half screen / full screen (or say "full screen", "half screen", "smaller"); Open in Chrome; Copy; Esc or "thanks" closes
+- Uses Claude's web search tool. If your Anthropic account has web search turned off, he answers from memory and says so
+
 ### Keys and clicks
 
 - **Cmd+Shift+Y** from any app: Milo looks at your screen, jumps to the question, spotlights it, and teaches it in his notebook

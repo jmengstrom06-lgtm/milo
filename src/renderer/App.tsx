@@ -5,6 +5,7 @@ import { Ears, EarState } from "./ears";
 import { isBareGo, parse, soundsUnfinished, stripGo, stripWake } from "./commands";
 import { Bubble, Confetti, Highlight } from "./Effects";
 import * as tts from "./voice";
+import ResearchPanel, { PanelSize } from "./ResearchPanel";
 
 type Msg = { role: "user" | "assistant"; content: string };
 type Pos = { x: number; y: number };
@@ -98,6 +99,8 @@ export default function App() {
   const [heard, setHeard] = useState<string | null>(null);
   const [pause, setPause] = useState(0); // "sending…" bar while you finish talking
   const [working, setWorking] = useState(false); // Milo is using the computer
+  const [researchQ, setResearchQ] = useState<{ q: string; id: number } | null>(null);
+  const [rpSize, setRpSize] = useState<PanelSize>("compact");
 
   const posRef = useRef(pos);
   const animRef = useRef<number | null>(null);
@@ -122,6 +125,7 @@ export default function App() {
   const pendingRef = useRef<{ text: string; started: number; unfinished: boolean } | null>(null);
   const earStateRef = useRef<string>("off"); // last thing you asked for (so a bare "go" can redo it)
   const restoreHandsFree = useRef(false);
+  const researchSpoken = useRef(false);
   const lastStepSay = useRef("");
   const lastStepPoint = useRef<{ x: number; y: number } | null>(null); // a task waiting on the student's yes/no
   const voiceRef = useRef(voice);
@@ -503,6 +507,44 @@ export default function App() {
     [moveTo]
   );
 
+  // ---- research panel -------------------------------------------------------------
+  const startResearch = (q: string, spoken = true) => {
+    runId.current++;
+    hush();
+    setChatOpen(false);
+    setLesson(null);
+    setBox(null);
+    setRpSize("compact");
+    setResearchQ({ q, id: Date.now() });
+    setMood("looking");
+    setBubble(null);
+    researchSpoken.current = spoken;
+    // Let the panel mount (and start listening for events) before research begins.
+    setTimeout(() => window.milo.research(q), 60);
+  };
+  const closeResearch = () => {
+    window.milo.stopResearch();
+    tts.stop();
+    setResearchQ(null);
+    hover(false);
+    setMood("idle");
+    setBubble(null);
+  };
+  const onResearchDone = async (answer: string) => {
+    const lead = answer
+      .split("\n")
+      .map((l) => l.trim())
+      .find(Boolean)
+      ?.replace(/^[-•]\s*/, "")
+      .replace(/\*\*/g, "");
+    setMood("happy");
+    if (lead) {
+      await say(lead.length > 220 ? lead.slice(0, 217) + "…" : lead);
+      setBubble(null);
+    }
+    if (researchSpoken.current) listen();
+  };
+
   // ---- chat (typed or spoken) ---------------------------------------------------
   const chat = async (text: string, spoken = false) => {
     const L = lessonRef.current;
@@ -523,6 +565,13 @@ export default function App() {
 
   // ---- voice commands -------------------------------------------------------------
   routeRef.current = (text: string, spoken = true) => {
+    if (researchQ) {
+      const t = text.toLowerCase();
+      if (/^(close|done|thanks|thank you|got it|never ?mind|that'?s all)\b/.test(t)) return closeResearch();
+      if (/(full ?screen|make it (big|bigger|full)|expand( it)?|maximi[sz]e)/.test(t)) return setRpSize("full");
+      if (/(half|split) ?screen|make it half/.test(t)) return setRpSize("half");
+      if (/(smaller|shrink|minimi[sz]e|compact)/.test(t)) return setRpSize("compact");
+    }
     const inLesson = !!lessonRef.current;
     const awaitingAnswer = inLesson && finishedRef.current && lessonModeRef.current !== "do" && !!lessonRef.current?.check_question;
     const intent = parse(text, { inLesson, awaitingAnswer, pendingAsk: !!pendingTask.current });
@@ -535,6 +584,9 @@ export default function App() {
         return;
       case "task":
         runTask(intent.task, spoken);
+        return;
+      case "research":
+        startResearch(intent.question, spoken);
         return;
       case "fill": {
         const L = lessonRef.current;
@@ -597,6 +649,7 @@ export default function App() {
               setMode(m);
               look(m, intent.text, null, spoken);
             } else if (rt.kind === "task") runTask(intent.text, spoken);
+            else if (rt.kind === "research") startResearch(intent.text, spoken);
             else chat(intent.text, spoken);
           });
           return;
@@ -871,10 +924,15 @@ export default function App() {
   }, [messages, busy]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && lesson && closeLesson();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (researchQ) closeResearch();
+      else if (lesson) closeLesson();
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [lesson, closeLesson]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lesson, closeLesson, researchQ]);
 
   const send = async () => {
     const text = input.trim();
@@ -901,6 +959,20 @@ export default function App() {
     nbStyle = { left: nbLeft, top: nbTop, width: NB_W, maxHeight: H - nbTop - MARGIN };
   }
 
+  // Research panel: next to Milo (compact), right half, or almost full screen.
+  let rpStyle: React.CSSProperties = {};
+  if (rpSize === "half") rpStyle = { right: 16, top: 16, width: Math.round(W / 2) - 24, height: H - 32 };
+  else if (rpSize === "full") rpStyle = { left: 16, top: 16, width: W - 32, height: H - 32 };
+  else {
+    const w = 420;
+    const h = Math.min(580, H - 32);
+    const top = clamp(pos.y + MILO_H - h, 16, H - h - 16);
+    rpStyle =
+      pos.x > W / 2
+        ? { left: clamp(pos.x - w - 12, 16, W - w - 16), top, width: w, height: h }
+        : { left: clamp(pos.x + MILO_W + 12, 16, W - w - 16), top, width: w, height: h };
+  }
+
   // Speech bubble: never on top of Milo. Above him (growing upward) if there's room,
   // otherwise beside him on the side away from the notebook, otherwise below.
   const bubblePos = (): React.CSSProperties => {
@@ -925,6 +997,19 @@ export default function App() {
 
   return (
     <>
+      {researchQ && (
+        <ResearchPanel
+          key={researchQ.id}
+          question={researchQ.q}
+          style={rpStyle}
+          size={rpSize}
+          onSize={setRpSize}
+          onClose={closeResearch}
+          onDone={onResearchDone}
+          hover={hover}
+        />
+      )}
+
       {box && <Highlight key={locked ? "locked" : "guess"} box={box} dim={!lesson} locked={locked} />}
 
       {box &&

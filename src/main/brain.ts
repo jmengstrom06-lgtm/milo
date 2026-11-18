@@ -439,7 +439,7 @@ How to work:
 
 // ---------------------------------------------------------------------------
 // Router: when keywords don't settle it, decide what the student wants.
-export type Route = { kind: "chat" | "look" | "task"; mode?: Mode };
+export type Route = { kind: "chat" | "look" | "task" | "research"; mode?: Mode };
 
 const ROUTE_TOOL = {
   name: "route",
@@ -449,9 +449,9 @@ const ROUTE_TOOL = {
     properties: {
       kind: {
         type: "string",
-        enum: ["chat", "look", "task"],
+        enum: ["chat", "look", "task", "research"],
         description:
-          "look = help with a homework question/problem that is (or will be) on screen. task = do something on the computer (open files/apps/sites, click, type, navigate). chat = just talk/answer from knowledge.",
+          "look = help with a homework question/problem that is (or will be) on screen. task = do something on the computer (open files/apps/sites, click, type, navigate). research = look up current or real-world facts on the web (people, weather, news, scores, prices, events, anything that may have changed). chat = just talk or explain a general concept.",
       },
       mode: { type: "string", enum: ["teach", "help", "do"], description: "For look: teach (explain), help (hint), do (solve/complete it)." },
     },

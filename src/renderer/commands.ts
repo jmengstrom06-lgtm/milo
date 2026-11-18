@@ -13,6 +13,7 @@ export type Intent =
   | { kind: "hush" }
   | { kind: "look"; mode: MiloMode; request: string } // start helping with something on screen
   | { kind: "task"; task: string } // do something on the computer: open, click, type…
+  | { kind: "research"; question: string } // look something up live (research panel)
   | { kind: "fill" } // type the lesson's answer into the blank
   | { kind: "yes" }
   | { kind: "no" }
@@ -44,6 +45,11 @@ export function modeFrom(t: string): MiloMode | undefined {
 const GOTO =
   /(\b(number|question|problem|part|exercise|#|q)\s*(\d+|[a-z]\b|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b)|(\b(this|that|the other|the next|the previous|the last|the first|the second|the third|the bottom|the top) (one|question|problem)\b)|(\bthe one (about|with|on|at|where|that)\b)|(\b(go|jump|move|switch|skip) to (number|question|problem|part|#|the next|the other|the last|the first)\b)|(\bnext (question|problem)\b)|(\bthis one\b|\bthat one\b|\bover here\b|\bright here\b)/;
 
+// Things that mean "look it up": people, weather, news, prices, facts that change.
+const RESEARCH =
+  /^(look up|research|find out|search( the web| online)?( for)?|google|who('s| is| was| are| were)|what('s| is| was) the (weather|temperature|forecast|score|price|news|population|latest)|weather|forecast|news (on|about)|latest (news|on)|how (much|many|old|tall|far|long) (is|are|was|does|did)|when (is|was|did|does|are)|where (is|was|are)|is it going to (rain|snow)|what happened)\b/;
+const NOT_RESEARCH = /\b(youtube|amazon|spotify|my (doc|email|gmail|screen|homework)|on (my|the) screen|number \d+|question \d+)\b/;
+
 // Things that mean "use the computer": open apps, click, type into something.
 const TASK =
   /\b(type|typing|click|press|open( up)?|launch|paste|search|google|fill (in|out)|enter (my|the|this|it|in)|go (in|on)to|navigate|scroll|select all)\b|\b(write|put|add) .*\b(in|into|on|inside) (my|the|a|this)\b|\b(in|into|on) (my|the) (google doc|doc|document|notes|word|chrome|safari|browser|email|gmail|claude|chatgpt|search bar|spreadsheet|sheet)\b|\b(go to|pull up|bring up|switch to|take me to|new tab|new window|close (this |the )?tab|next tab|previous tab|go back|go forward|refresh|reload|look up|make a new|create a new|new google|play)\b/;
@@ -67,6 +73,7 @@ export function parse(raw: string, ctx: { inLesson: boolean; awaitingAnswer: boo
     if (/(type it|type the answer|fill (it|that|the blank) in|fill in the (blank|answer)|fill it out|put (it|that|the answer) in|enter (it|that|the answer)|write it in)/.test(t))
       return { kind: "fill" };
     if (GOTO.test(t) && !/\b(type|click|open|launch)\b/.test(t)) return { kind: "goto", request: text, mode: modeFrom(t) };
+    if (/^(look up|research|find out|google|search( the web| online)? for)\b/.test(t) && !NOT_RESEARCH.test(t)) return { kind: "research", question: text };
     if (TASK.test(t)) return { kind: "task", task: text };
 
     if (/(more like (this|that)|practice|another one like|more problems|quiz me|give me (some )?more)/.test(t)) return { kind: "practice" };
@@ -86,7 +93,8 @@ export function parse(raw: string, ctx: { inLesson: boolean; awaitingAnswer: boo
     return { kind: "chat", text };
   }
 
-  // Not in a lesson: computer actions first, then anything about the screen / homework starts a lesson.
+  // Not in a lesson: live research, then computer actions, then anything about the screen / homework starts a lesson.
+  if (RESEARCH.test(t) && !NOT_RESEARCH.test(t)) return { kind: "research", question: text };
   if (TASK.test(t)) return { kind: "task", task: text };
   const mode = modeFrom(t);
   if (mode || GOTO.test(t) || /\b(this|screen|homework|question|problem|help me|help with|look at|what'?s (this|on))\b/.test(t))
