@@ -13,7 +13,7 @@ const examplePath = path.join(root, ".env.example");
 
 let key = "";
 try {
-  key = execSync("pbpaste", { encoding: "utf8" }).trim();
+  key = execSync("pbpaste", { encoding: "utf8" }).trim().replace(/^["']|["']$/g, "");
 } catch {
   console.error("Couldn't read the clipboard. This command works on a Mac.");
   process.exit(1);
@@ -24,8 +24,19 @@ if (key.startsWith("sk-ant-")) name = "ANTHROPIC_API_KEY";
 else if (/^sk_[A-Za-z0-9]{20,}$/.test(key)) name = "ELEVENLABS_API_KEY";
 else if (/^[a-f0-9]{40}$/i.test(key)) name = "DEEPGRAM_API_KEY";
 
+// You can also say which one it is: npm run setkey -- deepgram   (or anthropic / elevenlabs)
+const forced = (process.argv[2] || "").toLowerCase();
+if (/^(deepgram|dg)$/.test(forced)) name = "DEEPGRAM_API_KEY";
+else if (/^(anthropic|claude)$/.test(forced)) name = "ANTHROPIC_API_KEY";
+else if (/^(elevenlabs|eleven|11)$/.test(forced)) name = "ELEVENLABS_API_KEY";
+if (name && (key.length < 20 || /\s/.test(key))) {
+  console.error(`That doesn't look like a key (it's ${key.length} characters${/\s/.test(key) ? " with spaces" : ""}). Copy just the key, then run this again.`);
+  process.exit(1);
+}
+
 if (!name) {
-  console.error("Your clipboard doesn't hold a key I recognize.");
+  console.error(`Your clipboard doesn't hold a key I recognize (it starts with "${key.slice(0, 4)}", ${key.length} characters).`);
+  console.error("If it's your Deepgram key, run:  npm run setkey -- deepgram");
   console.error("Anthropic keys start with sk-ant-   ElevenLabs keys start with sk_   Deepgram keys are 40 letters/numbers");
   console.error("Copy the key, then run this again.");
   process.exit(1);
