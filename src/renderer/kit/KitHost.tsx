@@ -18,8 +18,12 @@ export type KitHandle = {
   open: (app: KitApp, request?: string) => void;
   close: () => void;
   current: () => KitApp | null;
-  /** Speech while a kit app is open. Returns true if the app handled it. */
+  /** Unmistakable speech for the open app (instant). Returns true if handled. */
   voice: (text: string) => boolean;
+  /** The router said this is for the open app. */
+  direct: (text: string) => boolean;
+  /** What's open, for the router. */
+  describe: () => string;
   /** "hold this" */
   hold: () => Promise<void>;
   /** "drop it" / "drop it in ChatGPT" */
@@ -29,6 +33,14 @@ export type KitHandle = {
   /** "my classes are stats, English comp, ..." (or no text: open the setup) */
   setupClasses: (text?: string) => void;
 };
+
+/** "Uh, okay, can you please…" -> the actual words. */
+export const clean = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/[.!?]+$/, "")
+    .replace(/^(?:(?:hey |ok(?:ay)? |so |uh+|um+|cool|alright|all right|yeah|well|now|and|milo|can you|could you|would you|will you|please|just)[,.]?\s+)+/, "")
+    .trim();
 
 const NUM: Record<string, number> = { one: 1, a: 1, an: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twelve: 12, fifteen: 15, twenty: 20 };
 export function studyModeFor(req: string): { mode: StudyMode; count: number } {
@@ -221,14 +233,15 @@ const KitHost = forwardRef<KitHandle, {
       show(null);
     },
     current: () => app,
+    /** Only UNMISTAKABLE in-app commands run instantly. Everything else goes to the router, which knows what's open. */
     voice: (text) => {
       if (!app) return false;
-      const t = text.toLowerCase().replace(/[.!?]+$/, "").trim();
-      if (editClasses && !/^(close|stop|go|never ?mind|cancel)\b/.test(t)) {
+      const t = clean(text);
+      if (editClasses && !/^(close|stop|go|never ?mind|cancel)\b/.test(t) && !/\b(close|open|chrome|move)\b/.test(t)) {
         setEditClasses({ seed: text });
         return true;
       }
-      if (/^(switch to|change to|go to|use|i'?m (working on|doing|studying)( for)?|let'?s do|now) (my |the )?.{2,40}\b(class|course)$/.test(t) || /^(switch|change) (it )?to (my )?.{2,30}$/.test(t)) {
+      if (/^(switch to|change to|go to|use|i'?m (working on|doing|studying)( for)?|let'?s do|now) (my |the )?.{2,40}\b(class|course)$/.test(t)) {
         window.milo.kit.classFor(text).then((c) => {
           if (c) {
             pickClass(c.id);
@@ -240,43 +253,81 @@ const KitHost = forwardRef<KitHandle, {
       if (app === "study" && study && studyRef.current) {
         const s = studyRef.current;
         if (/^(next|next one|next problem|keep going|continue|go on)$/.test(t)) return s.next(), true;
-        if (/^(hint|give me a hint|i'?m stuck|help)$/.test(t)) return s.hint(), true;
-        if (/^(show me|show me how|how do (i|you) do (it|this)|explain( it)?|walk me through it|show (the )?(answer|steps|solution)|solve it|i give up)$/.test(t)) return s.show(), true;
-        if (/^(again|replay|say that again|one more time|repeat)$/.test(t)) return s.replay(), true;
-        if (/^(another( one)?|more|more like this|one more|try one like this|give me (another|more))( one| problem| like (this|that))?$/.test(t)) return s.more(), true;
+        if (/^(hint|give me a hint|i'?m stuck)$/.test(t)) return s.hint(), true;
+        if (/^(show me how|walk me through it|show (the )?(answer|steps|solution)|solve it|i give up)$/.test(t)) return s.show(), true;
+        if (/^(again|replay|say that again|repeat)$/.test(t)) return s.replay(), true;
         if (/^(flip( it)?|turn it over)$/.test(t)) return s.show(), true;
-        if (/^(easier|make it easier|an easier one|something easier|too hard)( one| please)?$/.test(t)) return s.easier(), true;
-        if (/^(harder|make it harder|a harder one|something harder|challenge me|too easy)( one| please| ones)?$/.test(t)) return s.harder(), true;
+        if (/^(easier|make it easier|an easier one|too hard)$/.test(t)) return s.easier(), true;
+        if (/^(harder|make it harder|a harder one|too easy|challenge me)$/.test(t)) return s.harder(), true;
+        // An answer: "the answer is 0.05", "i got 12", or just a number / short math.
         if (s.awaiting()) {
-          const m = t.match(/^(?:(?:the )?answer is|i got|i get|is it|it'?s|it is|i think it'?s|my answer is|that'?s|equals)\s+(.+)/);
-          if (m || /\d/.test(t) || t.split(/\s+/).length <= 6) return s.answer(m ? m[1] : text), true;
+          const m = t.match(/^(?:(?:the )?answer is|i got|i get|my answer is|it equals|equals)\s+(.+)/);
+          if (m) return s.answer(m[1]), true;
+          if (/^[-+]?[\d.,/ ]+%?$|^[\d\s.+\-*/^()=x%]+$/.test(t)) return s.answer(text), true;
         }
       }
-      if (app === "sheet" && table && sheetRef.current && !/^(close|open|go|stop|hide)\b/.test(t)) {
+      if (app === "sheet" && table && sheetRef.current && /^((make it|switch to|change it to|turn it into) )?(a |an )?(histogram|box ?plot|bar (chart|graph)|line (chart|graph)|scatter ?plot|pie chart)$|^(more|fewer) bins$|^\d{1,2} bins$/.test(t)) {
         sheetRef.current.ask(text);
         return true;
       }
-      if (app === "sketch" && sketch && /^(now |also |and |ok(ay)? |what if |then )?(shade|add|change|make|zoom|label|move|remove|show|plot|graph|use|put|draw|color|highlight|mark|switch|flip|swap|turn)\b/.test(t)) {
-        loadSketch(editRequest(text));
+      return false;
+    },
+    /** The router decided this is for the open app. */
+    direct: (text) => {
+      if (!app) return false;
+      const t = clean(text);
+      if (app === "study") {
+        const s = studyRef.current;
+        if (study && s) {
+          if (s.awaiting() && !/^(make|give|create|another|more|new|teach|flash|quiz|test|practice)\b/.test(t)) return s.answer(text), true;
+          if (/^(another|more|one more|give me (another|more))\b/.test(t)) return s.more(), true;
+          if (/^(hint|help)\b/.test(t)) return s.hint(), true;
+          if (/^(show|explain|how|walk|solve)\b/.test(t)) return s.show(), true;
+          if (/^next\b/.test(t)) return s.next(), true;
+        }
+        loadStudy(text);
         return true;
       }
-      if (app === "notes" && /\b(quiz me|test me|flash ?cards|practice)\b/.test(t)) {
+      if (app === "sheet") {
+        if (table && sheetRef.current) sheetRef.current.ask(text);
+        else loadTable(text);
+        return true;
+      }
+      if (app === "sketch") {
+        loadSketch(sketch ? editRequest(text) : text);
+        return true;
+      }
+      if (app === "notes") {
         const n = notesRef.current?.current();
-        if (n) {
+        if (n && /\b(quiz me|test me|flash ?cards|practice)\b/.test(t)) {
           studyNote(n, /flash ?cards/.test(t) ? "cards" : /test/.test(t) ? "test" : "practice");
           return true;
         }
-      }
-      if (app === "notes" && /^(what|when|where|who|how|did|do|which)\b/.test(t)) {
-        askNotes(text);
+        if (/^(add|put|write|note|append)\b/.test(t) && n) {
+          const body = text.replace(/^(add|put|write|note|append)( that)?[:,]?\s*/i, "").replace(/\s*(to|in|into) (my |the |this )?notes?\.?$/i, "");
+          notesRef.current?.appendToOpen(body).then((ok) => (ok ? p.say("Added.") : makeNote(text)));
+          return true;
+        }
+        if (/^(what|when|where|who|how|why|did|do|does|which|find|search|is there)\b/.test(t) || /\?$/.test(text.trim())) askNotes(text);
+        else makeNote(text);
         return true;
       }
-      if (app === "notes" && /^(add|put|write)\b.*\b(to|in|into) (my |the )?notes?$|^(add|note)( that)?[: ]/.test(t)) {
-        const body = text.replace(/^(add|put|write|note)( that)?[:,]?\s*/i, "").replace(/\s*(to|in|into) (my |the )?notes?\.?$/i, "");
-        notesRef.current?.appendToOpen(body).then((ok) => (ok ? p.say("Added.") : makeNote(text)));
+      if (app === "planner") {
+        loadPlan(text);
         return true;
       }
       return false;
+    },
+    describe: () => {
+      if (!app) return "";
+      const name = KIT_APPS.find((x) => x.id === app)!.name;
+      const cls = activeClass ? ` (class: ${activeClass.name})` : "";
+      if (app === "sheet" && table) return `Milo's Sheet${cls}, showing ${sheetRef.current?.describe() ?? `"${table.title}"`}`;
+      if (app === "study" && study) return `Milo's Study app${cls}, ${study.mode} mode on "${study.set.title}"${studyRef.current?.awaiting() ? ", waiting for the student's answer" : ""}`;
+      if (app === "sketch" && sketch) return `Milo's Sketch app${cls}, showing "${sketch.title}"`;
+      if (app === "notes") return `Milo's Notes app${cls}${notesRef.current?.current() ? `, note "${notesRef.current.current()!.title}" open` : ""}`;
+      if (app === "planner" && plan) return `Milo's Planner${cls}, showing "${plan.title}"`;
+      return `Milo's ${name} app${cls}`;
     },
     hold: async () => {
       p.setBubble("Holding it…");

@@ -279,7 +279,7 @@ export function numberList(t: string): number[] | null {
   return nums.length >= 4 && words.length <= 14 ? nums : null;
 }
 
-export type SheetHandle = { ask: (text: string) => void };
+export type SheetHandle = { ask: (text: string) => void; describe: () => string };
 
 const SheetView = forwardRef<SheetHandle, {
   table: Table;
@@ -396,7 +396,11 @@ const SheetView = forwardRef<SheetHandle, {
     setAnswer(r.data.say);
     say(r.data.say);
   };
-  useImperativeHandle(ref, () => ({ ask }));
+  useImperativeHandle(ref, () => ({
+    ask,
+    describe: () =>
+      `"${title}": ${blank(rows) ? "an empty sheet" : `${rows.length} rows, columns ${cols.join(", ")}`}${chart ? `, with a ${chart.kind} of ${chart.y}` : ""}`,
+  }));
 
   const png = async () => (svgRef.current ? svgToPng(svgRef.current, drawn?.title ?? "") : null);
 

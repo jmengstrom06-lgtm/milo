@@ -464,15 +464,16 @@ How to work:
 // ---------------------------------------------------------------------------
 // Router: decides what the student wants, knowing what's open on screen right now.
 export type RouteKind =
-  | "chat" | "look" | "task" | "research" | "move" | "close" | "open_result" | "screen_question" | "kit" | "kit_menu" | "hold" | "drop"
+  | "chat" | "look" | "task" | "research" | "move" | "close" | "open_result" | "screen_question" | "kit" | "in_app" | "kit_menu" | "hold" | "drop"
   | "sweep" | "build" | "quiz" | "brief" | "watch" | "checkwork";
-export type Route = { kind: RouteKind; mode?: Mode; followUp?: boolean; where?: string; question?: string; on?: boolean; after?: string; app?: string; target?: string; failed?: boolean };
+export type Route = { kind: RouteKind; mode?: Mode; followUp?: boolean; where?: string; question?: string; on?: boolean; after?: string; app?: string; target?: string; request?: string; failed?: boolean };
 export type RouteCtx = {
   researchOpen?: boolean;
   researchTopic?: string;
   inLesson?: boolean;
   lessonTopic?: string;
   toolOpen?: string;
+  kitOpen?: string;
   quizOpen?: boolean;
   lastCommand?: string;
 };
@@ -485,8 +486,9 @@ const ROUTE_TOOL = {
     properties: {
       kind: {
         type: "string",
-        enum: ["chat", "look", "task", "research", "move", "close", "open_result", "screen_question", "kit", "kit_menu", "hold", "drop", "sweep", "build", "quiz", "brief", "watch", "checkwork"],
+        enum: ["chat", "look", "task", "research", "move", "close", "open_result", "screen_question", "kit", "in_app", "kit_menu", "hold", "drop", "sweep", "build", "quiz", "brief", "watch", "checkwork"],
         description: [
+          "in_app = ONLY when one of Milo's apps is open (see 'Right now'): the request is something to do INSIDE that open app. Sheet: change the data or chart ('make it a box plot', 'add a z-score column', 'sort by score', 'who's above average', 'more bins', 'make another example'). Study: answer the problem, next, hint, another one, harder, explain. Sketch: change the drawing/graph ('shade above 80', 'add labels'). Notes: add to / ask about / quiz on the open note. Planner: change the plan. NOT in_app: closing it, opening a different app, anything outside the app (Chrome, moving, research).",
           "research = a request for information about the world (people, events, news, weather, scores, prices, facts, 'look up', 'tell me about', 'do some research on') when the student did NOT ask for Chrome / a browser / a tab / a website. Shown in Milo's own research box.",
           "task = the student wants the computer operated: open an app, Chrome, a browser tab or a website, click, type or write something somewhere (Google Docs, ChatGPT, Notes...), navigate, download. If they say Chrome, browser, tab, Google it, or name a website, it's a task even if they want information.",
           "look = help with homework that is on the screen (teach / hint / do it).",
@@ -495,7 +497,7 @@ const ROUTE_TOOL = {
           "hold = 'hold this', 'grab this', 'keep this for me' (Milo copies the selection into his pocket). drop = 'drop it', 'paste what you're holding', 'drop it in ChatGPT' (set target to where, if they said).",
           "screen_question = a question to answer FROM what's on the student's screen right now that isn't homework to solve: 'when is my next exam' (on D2L), 'what does this email say', 'summarize this page', 'what's due on this page', 'what grade did I get'.",
           "move = the student wants Milo himself (the frog character) to go somewhere on the screen: 'move to the bottom left', 'go to the other side', 'get out of the way'.",
-          "close = close / dismiss what Milo has open himself: his research box (it looks like a browser window, the student may call it 'the tab', 'this tab', 'the research tab', 'that page', 'the window'), a tool he built, or a lesson. When Milo's research box is open, 'close this tab' / 'close that' means the research box, not Chrome.",
+          "close = close / dismiss what Milo has open himself: one of his apps (Sheet, Study, Notes, Sketch, Planner: 'close that', 'close the sheet', 'get rid of this'), his research box (it looks like a browser window, the student may call it 'the tab', 'this tab', 'the research tab', 'that page', 'the window'), a tool he built, or a lesson. When Milo's research box is open, 'close this tab' / 'close that' means the research box, not Chrome.",
           "open_result = open the page shown in the research box in Chrome ('open it in Chrome', 'open that article').",
           "sweep = do every question on the page. build = make a small working app/tool/calculator. quiz = quiz me. brief = what's due / daily brief. watch = watch me work (on:false to stop). checkwork = check my work once.",
           "chat = conversation or explaining a general concept that doesn't need the web or the screen.",
@@ -512,7 +514,8 @@ const ROUTE_TOOL = {
       on: { type: "boolean", description: "For watch: true to start, false to stop." },
       app: { type: "string", enum: ["study", "sketch", "notes", "sheet", "planner", "pocket"], description: "For kit: which of Milo's apps." },
       target: { type: "string", description: "For drop: where to paste it, in their words (e.g. 'ChatGPT', 'my Google Doc'). Empty = where they were." },
-      after: { type: "string", description: "Only when the student asked for two things where the first is about Milo himself (close, move): the rest of the request to do after it, in their words, e.g. 'open ChatGPT and have it write a story'." },
+      after: { type: "string", description: "When the student asked for more than one thing: EVERYTHING after the first thing, in their words and order, e.g. 'close that and open your notes and make a note that I have a flight' -> kind close, after 'open your notes and make a note that I have a flight'. Milo routes it again after doing the first part." },
+      request: { type: "string", description: "For in_app and kit: just the part of what they said that's for the app, cleaned of filler (e.g. 'make another example histogram')." },
     },
     required: ["kind"],
   },
@@ -523,13 +526,14 @@ function routeSystem(ctx: RouteCtx) {
   if (ctx.researchOpen) now.push(`Milo's research box is OPEN on screen (it looks like a browser tab showing a web page), showing research on: "${ctx.researchTopic ?? "?"}".`);
   if (ctx.inLesson) now.push(`A homework lesson is open in the notebook about: "${ctx.lessonTopic ?? "?"}".`);
   if (ctx.toolOpen) now.push(`A tool Milo built is open: "${ctx.toolOpen}".`);
+  if (ctx.kitOpen) now.push(`Milo's app is OPEN on screen: ${ctx.kitOpen}. Requests to change or use it are in_app; 'close that' closes it.`);
   if (ctx.quizOpen) now.push("A quiz is open.");
   if (ctx.lastCommand) now.push(`The student's previous command was: "${ctx.lastCommand}".`);
   return [
     "You route requests for Milo, a desktop study companion (an animated frog that lives on the student's screen).",
     "Milo can: research things in his own research box, see and teach homework on screen, operate the computer (apps, sites, typing), move himself around the screen, build small tools, quiz, check work, and read what's due.",
     now.length ? "Right now: " + now.join(" ") : "Right now nothing is open.",
-    "Decide what the student wants from what they actually said, not from keywords. Commands about Milo's own position are 'move' even when a box is open. Speech often has filler and self-corrections ('um', 'actually no, do X instead'): go with their final intent. Always answer by calling the route tool.",
+    "Decide what the student wants from what they actually said, not from keywords. Ignore filler at the start ('uh', 'cool', 'okay', 'so', 'can you'). Commands about Milo's own position are 'move' even when a box is open. Speech often has filler and self-corrections ('um', 'actually no, do X instead'): go with their final intent. Always answer by calling the route tool.",
   ].join("\n");
 }
 

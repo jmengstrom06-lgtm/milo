@@ -1092,11 +1092,14 @@ export default function App() {
     researchTopic: researchQ?.q,
     inLesson: !!lessonRef.current,
     lessonTopic: lessonRef.current?.topic,
-    toolOpen: tool ? tool.request : kitApp ? `Milo's ${kitApp} app` : undefined,
+    toolOpen: tool ? tool.request : undefined,
+    kitOpen: kitApp ? kitRef.current?.describe() || `Milo's ${kitApp} app` : undefined,
     quizOpen: !!quiz,
     lastCommand: lastCommand.current || undefined,
   });
-  routeRef.current = (text: string, spoken = true) => {
+  routeRef.current = (raw: string, spoken = true) => {
+    // "Uh, cool, okay, can you…" -> the actual command. Filler never decides anything.
+    const text = raw.replace(/^(?:(?:hey|ok(?:ay)?|so|uh+|um+|cool|alright|all right|yeah|well|and|milo)[,.]?\s+)+/i, "").trim() || raw;
     if (/^(flag (that|this|it)|that was (wrong|bad|weird|a bug|broken)|log (that|this)|report (a |that |this )?bug|bug report|that'?s a bug)\b/i.test(text.trim())) {
       flagNow(text);
       return;
@@ -1184,7 +1187,7 @@ export default function App() {
     if (researchQ || tool || kitApp) {
       const t0 = text.toLowerCase().replace(/[.!?]+$/, "").trim();
       const m = t0.match(/^(?:(?:ok(?:ay)?|now|just|please|can you|could you|would you|go ahead and)[, ]+)*(?:close|exit|dismiss|hide|get rid of|shut)\b(.*?)(?:,? (?:and then|and|then) (.+))?$/);
-      if (m && !/\bchrome\b(?!.*\bresearch\b)/.test(m[1]) && /^(\s*(the|this|that|your|my|it|research|box|panel|tab|window|page|screen|tool|one|you just opened|up|out|thing|notes|study|deck|sketch|sheet|planner|pocket|kit|graph|problems?|flashcards?)\b)*\s*$/.test(m[1] + " ")) {
+      if (m && !/\bchrome\b(?!.*\bresearch\b)/.test(m[1]) && /^(\s*(the|this|that|your|my|it|now|please|research|box|panel|tab|window|page|screen|tool|one|you just opened|up|out|thing|notes|study|deck|sketch|sheet|sheets|planner|pocket|kit|graph|chart|problems?|flashcards?)\b)*\s*$/.test(m[1] + " ")) {
         bb("close_own_panel", { text, then: m[2] ?? null });
         if (kitApp) kitRef.current?.close();
         else if (tool) closeTool();
@@ -1355,7 +1358,20 @@ export default function App() {
         return;
       case "kit": {
         const app = (["study", "sketch", "notes", "sheet", "planner", "pocket"].includes(rt.app ?? "") ? rt.app : "study") as KitApp;
-        openKit(app, text);
+        // Already open: do it in place (no reload). Otherwise open it with the request.
+        if (kitApp === app && rt.request && kitRef.current?.direct(rt.request)) {
+          /* handled in the open app */
+        } else openKit(app, rt.request?.trim() || text);
+        if (rt.after) setTimeout(() => routeRef.current(rt.after!, spoken), 1200);
+        return;
+      }
+      case "in_app": {
+        const req = rt.request?.trim() || text;
+        if (kitApp && kitRef.current?.direct(req)) {
+          /* the open app handles it */
+        } else if (kitApp || rt.app) openKit(((rt.app as KitApp) || kitApp) as KitApp, req);
+        else chat(text, spoken);
+        if (rt.after) setTimeout(() => routeRef.current(rt.after!, spoken), 1200);
         return;
       }
       case "kit_menu":

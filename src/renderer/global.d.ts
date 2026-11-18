@@ -10,7 +10,7 @@ declare global {
     | { type: "closed"; reason: string }
     | { type: "error"; text: string };
   type MiloRoute = {
-    kind: "chat" | "look" | "task" | "research" | "move" | "close" | "open_result" | "screen_question" | "kit" | "kit_menu" | "hold" | "drop" | "sweep" | "build" | "quiz" | "brief" | "watch" | "checkwork";
+    kind: "chat" | "look" | "task" | "research" | "move" | "close" | "open_result" | "screen_question" | "kit" | "in_app" | "kit_menu" | "hold" | "drop" | "sweep" | "build" | "quiz" | "brief" | "watch" | "checkwork";
     mode?: MiloMode;
     followUp?: boolean;
     where?: string;
@@ -19,6 +19,7 @@ declare global {
     after?: string;
     app?: string;
     target?: string;
+    request?: string;
     failed?: boolean;
   };
   type MiloMode = "teach" | "help" | "do";
@@ -117,7 +118,7 @@ declare global {
       ask: (history: { role: "user" | "assistant"; content: string }[]) => Promise<{ ok: boolean; text: string }>;
       route: (
         text: string,
-        ctx?: { researchOpen?: boolean; researchTopic?: string; inLesson?: boolean; lessonTopic?: string; toolOpen?: string; quizOpen?: boolean; lastCommand?: string }
+        ctx?: { researchOpen?: boolean; researchTopic?: string; inLesson?: boolean; lessonTopic?: string; toolOpen?: string; kitOpen?: string; quizOpen?: boolean; lastCommand?: string }
       ) => Promise<MiloRoute>;
       look: (mode: MiloMode, request: string, focus?: MiloBox | null) => Promise<{ ok: true; lesson: MiloLesson; box: MiloBox | null; others: MiloOther[] } | Err>;
       refine: (box: MiloBox, topic: string) => Promise<{ ok: true; box: MiloBox } | Err>;
