@@ -555,3 +555,59 @@ Skip questions that already have an answer filled in.${skip.length ? ` Also skip
     SWEEP_TOOL.name
   );
 }
+
+// ---------------------------------------------------------------------------
+// Watch Me Work: spot a clear mistake in what the student is working on right now.
+export type WatchResult = {
+  found_mistake: boolean;
+  confidence: number;
+  box?: { x: number; y: number; width: number; height: number };
+  hint: string;
+};
+
+const WATCH_TOOL = {
+  name: "review",
+  description: "Report whether there is a clear mistake in the student's in-progress work.",
+  input_schema: {
+    type: "object",
+    properties: {
+      found_mistake: { type: "boolean" },
+      confidence: { type: "number", description: "0 to 1. Only above 0.75 if you are sure it is wrong." },
+      box: {
+        type: "object",
+        description: "Tight pixel box around the exact mistake (the wrong number, cell, line, or word).",
+        properties: { x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" } },
+        required: ["x", "y", "width", "height"],
+      },
+      hint: {
+        type: "string",
+        description: "One short spoken sentence pointing at the problem WITHOUT giving the answer, e.g. 'Check your denominator, it should be the standard deviation.'",
+      },
+    },
+    required: ["found_mistake", "confidence", "hint"],
+  },
+};
+
+export async function watchCheck(jpegBase64: string, size: { width: number; height: number }): Promise<ApiOk<WatchResult> | ApiErr> {
+  return callTool(
+    {
+      max_tokens: 1200,
+      system: `${persona()}
+You are quietly watching the student work. Look at their own in-progress work on screen (math steps, answers they typed, spreadsheet formulas, code, essay sentences).
+Flag ONLY a clear, concrete error that is already written: a wrong number or calculation, wrong formula or cell reference, a bug, a factual or grammar error.
+Do not flag unfinished work, style preferences, or anything you're unsure about. Most of the time the answer is found_mistake=false.`,
+      tools: [WATCH_TOOL],
+      tool_choice: { type: "auto" },
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: jpegBase64 } },
+            { type: "text", text: `Screenshot is ${size.width}x${size.height} pixels. Anything clearly wrong so far?` },
+          ],
+        },
+      ],
+    },
+    WATCH_TOOL.name
+  );
+}

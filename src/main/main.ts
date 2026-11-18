@@ -17,7 +17,7 @@ import { click, ensureBrowser, frontApp, openApp, openFolder, openLatestDownload
 import { plan } from "./quick";
 import { research } from "./research";
 import { buildTool } from "./builder";
-import { Action, askMilo, classify, setUserName, sweepPlan, ChatMessage, checkAnswer, locateInCrop, nextAction, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
+import { Action, askMilo, classify, setUserName, sweepPlan, watchCheck, ChatMessage, checkAnswer, locateInCrop, nextAction, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
 dotenv.config({ path: path.join(app.getAppPath(), ".env") });
 
@@ -468,6 +468,45 @@ ipcMain.handle("milo:scroll-page", async () => {
     overlay?.setFocusable(true);
   }
 });
+
+// ---------- watch me work ------------------------------------------------------------------
+let lastThumb: Buffer | null = null;
+
+/** Tiny grayscale fingerprint of the screen, to skip checks when nothing changed. */
+function thumb(img: Electron.NativeImage) {
+  return img.resize({ width: 64, height: 40, quality: "good" }).toBitmap();
+}
+function changed(a: Buffer | null, b: Buffer) {
+  if (!a || a.length !== b.length) return true;
+  let diff = 0;
+  for (let i = 0; i < b.length; i += 4) diff += Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]);
+  return diff / (b.length / 4) > 2.5; // average change per pixel
+}
+
+ipcMain.handle("milo:watch-check", async (_e, force: boolean) => {
+  const cap = await captureScreen();
+  if (!cap.ok) return cap;
+  const { shot } = cap;
+  const t = thumb(shot.full);
+  if (!force && !changed(lastThumb, t)) return { ok: true, changed: false };
+  lastThumb = t;
+  const small = toJpeg(shot.full, 1568);
+  const r = await watchCheck(small.b64, small.size);
+  if (!r.ok) return r;
+  const k = small.k * shot.pxPerPt;
+  const b = r.data.box;
+  const box =
+    r.data.found_mistake && b
+      ? {
+          x: shot.bounds.x + b.x / k - shot.workArea.x,
+          y: shot.bounds.y + b.y / k - shot.workArea.y,
+          width: b.width / k,
+          height: b.height / k,
+        }
+      : null;
+  return { ok: true, changed: true, mistake: r.data.found_mistake && (r.data.confidence ?? 0) >= 0.75 && !!box, box, hint: r.data.hint };
+});
+ipcMain.on("milo:watch-reset", () => (lastThumb = null));
 
 // ---------- research ----------------------------------------------------------------
 let researchAbort: AbortController | null = null;

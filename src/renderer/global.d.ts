@@ -69,6 +69,8 @@ declare global {
       build: (req: string) => Promise<boolean>;
       stopBuild: () => void;
       onBuild: (cb: (ev: { type: "code"; delta: string } | { type: "done"; title: string; html: string } | { type: "error"; text: string }) => void) => () => void;
+      watchCheck: (force?: boolean) => Promise<{ ok: true; changed: boolean; mistake?: boolean; box?: MiloBox | null; hint?: string } | Err>;
+      watchReset: () => void;
       copy: (text: string) => void;
       onSummon: (cb: () => void) => () => void;
       onTeachScreen: (cb: () => void) => () => void;

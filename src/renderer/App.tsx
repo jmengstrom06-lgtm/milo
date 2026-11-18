@@ -85,6 +85,8 @@ export default function App() {
   const [sounds, setSoundsState] = useState(soundsOn());
   const [tool, setTool] = useState<{ request: string; id: number; existing?: SavedTool | null } | null>(null);
   const [tools, setTools] = useState<SavedTool[]>(loadTools);
+  const [watching, setWatching] = useState(false);
+  const [flag, setFlag] = useState<{ box: MiloBox; hint: string } | null>(null); // mistake Milo spotted
   const [name, setNameState] = useState(() => {
     try {
       return localStorage.getItem("milo.name") || "";
@@ -647,6 +649,73 @@ export default function App() {
     saveTools(next);
   };
 
+  // ---- Watch Me Work ----------------------------------------------------------------
+  const watchBusy = useRef(false);
+  const lastFlag = useRef<MiloBox | null>(null);
+  const showMistake = async (b: MiloBox, hint: string) => {
+    setChatOpen(false);
+    hover(false);
+    setFlag({ box: b, hint });
+    sfx.alert();
+    // Stand to the right of the mistake (usually empty space), or the left if there's no room.
+    const right = b.x + b.width + 14;
+    const onRight = right + MILO_W < window.innerWidth - MARGIN;
+    await moveTo({ x: onRight ? right : b.x - MILO_W - 14, y: b.y + b.height / 2 - MILO_H * 0.55 }, "jump");
+    setFacing(onRight ? "left" : "right");
+    setMood("pointing");
+    await say(hint);
+    setBubble(null);
+    setTimeout(() => setFlag((f) => (f && f.box === b ? null : f)), 7000);
+    setMood("idle");
+  };
+  const checkOnce = async (force: boolean) => {
+    if (watchBusy.current) return null;
+    watchBusy.current = true;
+    try {
+      return await window.milo.watchCheck(force);
+    } finally {
+      watchBusy.current = false;
+    }
+  };
+  // Every few seconds, if the screen changed and Milo isn't busy, take a quiet look.
+  useEffect(() => {
+    if (!watching) return;
+    const t = window.setInterval(async () => {
+      if (lessonRef.current || working || sweep || tool || researchQ || speaking) return;
+      const r = await checkOnce(false);
+      if (!r || !r.ok || !r.changed || !r.mistake || !r.box) return;
+      const p = lastFlag.current;
+      if (p && Math.hypot(p.x - r.box.x, p.y - r.box.y) < 40) return; // already told you about this one
+      lastFlag.current = r.box;
+      showMistake(r.box, r.hint || "Take another look at this part.");
+    }, 6000);
+    return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watching, working, sweep, tool, researchQ, speaking]);
+
+  const setWatch = (on: boolean) => {
+    setChatOpen(false);
+    setWatching(on);
+    lastFlag.current = null;
+    window.milo.watchReset();
+    if (!on) setFlag(null);
+    say(on ? "Okay, I'll watch quietly and only speak up if something's off." : "Okay, I stopped watching.").then(() => setBubble(null));
+  };
+  const checkWorkNow = async () => {
+    setChatOpen(false);
+    hover(false);
+    setMood("looking");
+    setBubble("Checking your work…");
+    const r = await checkOnce(true);
+    setBubble(null);
+    if (!r || !r.ok) return say(r && !r.ok ? r.text : "I couldn't check right now.").then(() => setBubble(null));
+    if (r.mistake && r.box) return showMistake(r.box, r.hint || "Take another look at this part.");
+    setMood("happy");
+    sfx.tick();
+    await say("Looks right so far.");
+    setBubble(null);
+  };
+
   // ---- research panel -------------------------------------------------------------
   const startResearch = (q: string, spoken = true) => {
     runId.current++;
@@ -750,6 +819,12 @@ export default function App() {
         return;
       case "build":
         startBuild(intent.request);
+        return;
+      case "watch":
+        setWatch(intent.on);
+        return;
+      case "checkwork":
+        checkWorkNow();
         return;
       case "fill": {
         const L = lessonRef.current;
@@ -1220,6 +1295,7 @@ export default function App() {
         />
       )}
 
+      {flag && <Highlight key={`flag-${flag.box.x}-${flag.box.y}`} box={flag.box} dim={false} locked warn />}
       {box && <Highlight key={locked ? "locked" : "guess"} box={box} dim={!lesson && !sweep} locked={locked} />}
 
       {box &&
@@ -1274,7 +1350,20 @@ export default function App() {
           <div className="ear-ring" style={{ transform: `scale(${1 + level * 0.6})` }} />
         )}
         <Milo mood={mood} facing={facing} speaking={speaking} character={character} />
-        {handsFree && !working && !pending && !sweep && <div className={`ears-on ${earState === "hearing" ? "ears-on--hot" : ""}`}>Say "Hey Milo"</div>}
+        {watching && !working && !pending && !sweep && (
+          <button
+            className="watch-pill"
+            onMouseEnter={() => hover(true)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setWatch(false);
+            }}
+            title="Stop watching"
+          >
+            <span className="watch-eye" /> Watching · Stop
+          </button>
+        )}
+        {handsFree && !watching && !working && !pending && !sweep && <div className={`ears-on ${earState === "hearing" ? "ears-on--hot" : ""}`}>Say "Hey Milo"</div>}
       </div>
 
       {bubble && <Bubble text={short(bubble)} style={bStyle} />}

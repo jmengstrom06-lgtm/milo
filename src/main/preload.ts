@@ -43,6 +43,8 @@ contextBridge.exposeInMainWorld("milo", {
     ipcRenderer.on("milo:build-event", l);
     return () => ipcRenderer.removeListener("milo:build-event", l);
   },
+  watchCheck: (force?: boolean) => ipcRenderer.invoke("milo:watch-check", !!force),
+  watchReset: () => ipcRenderer.send("milo:watch-reset"),
   copy: (text: string) => ipcRenderer.send("milo:copy", text),
   onSummon: (cb: () => void) => on("milo:summon", cb),
   onTeachScreen: (cb: () => void) => on("milo:teach-screen", cb),
