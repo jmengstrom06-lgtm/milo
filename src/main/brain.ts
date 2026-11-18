@@ -174,7 +174,31 @@ function model() {
   return process.env.MILO_MODEL || "claude-sonnet-5-5";
 }
 
+/** What an image REALLY is, from its first bytes (base64). Screenshots can arrive as PNG or JPEG. */
+export function sniffImageType(b64: string): string | null {
+  if (b64.startsWith("/9j/")) return "image/jpeg";
+  if (b64.startsWith("iVBOR")) return "image/png";
+  if (b64.startsWith("R0lGOD")) return "image/gif";
+  if (b64.startsWith("UklGR")) return "image/webp";
+  return null;
+}
+/** Every image we send gets its true type, so the AI never rejects a mislabeled screenshot. */
+export function fixImageTypes<T>(body: T): T {
+  const msgs = (body as { messages?: { content?: unknown }[] }).messages;
+  for (const m of msgs ?? []) {
+    if (!Array.isArray(m.content)) continue;
+    for (const part of m.content as { type?: string; source?: { type?: string; media_type?: string; data?: string } }[]) {
+      if (part?.type === "image" && part.source?.type === "base64" && part.source.data) {
+        const real = sniffImageType(part.source.data);
+        if (real && real !== part.source.media_type) part.source.media_type = real;
+      }
+    }
+  }
+  return body;
+}
+
 async function callClaude(body: Record<string, unknown>): Promise<ApiOk<Block[]> | ApiErr> {
+  fixImageTypes(body);
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return { ok: false, text: "I don't have a brain yet! Add your ANTHROPIC_API_KEY to the .env file and restart me." };
