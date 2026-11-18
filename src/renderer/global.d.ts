@@ -10,7 +10,7 @@ declare global {
     | { type: "closed"; reason: string }
     | { type: "error"; text: string };
   type MiloRoute = {
-    kind: "chat" | "look" | "task" | "research" | "move" | "close" | "open_result" | "sweep" | "build" | "quiz" | "brief" | "watch" | "checkwork";
+    kind: "chat" | "look" | "task" | "research" | "move" | "close" | "open_result" | "screen_question" | "sweep" | "build" | "quiz" | "brief" | "watch" | "checkwork";
     mode?: MiloMode;
     followUp?: boolean;
     where?: string;
@@ -74,6 +74,7 @@ declare global {
       onFlux: (fn: (e: MiloFluxEvent) => void) => () => void;
       saveClip: (wav: ArrayBuffer, note?: string) => void;
       bridgeStatus: () => Promise<boolean>;
+      screenAsk: (q: string) => Promise<{ ok: boolean; text: string }>;
       macSay: (text: string) => Promise<{ ok: true; audio: string } | { ok: false; text: string }>;
       onFlag: (fn: () => void) => () => void;
       setClickable: (clickable: boolean) => void;

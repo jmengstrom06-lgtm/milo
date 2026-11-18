@@ -1256,6 +1256,9 @@ export default function App() {
       case "move":
         moveMilo(rt.where ?? "away");
         return;
+      case "screen_question":
+        askAboutScreen(text, spoken);
+        return;
       case "close":
         if (tool) closeTool();
         else if (researchQ) closeResearch();
@@ -1303,6 +1306,18 @@ export default function App() {
   const flagRef = useRef(flagNow);
   flagRef.current = flagNow;
   useEffect(() => window.milo.onFlag(() => flagRef.current("shortcut")), []);
+
+  /** "Milo, when's my next exam?" with D2L open: read the screen and answer out loud. */
+  const askAboutScreen = async (question: string, spoken: boolean) => {
+    setMood("looking");
+    setBubble("Reading your screen…");
+    const r = await window.milo.screenAsk(question);
+    setMessages((m) => [...m, { role: "user", content: question }, { role: "assistant", content: r.text }]);
+    setMood(r.ok ? "happy" : "thinking");
+    await say(r.text);
+    setBubble(null);
+    if (spoken) listen();
+  };
 
   /** "Milo, move to the bottom left": go there and make it his new spot. */
   const moveMilo = (where: string) => {
@@ -1571,7 +1586,8 @@ export default function App() {
   function setPendingCmd(text: string, goNow = false) {
     if (!text) return;
     if (goNow && !soundsUnfinished(text)) return runPending(text);
-    const unfinished = soundsUnfinished(text);
+    // Smart ears already judged that you finished; only an obvious dangling word ("…and", "…then") holds the card.
+    const unfinished = smartTurn.current ? /\b(and|and then|then|to|the|a|an|my|or|with|for|of)[.,!?]*$/i.test(text.trim()) : soundsUnfinished(text);
     if (!unfinished) getRoute(text); // think about it now, so it's ready when the card runs
     bb("card_shown", { text, unfinished, goNow });
     pendingRef.current = { text, started: Date.now(), unfinished, smart: smartTurn.current };

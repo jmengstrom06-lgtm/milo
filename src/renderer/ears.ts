@@ -26,7 +26,8 @@ const ONCE_TIMEOUT = Math.round((7 * RATE) / FRAME); // give up after 7 s of not
 // Smart ears (Deepgram Flux): the mic still notices when you START talking (so we only stream, and pay,
 // while you're talking), but Flux decides when you're DONE from what you said.
 const STREAM_IDLE = Math.round((6 * RATE) / FRAME); // close the stream after 6 s with nobody talking
-const FLUX_GRACE = Math.round((8 * RATE) / FRAME); // if Flux hasn't ended the turn 8 s into quiet, end it ourselves
+const FLUX_NUDGE = Math.round((3.2 * RATE) / FRAME); // ~3 s of real quiet and Flux still hasn't ended it: ask Flux to finish now
+const FLUX_WAIT = Math.round((2.5 * RATE) / FRAME); // after asking, give Flux this long to send the words back
 
 export class Ears {
   mode: EarMode = "off";
@@ -82,6 +83,7 @@ export class Ears {
   private streaming = false;
   private streamIdle = 0;
   private forcing = false;
+  private forcedAtFrame = 0;
   private fallbackAt = 0; // we finished a turn ourselves: ignore Flux's late copy of it
 
   /** Turn smart ears (Deepgram Flux) on or off. Off = the built-in pause detection. */
@@ -139,7 +141,7 @@ export class Ears {
         break;
       case "end":
         if (Date.now() - this.fallbackAt < 4000) break;
-        this.finishSmart(ev.text, ev.trigger === "manual" || this.forcing);
+        this.finishSmart(ev.text, this.pttSend);
         break;
       case "error":
         if (ev.text === "key") this.setSmart(false);
@@ -154,8 +156,10 @@ export class Ears {
     }
   }
 
+  private pttSend = false; // you pressed the talk key again = "send it now"
   private finishSmart(text: string, forced: boolean) {
     this.forcing = false;
+    this.pttSend = false;
     const frames = this.speech;
     const energy = this.uttEnergy.filter((e) => e > 0.011).sort((a, b) => a - b);
     const seconds = +((frames.length * FRAME) / RATE).toFixed(2);
@@ -214,7 +218,14 @@ export class Ears {
   /** True right after you interrupted Milo (so the app can check it wasn't just his own voice). */
   bargedAt = 0;
 
+  private opening: Promise<void> | null = null;
   private async open() {
+    if (this.stream) return;
+    // Two quick setMode calls used to open the mic TWICE, so every frame was processed (and streamed) twice.
+    if (!this.opening) this.opening = this.openOnce().finally(() => (this.opening = null));
+    return this.opening;
+  }
+  private async openOnce() {
     if (this.stream) return;
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -262,12 +273,15 @@ export class Ears {
   flush() {
     if (this.speaking && this.streaming) {
       this.forcing = true;
+      this.pttSend = true;
+      this.forcedAtFrame = this.speech.length;
       window.milo.fluxForce(); // Flux ends the turn on what it has and sends the words back
     } else if (this.speaking && this.speech.length > 4) this.finish(true, "push_to_talk_send");
     else if (this.mode === "once") this.setMode("off");
   }
 
   private resetUtterance() {
+    this.forcing = false;
     this.noVoiceRun = 0;
     this.onPause(0);
     this.uttPeak = 0;
@@ -379,10 +393,15 @@ export class Ears {
       this.streamIdle = 0;
       this.onPause(0);
       const capS = this.mode === "always" ? MAX_FRAMES_HF : MAX_FRAMES;
-      if (this.speech.length >= capS && !this.forcing) {
+      if (!this.forcing && (this.speech.length >= capS || this.quietRun >= FLUX_NUDGE || this.noVoiceRun >= FLUX_NUDGE + 8)) {
+        // Flux is still waiting (other voices in the room, a trailing "um"...). Ask it to end the turn
+        // on what it has: it sends back the words right away.
         this.forcing = true;
+        this.forcedAtFrame = this.speech.length;
+        this.onDebug("flux_nudge", { quietS: +((this.quietRun * FRAME) / RATE).toFixed(1), seconds: +((this.speech.length * FRAME) / RATE).toFixed(1) });
         window.milo.fluxForce();
-      } else if (this.quietRun >= END_SILENCE + FLUX_GRACE) {
+      } else if (this.forcing && this.speech.length - this.forcedAtFrame >= FLUX_WAIT) {
+        // Flux didn't answer at all: last resort, transcribe the recording ourselves.
         this.onDebug("flux_no_end", { quietS: +((this.quietRun * FRAME) / RATE).toFixed(1) });
         this.stopStream();
         this.finish(false, "flux_silent_fallback");

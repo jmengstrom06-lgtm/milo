@@ -447,7 +447,7 @@ How to work:
 // ---------------------------------------------------------------------------
 // Router: decides what the student wants, knowing what's open on screen right now.
 export type RouteKind =
-  | "chat" | "look" | "task" | "research" | "move" | "close" | "open_result"
+  | "chat" | "look" | "task" | "research" | "move" | "close" | "open_result" | "screen_question"
   | "sweep" | "build" | "quiz" | "brief" | "watch" | "checkwork";
 export type Route = { kind: RouteKind; mode?: Mode; followUp?: boolean; where?: string; question?: string; on?: boolean; failed?: boolean };
 export type RouteCtx = {
@@ -468,11 +468,12 @@ const ROUTE_TOOL = {
     properties: {
       kind: {
         type: "string",
-        enum: ["chat", "look", "task", "research", "move", "close", "open_result", "sweep", "build", "quiz", "brief", "watch", "checkwork"],
+        enum: ["chat", "look", "task", "research", "move", "close", "open_result", "screen_question", "sweep", "build", "quiz", "brief", "watch", "checkwork"],
         description: [
           "research = any request for information about the world: people, events, news, weather, scores, prices, facts, 'do some research on', 'look up', 'tell me about', 'find info on'. Shown in Milo's own research box, never in Chrome.",
           "task = ONLY when the student explicitly wants the computer operated: open an app, a website or a tab, click, type or write something somewhere (Google Docs, ChatGPT, Notes...), navigate, download. Asking for information is NOT a task.",
           "look = help with homework that is on the screen (teach / hint / do it).",
+          "screen_question = a question to answer FROM what's on the student's screen right now that isn't homework to solve: 'when is my next exam' (on D2L), 'what does this email say', 'summarize this page', 'what's due on this page', 'what grade did I get'.",
           "move = the student wants Milo himself (the frog character) to go somewhere on the screen: 'move to the bottom left', 'go to the other side', 'get out of the way'.",
           "close = close / dismiss what Milo has open (research box, tool, lesson).",
           "open_result = open the page shown in the research box in Chrome ('open it in Chrome', 'open that article').",
@@ -838,4 +839,20 @@ How to work:
     },
     WEB_TOOL.name
   );
+}
+
+
+// ---------------------------------------------------------------------------
+// Answer a question from what's on screen (page text from the Chrome extension, or a screenshot).
+export async function askScreen(question: string, src: { pageText?: string; url?: string; title?: string; jpeg?: string; size?: { width: number; height: number } }) {
+  const system = `${persona()}
+The student asked a question about what's on their screen right now. Answer it from what you're given, in one or two short spoken sentences (no lists, no symbols, no links). Use exact dates, times, names and numbers from the screen. If the answer isn't there, say what you'd need them to open (for example "open your calendar or the course page with the exam schedule").`;
+  const content: unknown[] = [];
+  if (src.jpeg) content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: src.jpeg } });
+  const pageBit = src.pageText ? `\n\nThe page (${src.title ?? ""} — ${src.url ?? ""}):\n${src.pageText.slice(0, 14000)}` : "";
+  content.push({ type: "text", text: `Question: "${question}"\nToday is ${new Date().toDateString()}.${pageBit}` });
+  const r = await callClaude({ max_tokens: 400, system, messages: [{ role: "user", content }] });
+  if (!r.ok) return r;
+  const text = r.data.filter((b) => b.type === "text").map((b) => b.text).join(" ").trim();
+  return { ok: true as const, text: text || "I couldn't find that on your screen." };
 }

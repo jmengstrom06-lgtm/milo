@@ -174,7 +174,10 @@ export function stripGo(text: string): string {
 }
 
 /** Just "go" / "do it" on its own, with nothing else. */
-export const isBareGo = (text: string) => /^(okay |ok )?(go|go ahead|do it|start|begin|complete( the)? task)[.!?]*$/i.test(text.trim());
+export const isBareGo = (text: string) =>
+  /^((okay|ok|yeah|yes|yep|alright|all right|sure|cool) )?(go|go ahead|go for it|do it|start|begin|run it|send it|lets go|let's go|you can go|complete( the)? task)( now| please)?$/i.test(
+    text.toLowerCase().replace(/[^a-z' ]+/g, " ").replace(/\s+/g, " ").trim()
+  );
 
 /** Does this sound like the student stopped mid-sentence? ("go", "open the", "go to chrome and") */
 export function soundsUnfinished(text: string): boolean {

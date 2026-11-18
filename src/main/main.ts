@@ -16,13 +16,14 @@ import { speak } from "./voice";
 import { log as bb, saveClip, timer, LOG_DIR, LOG_FILE } from "./blackbox";
 import { closeFlux, fluxAvailable, forceEndTurn, onFlux, openFlux, sendAudio } from "./flux";
 import { macSpeak } from "./macvoice";
-import { bridgeConnected, startBridge } from "./bridge";
+import { bridgeConnected, call as ext, startBridge } from "./bridge";
 import { runWebTask } from "./webagent";
 import { transcribe } from "./ears";
 import { click, ensureBrowser, frontApp, openApp, openFolder, openLatestDownload, openUrl, pressKeys, typeText } from "./hands";
 import { plan } from "./quick";
 import { research } from "./research";
 import { buildTool } from "./builder";
+import { askScreen } from "./brain";
 import { Action, askMilo, classify, RouteCtx, makeQuiz, readBrief, setUserName, sweepPlan, watchCheck, ChatMessage, checkAnswer, locateInCrop, nextAction, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
 dotenv.config({ path: path.join(app.getAppPath(), ".env") });
@@ -646,6 +647,21 @@ ipcMain.on("milo:save-clip", (_e, wav: ArrayBuffer, note?: string) => {
   if (wav instanceof ArrayBuffer) bb("ears", "clip", { clip: saveClip(wav), note: typeof note === "string" ? note.slice(0, 200) : "" });
 });
 ipcMain.handle("milo:bridge-status", () => bridgeConnected());
+
+// "Milo, look at my screen and find out when my next exam is": answer from the page text (Chrome) + a screenshot.
+ipcMain.handle("milo:screen-ask", async (_e, question: string) => {
+  const q = String(question ?? "").slice(0, 500);
+  const front = await frontApp().catch(() => "");
+  let page: { text?: string; url?: string; title?: string; canvasHeavy?: boolean } | null = null;
+  if (bridgeConnected() && /Google Chrome|Electron|Milo/i.test(front)) {
+    page = await ext("snapshot", { max: 20 }, 8000).catch(() => null);
+  }
+  const cap = await captureScreen();
+  const jpeg = cap.ok ? toJpeg(cap.shot.full, 1568).b64 : undefined;
+  if (!jpeg && !page?.text) return { ok: false, text: cap.ok ? "I couldn't see your screen." : cap.text };
+  bb("screen", "ask", { q, front, usedPage: !!page?.text, url: page?.url });
+  return askScreen(q, { jpeg, pageText: page?.canvasHeavy ? undefined : page?.text, url: page?.url, title: page?.title });
+});
 ipcMain.handle("milo:mac-say", (_e, text: string) => macSpeak(String(text ?? "")));
 ipcMain.handle("milo:hands-access", () =>
   process.platform === "darwin" ? systemPreferences.isTrustedAccessibilityClient(true) : true

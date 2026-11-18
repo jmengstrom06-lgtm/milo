@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld("milo", {
   saveClip: (wav: ArrayBuffer, note?: string) => ipcRenderer.send("milo:save-clip", wav, note ?? ""),
   macSay: (text: string) => ipcRenderer.invoke("milo:mac-say", text),
   bridgeStatus: () => ipcRenderer.invoke("milo:bridge-status"),
+  screenAsk: (q: string) => ipcRenderer.invoke("milo:screen-ask", q),
   onFlag: (fn: () => void) => {
     const l = () => fn();
     ipcRenderer.on("milo:flag", l);

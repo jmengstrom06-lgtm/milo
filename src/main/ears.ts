@@ -3,7 +3,48 @@ import { limited } from "./limiter";
 
 // Milo's ears: ElevenLabs speech-to-text. Audio arrives from the renderer as a 16 kHz mono WAV.
 
-export async function transcribe(audio: ArrayBuffer | Uint8Array): Promise<{ ok: true; text: string } | { ok: false; text: string }> {
+type Heard = { ok: true; text: string } | { ok: false; text: string };
+
+/** Never let one slow transcription block every command after it. */
+function withTimeout(p: Promise<Heard>, ms: number): Promise<Heard> {
+  return Promise.race([
+    p,
+    new Promise<Heard>((resolve) =>
+      setTimeout(() => {
+        bb("ears", "transcribe_timeout", { ms });
+        resolve({ ok: false, text: "busy" });
+      }, ms)
+    ),
+  ]);
+}
+
+export function transcribe(audio: ArrayBuffer | Uint8Array): Promise<Heard> {
+  // Deepgram when it's set up (fast, and keeps ElevenLabs credits for Milo's voice), else ElevenLabs.
+  return withTimeout(process.env.DEEPGRAM_API_KEY ? deepgram(audio) : elevenlabs(audio), 12000);
+}
+
+async function deepgram(audio: ArrayBuffer | Uint8Array): Promise<Heard> {
+  try {
+    const res = await fetch("https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true&language=en&keyterm=Milo", {
+      method: "POST",
+      headers: { Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`, "content-type": "audio/wav" },
+      body: Buffer.from(audio as ArrayBuffer),
+    });
+    if (!res.ok) {
+      const detail = await res.text();
+      bb("ears", "deepgram_error", { status: res.status, detail: detail.slice(0, 400) });
+      if (res.status === 401 || res.status === 403) return { ok: false, text: "Deepgram rejected my key. Run npm run setkey -- deepgram with your key copied." };
+      return elevenlabs(audio); // try the other service
+    }
+    const data = (await res.json()) as { results?: { channels?: { alternatives?: { transcript?: string }[] }[] } };
+    return { ok: true, text: (data.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? "").trim() };
+  } catch (err) {
+    bb("ears", "deepgram_network_error", { error: (err as Error).message });
+    return elevenlabs(audio);
+  }
+}
+
+async function elevenlabs(audio: ArrayBuffer | Uint8Array): Promise<Heard> {
   const key = process.env.ELEVENLABS_API_KEY;
   if (!key) return { ok: false, text: "I need an ElevenLabs key to hear you. Run npm run setkey with it copied." };
 
