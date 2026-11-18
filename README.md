@@ -89,3 +89,10 @@ System Settings > Privacy & Security > Screen & System Audio Recording, then res
 Everything Milo hears, decides and does is written to **~/Milo Logs** (one file per launch, plus the last 40 voice clips). Nothing leaves your Mac.
 - Something went wrong? Say **"Milo, flag that"** or press **Cmd+Shift+B** right after. That marks the moment.
 - Open the folder from the **Logs** chip in the chat panel, then send the newest `session-…jsonl` file (and clips if it's a hearing problem).
+
+## Chrome extension (fast web tasks)
+Milo reads web pages' real buttons and text boxes instead of guessing from screenshots.
+1. Open **chrome://extensions** in Chrome and turn on **Developer mode** (top right).
+2. Click **Load unpacked** and pick the **extension** folder inside your milo folder.
+3. Start Milo. The chat panel shows **Chrome ✓** when it's connected.
+Pages that can't be read as elements (Google Docs, Sheets, Slides) automatically use screen mode.

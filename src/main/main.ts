@@ -16,6 +16,8 @@ import { speak } from "./voice";
 import { log as bb, saveClip, timer, LOG_DIR, LOG_FILE } from "./blackbox";
 import { closeFlux, fluxAvailable, forceEndTurn, onFlux, openFlux, sendAudio } from "./flux";
 import { macSpeak } from "./macvoice";
+import { bridgeConnected, startBridge } from "./bridge";
+import { runWebTask } from "./webagent";
 import { transcribe } from "./ears";
 import { click, ensureBrowser, frontApp, openApp, openFolder, openLatestDownload, openUrl, pressKeys, typeText } from "./hands";
 import { plan } from "./quick";
@@ -340,6 +342,29 @@ ipcMain.handle("milo:task", async (_e, task: string) => {
   let lastSig = ""; // the previous action, to catch loops ("open Chrome", "open Chrome", "open Chrome"...)
   let stuck = 0;
   try {
+    // 2) Web tasks with the Chrome extension: read the page and use real elements (fast, no screenshots).
+    const front = await frontApp().catch(() => "");
+    const webby = /\b(chrome|browser|website|site|tab|search|google|youtube|chatgpt|chat gpt|gmail|amazon|reddit|wikipedia|online|web|internet|d2l|canvas|quizlet|espn)\b|\.(com|org|edu|net|io|ai)\b/i.test(task);
+    if (bridgeConnected() && (/Google Chrome/i.test(front) || webby)) {
+      if (!/Google Chrome/i.test(front)) {
+        await openApp("Google Chrome");
+        history.push("Opened Google Chrome");
+      }
+      const wa = screen.getPrimaryDisplay().workArea;
+      bb("task", "web_mode", { task });
+      const w = await runWebTask(
+        task,
+        history,
+        (st) => sendStep({ say: st.say, action: st.action, point: st.screenPt ? { x: st.screenPt.x - wa.x, y: st.screenPt.y - wa.y } : null }),
+        () => taskAbort,
+        pressKeys
+      );
+      if (w.status === "done" || w.status === "ask" || w.status === "stopped") return { ok: true, status: w.status, text: w.text };
+      if (w.status === "error") return { ok: false, text: w.text };
+      bb("task", "web_mode_handoff_to_screen", { why: w.text });
+    }
+
+    // 3) Screen mode: look at a screenshot, act, repeat.
     for (let step = 0; step < 14; step++) {
       if (taskAbort) return { ok: true, status: "stopped", text: "Stopped!" };
       const cap = await captureScreen();
@@ -620,6 +645,7 @@ ipcMain.on("milo:flux-close", () => closeFlux());
 ipcMain.on("milo:save-clip", (_e, wav: ArrayBuffer, note?: string) => {
   if (wav instanceof ArrayBuffer) bb("ears", "clip", { clip: saveClip(wav), note: typeof note === "string" ? note.slice(0, 200) : "" });
 });
+ipcMain.handle("milo:bridge-status", () => bridgeConnected());
 ipcMain.handle("milo:mac-say", (_e, text: string) => macSpeak(String(text ?? "")));
 ipcMain.handle("milo:hands-access", () =>
   process.platform === "darwin" ? systemPreferences.isTrustedAccessibilityClient(true) : true
@@ -654,6 +680,7 @@ app.on("web-contents-created", (_e, contents) => {
 });
 
 app.whenReady().then(() => {
+  startBridge(path.join(app.getAppPath(), "extension"));
   if (process.platform === "darwin") app.dock?.hide();
   // Let Milo's window use the microphone.
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === "media"));

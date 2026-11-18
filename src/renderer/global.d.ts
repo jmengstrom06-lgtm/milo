@@ -73,6 +73,7 @@ declare global {
       fluxClose: () => void;
       onFlux: (fn: (e: MiloFluxEvent) => void) => () => void;
       saveClip: (wav: ArrayBuffer, note?: string) => void;
+      bridgeStatus: () => Promise<boolean>;
       macSay: (text: string) => Promise<{ ok: true; audio: string } | { ok: false; text: string }>;
       onFlag: (fn: () => void) => () => void;
       setClickable: (clickable: boolean) => void;

@@ -771,3 +771,71 @@ export async function readBrief(jpegBase64: string, today: string): Promise<ApiO
     BRIEF_TOOL.name
   );
 }
+
+// ---------------------------------------------------------------------------
+// Web tasks through the Chrome extension: Milo reads the page's real buttons/fields (no screenshot).
+export type WebAction = {
+  action: "click" | "type" | "key" | "navigate" | "new_tab" | "switch_tab" | "back" | "scroll" | "wait" | "ask" | "done" | "use_screen";
+  id?: string;
+  text?: string;
+  clear?: boolean;
+  keys?: string;
+  url?: string;
+  tab?: number;
+  direction?: "up" | "down" | "top" | "bottom";
+  say: string;
+};
+
+const WEB_TOOL = {
+  name: "web_action",
+  description: "The single next action to take in the browser.",
+  input_schema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["click", "type", "key", "navigate", "new_tab", "switch_tab", "back", "scroll", "wait", "ask", "done", "use_screen"],
+        description:
+          "click/type use an element id from the list. key = keyboard shortcut or Enter (e.g. 'enter', 'cmd+a'). navigate = open a URL in this tab. new_tab = open a URL in a new tab. switch_tab = go to another open tab (tab = its id). use_screen = this page can't be read as elements (canvas editor like Google Docs/Sheets, a game, a PDF): hand over to screen mode.",
+      },
+      id: { type: "string", description: "Element id from the list (for click / type)." },
+      text: { type: "string", description: "For type: exact text. For ask: the question. For done: one-sentence summary." },
+      clear: { type: "boolean", description: "For type: replace what's in the box instead of adding to it." },
+      keys: { type: "string", description: "For key." },
+      url: { type: "string", description: "For navigate / new_tab: full https URL." },
+      tab: { type: "number", description: "For switch_tab." },
+      direction: { type: "string", enum: ["up", "down", "top", "bottom"] },
+      say: { type: "string", description: "Very short line shown to the student, like 'Clicking Search' (under 8 words)." },
+    },
+    required: ["action", "say"],
+  },
+};
+
+export async function webAction(task: string, page: string, history: string[]): Promise<ApiOk<WebAction> | ApiErr> {
+  const system = `${persona()}
+You are using the student's Chrome browser to finish their request. Instead of a screenshot you get the page as a list of interactive elements (with ids) plus the page's text. Choose exactly ONE next action.
+
+How to work:
+- Click and type using element ids from the list. Prefer elements marked on-screen.
+- To search a site, type into its search box, then press enter (key "enter") or click its search button.
+- To write in ChatGPT, Claude, Gemini etc: type into the message box. Don't send it unless the student asked you to send/submit/ask it. If they asked you to ask ChatGPT something or "make a story in ChatGPT", sending the prompt IS what they asked: press enter after typing.
+- If the list is empty or the page is a canvas editor (Google Docs, Sheets, Slides, Canva, Figma) or you can't find what you need after scrolling, use "use_screen".
+- To go to a website directly, use navigate with the URL (faster than searching).
+- After each action you'll get the updated page. Check it worked before moving on. If something didn't work, try a different element or approach. Never repeat the exact same action twice in a row.
+- Do exactly what was asked, nothing extra.
+- NEVER submit forms that buy, pay, post publicly, delete, send email/messages to people, or change account settings without asking first: use "ask".
+- Never type passwords or payment details. If a login is needed, use "ask".
+- When the request is complete, use "done" with a one-sentence summary in text.`;
+  const log = history.length ? history.map((h, i) => `${i + 1}. ${h}`).join("\n") : "(nothing yet)";
+  return callTool<WebAction>(
+    {
+      ...(process.env.MILO_WEB_MODEL ? { model: process.env.MILO_WEB_MODEL } : {}),
+      max_tokens: 1200,
+      system,
+      tools: [WEB_TOOL],
+      tool_choice: { type: "auto" },
+      messages: [{ role: "user", content: `Student's request: "${task}"\n\nWhat you've done so far:\n${log}\n\nThe browser right now:\n${page}` }],
+    },
+    WEB_TOOL.name
+  );
+}

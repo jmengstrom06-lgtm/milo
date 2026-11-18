@@ -123,6 +123,7 @@ export default function App() {
   const [pause, setPause] = useState(0); // "sending…" bar while you finish talking
   const [working, setWorking] = useState(false); // Milo is using the computer
   const [live, setLive] = useState<string | null>(null); // your words as you say them (smart ears)
+  const [chromeOn, setChromeOn] = useState(false); // Milo's Chrome extension is connected
   const workingRef = useRef(false);
   workingRef.current = working;
   const [researchQ, setResearchQ] = useState<{ q: string; id: number } | null>(null);
@@ -1055,6 +1056,13 @@ export default function App() {
   };
 
   // ---- voice commands -------------------------------------------------------------
+  useEffect(() => {
+    if (!chatOpen) return;
+    const check = () => window.milo.bridgeStatus().then(setChromeOn).catch(() => {});
+    check();
+    const t = window.setInterval(check, 3000);
+    return () => window.clearInterval(t);
+  }, [chatOpen]);
   routeCtxRef.current = () => ({
     researchOpen: !!researchQ,
     researchTopic: researchQ?.q,
@@ -2029,6 +2037,9 @@ export default function App() {
               >
                 {freeVoice ? "Free voice" : "Natural voice"}
               </button>
+              <span className={`chip ${chromeOn ? "chip--on" : ""}`} title={chromeOn ? "Chrome extension connected: fast web tasks" : "Chrome extension not connected (web tasks use screenshots)"}>
+                {chromeOn ? "Chrome ✓" : "Chrome –"}
+              </span>
               <button className="chip" onClick={() => window.milo.openLogs()} title="Open Milo's black-box log (Cmd+Shift+B flags a bug)">
                 Logs
               </button>
