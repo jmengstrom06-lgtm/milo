@@ -68,9 +68,9 @@ export function Confetti({ x, y, seed }: { x: number; y: number; seed: number })
 }
 
 // Comic-style speech bubble above Milo.
-export function Bubble({ text, x, y, heard }: { text: string; x: number; y: number; heard?: boolean }) {
+export function Bubble({ text, style, heard }: { text: string; style: React.CSSProperties; heard?: boolean }) {
   return (
-    <div className={`bubble-say ${heard ? "bubble-say--heard" : ""}`} style={{ left: x, top: y }}>
+    <div className={`bubble-say ${heard ? "bubble-say--heard" : ""}`} style={style}>
       {text}
     </div>
   );

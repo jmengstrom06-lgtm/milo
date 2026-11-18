@@ -556,15 +556,27 @@ export default function App() {
     nbStyle = { left: nbLeft, top: nbTop, width: NB_W, maxHeight: H - nbTop - MARGIN };
   }
 
-  // Speech bubble: above Milo if there's room, otherwise beside him (away from the notebook).
-  const roomAbove = pos.y - 70 >= MARGIN;
-  const notebookOnRight = box ? (nbStyle.left as number) > pos.x : false;
-  const bubbleX = roomAbove
-    ? clamp(pos.x + MILO_W / 2 - 140, MARGIN, W - 280 - MARGIN)
-    : notebookOnRight || pos.x + MILO_W + 290 > W
-      ? clamp(pos.x - 290, MARGIN, W - 280 - MARGIN)
-      : pos.x + MILO_W + 8;
-  const bubbleY = roomAbove ? pos.y - 70 : pos.y + 12;
+  // Speech bubble: never on top of Milo. Above him (growing upward) if there's room,
+  // otherwise beside him on the side away from the notebook, otherwise below.
+  const bubblePos = (): React.CSSProperties => {
+    const maxW = 280;
+    if (pos.y > 170) {
+      return { left: clamp(pos.x + MILO_W / 2 - maxW / 2, MARGIN, W - maxW - MARGIN), bottom: H - pos.y + 4, maxWidth: maxW };
+    }
+    const roomLeft = pos.x - MARGIN - 10;
+    const roomRight = W - (pos.x + MILO_W) - MARGIN - 10;
+    const nbRight = box ? (nbStyle.left as number) > pos.x : false;
+    let side: "left" | "right" = nbRight ? "left" : "right";
+    if ((side === "left" ? roomLeft : roomRight) < 170) side = side === "left" ? "right" : "left";
+    const room = side === "left" ? roomLeft : roomRight;
+    if (room < 170) return { left: clamp(pos.x + MILO_W / 2 - maxW / 2, MARGIN, W - maxW - MARGIN), top: pos.y + MILO_H + 6, maxWidth: maxW };
+    const w = Math.min(maxW, room);
+    return side === "left"
+      ? { right: W - pos.x + 10, top: pos.y + 8, maxWidth: w }
+      : { left: pos.x + MILO_W + 10, top: pos.y + 8, maxWidth: w };
+  };
+  const bStyle = bubblePos();
+  const short = (t: string) => (t.length > 170 ? t.slice(0, 167).trimEnd() + "…" : t);
 
   return (
     <>
@@ -625,9 +637,9 @@ export default function App() {
         {handsFree && <div className={`ears-on ${earState === "hearing" ? "ears-on--hot" : ""}`}>Say "Milo…"</div>}
       </div>
 
-      {bubble && <Bubble text={bubble} x={bubbleX} y={bubbleY} />}
-      {!bubble && heard && <Bubble text={`“${heard}”`} x={bubbleX} y={bubbleY} heard />}
-      {!bubble && !heard && earState === "thinking" && <Bubble text="…" x={bubbleX} y={bubbleY} heard />}
+      {bubble && <Bubble text={short(bubble)} style={bStyle} />}
+      {!bubble && heard && <Bubble text={`“${short(heard)}”`} style={bStyle} heard />}
+      {!bubble && !heard && earState === "thinking" && <Bubble text="…" style={bStyle} heard />}
       {confetti && <Confetti key={confetti.seed} {...confetti} />}
 
       {chatOpen && (
