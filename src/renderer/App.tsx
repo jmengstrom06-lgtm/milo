@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Milo, { Character, CHARACTERS, Mood } from "./Milo";
 import Notebook, { NotebookHandle } from "./Notebook";
 import { Ears, EarState } from "./ears";
-import { isBareGo, parse, soundsUnfinished, stripGo, stripWake } from "./commands";
+import { Intent, isBareGo, parse, soundsUnfinished, stripGo, stripWake } from "./commands";
 import { Bubble, Confetti, Highlight } from "./Effects";
 import * as tts from "./voice";
 import ResearchPanel, { PanelSize } from "./ResearchPanel";
@@ -425,12 +425,13 @@ export default function App() {
   };
 
   // ---- hands: do things on the computer -------------------------------------------
+  /** Do something on the computer. Resolves true if it finished (so a chain can continue). */
   const runTask = useCallback(
-    async (task: string, byVoice = true) => {
+    async (task: string, byVoice = true, partOfChain = false): Promise<boolean> => {
       if (!(await window.milo.handsAccess())) {
         await say("I need permission to use your keyboard and mouse. Turn on Terminal in System Settings, Privacy and Security, Accessibility, then restart me.");
         setBubble(null);
-        return;
+        return false;
       }
       runId.current++;
       hush();
@@ -449,43 +450,85 @@ export default function App() {
       if (!r.ok) {
         setMood("thinking");
         await say(r.text);
-      } else if (r.status === "ask") {
+        setBubble(null);
+        return false;
+      }
+      if (r.status === "ask") {
         pendingTask.current = task;
         setMood("happy");
         await say(r.text);
         setBubble(null);
         listen();
-        return;
-      } else if (r.status === "quick") {
+        return false;
+      }
+      if (r.status === "stopped") {
+        setMood("idle");
+        await say("Stopped!");
+        setBubble(null);
+        return false;
+      }
+      if (r.status === "quick") {
         // Instant command (open an app, new tab…) already happened. Anything left gets routed:
         // homework ("…and solve the problem") or more computer work ("…and write a poem").
         setMood("happy");
         if (r.rest) {
           const intent = parse(r.rest, { inLesson: false, awaitingAnswer: false });
-          if (intent.kind === "look") {
+          if (intent.kind === "look" && !partOfChain) {
             setMode(intent.mode);
             look(intent.mode, intent.request, null, byVoice);
-          } else {
-            runTask(`${r.rest}\n(Already done: ${(r.did ?? []).join("; ")})`, byVoice);
+            return true;
           }
-          return;
+          return runTask(`${r.rest}\n(Already done: ${(r.did ?? []).join("; ")})`, byVoice, partOfChain);
         }
-        await sleep(1200);
-      } else if (r.status === "stopped") {
-        setMood("idle");
-        await say("Stopped!");
-      } else {
-        setMood("celebrating");
-        setConfetti({ x: posRef.current.x + MILO_W / 2, y: posRef.current.y + 40, seed: Date.now() });
-        await say(r.text);
+        await sleep(partOfChain ? 400 : 1200);
+        setBubble(null);
+        return true;
       }
+      // Finished.
+      if (partOfChain) {
+        setMood("happy");
+        await say(r.text || "Found it.");
+        setBubble(null);
+        return true;
+      }
+      setMood("celebrating");
+      setConfetti({ x: posRef.current.x + MILO_W / 2, y: posRef.current.y + 40, seed: Date.now() });
+      await say(r.text);
       setBubble(null);
       setMood("happy");
       if (byVoice) listen();
+      return true;
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [say, hover, listen, look]
   );
+
+  /** "Open chrome, find a worksheet, and complete it": the computer part first, then the screen job on what's open. */
+  const runChain = async (steps: Intent[], spoken: boolean) => {
+    const last = steps[steps.length - 1];
+    const what =
+      last.kind === "sweep" ? "do the whole thing" : last.kind === "quiz" ? "quiz you on it" : last.kind === "look" ? "work through it" : "take a look";
+    setBubble(null);
+    await say(`Got it. First I'll find it, then I'll ${what}.`);
+    setBubble(null);
+    for (let i = 0; i < steps.length; i++) {
+      const st = steps[i];
+      if (st.kind === "task") {
+        const ok = await runTask(st.task, spoken, true);
+        if (!ok) return; // stopped, failed, or waiting on a yes/no: don't charge ahead
+        await sleep(1200); // let the page finish drawing before Milo reads it
+        continue;
+      }
+      if (st.kind === "sweep") return runSweep();
+      if (st.kind === "quiz") return startQuiz(st.focus);
+      if (st.kind === "look") {
+        setMode(st.mode);
+        return look(st.mode, st.request, null, spoken);
+      }
+      if (st.kind === "checkwork") return checkWorkNow();
+      if (st.kind === "watch") return setWatch(st.on);
+    }
+  };
 
   // Follow Milo's hands: hop next to whatever he's about to click, show what he's doing.
   useEffect(
@@ -956,6 +999,9 @@ export default function App() {
         return;
       case "brief":
         startBrief(spoken);
+        return;
+      case "chain":
+        runChain(intent.steps, spoken);
         return;
       case "fill": {
         const L = lessonRef.current;

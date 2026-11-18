@@ -20,6 +20,7 @@ export type Intent =
   | { kind: "checkwork" } // one-time look for mistakes
   | { kind: "quiz"; focus: string } // quiz me on what's on screen
   | { kind: "brief" } // what's due (reads D2L)
+  | { kind: "chain"; steps: Intent[] } // "open chrome, find a worksheet, and complete it": do in order
   | { kind: "fill" } // type the lesson's answer into the blank
   | { kind: "yes" }
   | { kind: "no" }
@@ -66,7 +67,47 @@ const SWEEP =
 const BUILD =
   /^(?:can you |could you |please )?(make|build|create|code|design|whip up|throw together) (me )?(a|an|my|some)?\s*.*\b(calculator|tool|app|tracker|timer|planner|converter|generator|flash ?cards?|game|dashboard|widget|checklist|budget|countdown|stopwatch|scheduler|organizer|randomizer|visualizer|simulator|grapher|graphing)\b/;
 
-export function parse(raw: string, ctx: { inLesson: boolean; awaitingAnswer: boolean; pendingAsk?: boolean }): Intent {
+type Ctx = { inLesson: boolean; awaitingAnswer: boolean; pendingAsk?: boolean };
+
+const SCREEN_KINDS = new Set(["sweep", "quiz", "look", "checkwork", "watch"]);
+const COMPUTER =
+  /\b(open|launch|find|search|google|go to|go on|pull up|bring up|navigate|download|look up|get me|browse|visit|chrome|safari|youtube|website|online|on the internet|tab)\b/;
+
+/**
+ * Multi-step commands: "open chrome and find a simple math worksheet and complete the whole thing".
+ * Everything before the screen job (find/open stuff) becomes one computer task; the screen job runs after it.
+ */
+function splitChain(text: string, ctx: Ctx): Intent | null {
+  if (ctx.inLesson || ctx.pendingAsk) return null;
+  const clauses = text
+    .split(/\s*,?\s*\b(?:and then|after that|then|and)\b\s*/i)
+    .map((c) => c.trim())
+    .filter(Boolean);
+  if (clauses.length < 2) return null;
+  let j = -1;
+  for (let k = clauses.length - 1; k > 0; k--) {
+    if (SCREEN_KINDS.has(parseSingle(clauses[k], ctx).kind)) {
+      j = k;
+      break;
+    }
+  }
+  if (j < 1) return null;
+  const before = clauses.slice(0, j).join(" and ");
+  if (!COMPUTER.test(before.toLowerCase())) return null;
+  const screenJob = parseSingle(clauses.slice(j).join(" and "), ctx);
+  return {
+    kind: "chain",
+    steps: [{ kind: "task", task: `${before}. Stop as soon as it's open on screen; the next step happens after.` }, screenJob],
+  };
+}
+
+export function parse(raw: string, ctx: Ctx): Intent {
+  const text = raw.trim().replace(/[.!?]+$/, "");
+  if (!text) return { kind: "chat", text };
+  return splitChain(text, ctx) ?? parseSingle(text, ctx);
+}
+
+function parseSingle(raw: string, ctx: Ctx): Intent {
   const text = raw.trim().replace(/[.!?]+$/, "");
   const t = text.toLowerCase();
   if (!t) return { kind: "chat", text };
