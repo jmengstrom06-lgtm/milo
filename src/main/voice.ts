@@ -1,3 +1,4 @@
+import { log as bb } from "./blackbox";
 import { limited } from "./limiter";
 
 // Milo's voice: ElevenLabs text-to-speech, called from the main process so the key stays private.
@@ -26,6 +27,7 @@ export async function speak(text: string, urgent = false): Promise<{ ok: true; a
     if (!res.ok) {
       const detail = await res.text();
       console.warn(`[voice] ElevenLabs ${res.status}: ${detail.slice(0, 200)}`);
+      bb("voice", "elevenlabs_error", { status: res.status, detail: detail.slice(0, 400) });
       if (/quota_exceeded|credits|quota/i.test(detail)) return { ok: false, text: "quota" };
       return { ok: false, text: `voice-error-${res.status}` };
     }

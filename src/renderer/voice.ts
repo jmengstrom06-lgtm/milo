@@ -43,6 +43,7 @@ export function prefetch(text: string, urgent = false): Promise<Clip> {
         if (!elevenDown()) onVoiceTrouble("key");
         elevenDownUntil = Date.now() + 60_000;
       }
+      window.milo.log("voice", "natural_voice_failed", { reason: r.text, text: key.slice(0, 80) });
       cache.delete(key); // don't keep a failed line around
       return { ok: false as const };
     });
@@ -126,7 +127,10 @@ function speakOne(text: string, token: number, onStart: () => void): Promise<voi
         quiet = 0;
       } else if (started && ++quiet >= 2) finish();
     }, 150);
-    const cap = setTimeout(finish, 4000 + text.length * 120);
+    const cap = setTimeout(() => {
+      if (!done) window.milo.log("voice", "mac_voice_timeout", { started, text: text.slice(0, 80) });
+      finish();
+    }, 4000 + text.length * 120);
     synth.speak(u);
   });
 }
@@ -155,6 +159,7 @@ async function systemSpeak(text: string, onStart: () => void): Promise<void> {
 export async function play(text: string, onStart: () => void): Promise<void> {
   stop();
   const clip = await prefetch(text, true);
+  window.milo.log("voice", "play", { engine: clip.ok ? "elevenlabs" : freeVoice ? "mac_free" : "mac_fallback", chars: text.length });
   if (clip.ok) {
     await new Promise<void>((resolve) => {
       const a = new Audio(clip.url);

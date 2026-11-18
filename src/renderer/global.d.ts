@@ -55,6 +55,10 @@ declare global {
 
   interface Window {
     milo: {
+      log: (src: string, ev: string, data?: Record<string, unknown>) => void;
+      flag: (note?: string) => Promise<{ file: string; dir: string }>;
+      openLogs: () => void;
+      onFlag: (fn: () => void) => () => void;
       setClickable: (clickable: boolean) => void;
       ask: (history: { role: "user" | "assistant"; content: string }[]) => Promise<{ ok: boolean; text: string }>;
       route: (

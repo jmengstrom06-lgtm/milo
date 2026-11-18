@@ -84,3 +84,8 @@ System Settings > Privacy & Security > Screen & System Audio Recording, then res
 - [ ] Phase 3: Help Me / Do It For Me, real computer actions, memory (Supabase)
 - [ ] Phase 4: Accounts, TCU network, shared study room with two Milos
 - [ ] Phase 5: Polish, signed Mac beta
+
+## Black-box log
+Everything Milo hears, decides and does is written to **~/Milo Logs** (one file per launch, plus the last 40 voice clips). Nothing leaves your Mac.
+- Something went wrong? Say **"Milo, flag that"** or press **Cmd+Shift+B** right after. That marks the moment.
+- Open the folder from the **Logs** chip in the chat panel, then send the newest `session-…jsonl` file (and clips if it's a hearing problem).

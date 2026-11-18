@@ -1,3 +1,4 @@
+import { log as bb } from "./blackbox";
 // Milo's brain: all Anthropic API calls live in the main process,
 // so the API key never touches the renderer.
 
@@ -189,11 +190,13 @@ async function callClaude(body: Record<string, unknown>): Promise<ApiOk<Block[]>
     });
     if (!res.ok) {
       const detail = await res.text();
+      bb("brain", "api_error", { status: res.status, model: (body.model as string) ?? model(), detail: detail.slice(0, 500) });
       return { ok: false, text: `My brain hit an error (${res.status}). ${detail.slice(0, 200)}` };
     }
     const data = (await res.json()) as { content?: Block[] };
     return { ok: true, data: data.content ?? [] };
   } catch (err) {
+    bb("brain", "network_error", { error: (err as Error).message });
     return { ok: false, text: `I couldn't reach my brain: ${(err as Error).message}` };
   }
 }

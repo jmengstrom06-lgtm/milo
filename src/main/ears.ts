@@ -1,3 +1,4 @@
+import { log as bb } from "./blackbox";
 import { limited } from "./limiter";
 
 // Milo's ears: ElevenLabs speech-to-text. Audio arrives from the renderer as a 16 kHz mono WAV.
@@ -19,6 +20,7 @@ export async function transcribe(audio: ArrayBuffer | Uint8Array): Promise<{ ok:
     if (!res.ok) {
       const detail = await res.text();
       console.warn(`[ears] ElevenLabs ${res.status}: ${detail.slice(0, 200)}`);
+      bb("ears", "elevenlabs_error", { status: res.status, detail: detail.slice(0, 400) });
       if (/quota_exceeded|credits|quota/i.test(detail)) {
         return { ok: false, text: "I'm out of ElevenLabs credits, so I can't hear you right now. Type to me in the chat, or top up ElevenLabs." };
       }

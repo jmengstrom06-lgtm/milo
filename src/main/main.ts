@@ -8,10 +8,12 @@ import {
   ipcMain,
   screen,
   systemPreferences,
+  shell,
 } from "electron";
 import path from "node:path";
 import dotenv from "dotenv";
 import { speak } from "./voice";
+import { log as bb, saveClip, timer, LOG_DIR, LOG_FILE } from "./blackbox";
 import { transcribe } from "./ears";
 import { click, ensureBrowser, frontApp, openApp, openFolder, openLatestDownload, openUrl, pressKeys, typeText } from "./hands";
 import { plan } from "./quick";
@@ -20,6 +22,38 @@ import { buildTool } from "./builder";
 import { Action, askMilo, classify, RouteCtx, makeQuiz, readBrief, setUserName, sweepPlan, watchCheck, ChatMessage, checkAnswer, locateInCrop, nextAction, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
 dotenv.config({ path: path.join(app.getAppPath(), ".env") });
+
+// ---------- black-box log: every request Milo handles, how long it took, what came back ----------
+const QUIET = new Set(["milo:watch-check", "milo:mic-access", "milo:hands-access", "milo:log-flag"]);
+const brief = (v: unknown): unknown => {
+  if (v instanceof ArrayBuffer) return { bytes: v.byteLength };
+  if (ArrayBuffer.isView(v)) return { bytes: v.byteLength };
+  if (typeof v === "string") return v.length > 400 ? v.slice(0, 400) + "…" : v;
+  if (Array.isArray(v)) return v.length > 8 ? [...v.slice(-8).map(brief), `(+${v.length - 8} more)`] : v.map(brief);
+  if (v && typeof v === "object") {
+    const o: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v)) o[k] = brief(x);
+    return o;
+  }
+  return v;
+};
+{
+  const orig = ipcMain.handle.bind(ipcMain);
+  (ipcMain as unknown as { handle: typeof ipcMain.handle }).handle = (channel, fn) =>
+    orig(channel, async (e, ...args) => {
+      const done = timer();
+      try {
+        const out = await fn(e, ...args);
+        if (!QUIET.has(channel)) bb("ipc", channel.replace("milo:", ""), { ms: done(), args: brief(args), out: brief(out) });
+        return out;
+      } catch (err) {
+        bb("ipc", channel.replace("milo:", "") + "_crash", { ms: done(), args: brief(args), error: String((err as Error)?.stack ?? err) });
+        throw err;
+      }
+    });
+}
+process.on("uncaughtException", (err) => bb("main", "uncaught", { error: String(err?.stack ?? err) }));
+process.on("unhandledRejection", (err) => bb("main", "unhandled_rejection", { error: String((err as Error)?.stack ?? err) }));
 
 const isDev = process.env.MILO_DEV === "1";
 let overlay: BrowserWindow | null = null;
@@ -227,6 +261,7 @@ let taskRunning = false;
 let taskAbort = false;
 
 function sendStep(step: { say: string; action: string; point?: { x: number; y: number } | null; status?: string }) {
+  bb("task", "step", step);
   overlay?.webContents.send("milo:task-step", step);
 }
 
@@ -553,7 +588,23 @@ ipcMain.on("milo:open-url", (_e, url: string) => {
 
 ipcMain.handle("milo:check", (_e, lesson: TeachResult, answer: string) => checkAnswer(lesson, answer));
 ipcMain.handle("milo:practice", (_e, lesson: TeachResult) => makePractice(lesson));
-ipcMain.handle("milo:stt", (_e, audio: ArrayBuffer) => transcribe(audio));
+ipcMain.handle("milo:stt", async (_e, audio: ArrayBuffer) => {
+  const clip = saveClip(audio); // so we can hear exactly what Milo heard
+  const r = await transcribe(audio);
+  bb("ears", "transcript", { clip, ok: r.ok, text: r.text });
+  return r;
+});
+
+// Logs from the overlay (what the mic did, what Milo decided, when he spoke).
+ipcMain.on("milo:log", (_e, src: string, ev: string, data: Record<string, unknown>) => {
+  if (typeof src === "string" && typeof ev === "string") bb(src.slice(0, 20), ev.slice(0, 60), data && typeof data === "object" ? data : {});
+});
+// "Milo, that was wrong" / Cmd+Shift+B: mark the moment so it's easy to find.
+ipcMain.handle("milo:log-flag", (_e, note?: string) => {
+  bb("user", "FLAG", { note: typeof note === "string" ? note : "" });
+  return { file: LOG_FILE, dir: LOG_DIR };
+});
+ipcMain.on("milo:open-logs", () => shell.showItemInFolder(LOG_FILE));
 ipcMain.handle("milo:hands-access", () =>
   process.platform === "darwin" ? systemPreferences.isTrustedAccessibilityClient(true) : true
 );
@@ -594,6 +645,7 @@ app.whenReady().then(() => {
   createOverlay();
 
   // Open Milo's chat from anywhere.
+  globalShortcut.register("CommandOrControl+Shift+B", () => overlay?.webContents.send("milo:flag"));
   globalShortcut.register("CommandOrControl+Shift+M", () => {
     overlay?.webContents.send("milo:summon");
     overlay?.focus();

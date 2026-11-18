@@ -63,6 +63,8 @@ export class Ears {
   onPause: (progress: number) => void = () => {};
   /** You started talking over Milo: he should stop and listen. */
   onBargeIn: () => void = () => {};
+  /** Black-box log hook: why recordings started/ended, interruptions, dropped sounds. */
+  onDebug: (ev: string, data: Record<string, unknown>) => void = () => {};
   private echo = 0.01; // how loud Milo's own voice is in the mic while he talks (peak-tracked)
   private warmup = 0;
   private bargeOk = true;
@@ -149,7 +151,7 @@ export class Ears {
 
   /** Push-to-talk: "I'm done talking", send what we have now. */
   flush() {
-    if (this.speaking && this.speech.length > 4) this.finish(true);
+    if (this.speaking && this.speech.length > 4) this.finish(true, "push_to_talk_send");
     else if (this.mode === "once") this.setMode("off");
   }
 
@@ -188,6 +190,7 @@ export class Ears {
       if (this.warmup > 0) {
         this.warmup--;
         this.echo = Math.max(this.echo, rms); // his loudest so far
+        if (this.warmup === 0) this.onDebug("echo_measured", { echo: +this.echo.toFixed(4), userLevel: +this.userLevel.toFixed(4) });
         return;
       }
       if (!this.bargeOk) return;
@@ -198,6 +201,7 @@ export class Ears {
         this.echo = Math.max(this.echo * 0.997, rms); // keep tracking his peaks, slowly forget
       }
       if (this.bargeRun >= BARGE_FRAMES) {
+        this.onDebug("barge_in", { rms: +rms.toFixed(4), thresh: +thresh.toFixed(4), echo: +this.echo.toFixed(4), userLevel: +this.userLevel.toFixed(4) });
         this.bargedAt = Date.now();
         this.bargeRun = 0;
         this.muted = false;
@@ -228,6 +232,7 @@ export class Ears {
         this.floor = this.floor * 0.95 + rms * 0.05; // learn the room's background noise
       }
       if (this.loudRun >= START_FRAMES) {
+        this.onDebug("start", { mode: this.mode, rms: +rms.toFixed(4), on: +on.toFixed(4), floor: +this.floor.toFixed(4) });
         this.speaking = true;
         this.speech = [...this.ring];
         this.ring = [];
@@ -253,11 +258,15 @@ export class Ears {
     if (p > 0.25) this.onPause(Math.min(1, (p - 0.25) / 0.75));
     else this.onPause(0);
     const cap = this.mode === "always" ? MAX_FRAMES_HF : MAX_FRAMES;
-    if (this.quietRun >= END_SILENCE || this.noVoiceRun >= END_NO_VOICE || this.speech.length >= cap) this.finish();
+    if (this.quietRun >= END_SILENCE) this.finish(false, "silence");
+    else if (this.noVoiceRun >= END_NO_VOICE) this.finish(false, "your_voice_stopped");
+    else if (this.speech.length >= cap) this.finish(false, "too_long_cap");
   }
 
-  private finish(forced = false) {
+  private finish(forced = false, reason = "silence") {
     const frames = this.speech;
+    const seconds = +((frames.length * FRAME) / RATE).toFixed(2);
+    const peak = +this.uttPeak.toFixed(4);
     const energy = this.uttEnergy.filter((e) => e > 0.011).sort((a, b) => a - b);
     this.resetUtterance();
     const voiced = energy.length;
@@ -268,7 +277,9 @@ export class Ears {
     const tooShort = voiced * FRAME < RATE * MIN_VOICED_S;
     // Voice focus: in hands-free, ignore voices much quieter than yours (TV, people across the room).
     const tooFar = this.mode === "always" && this.userLevel > 0 && level < this.userLevel * 0.45;
+    this.onDebug("end", { reason, seconds, voicedS: +((voiced * FRAME) / RATE).toFixed(2), level: +level.toFixed(4), peak, userLevel: +this.userLevel.toFixed(4), floor: +this.floor.toFixed(4), mode: this.mode });
     if (tooShort || tooFar) {
+      this.onDebug("dropped", { why: tooShort ? "too_short" : "too_quiet_not_you", seconds });
       // too short to be words; keep listening
       this.onState("waiting");
       return;

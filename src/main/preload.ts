@@ -7,6 +7,14 @@ function on(channel: string, cb: () => void) {
 }
 
 contextBridge.exposeInMainWorld("milo", {
+  log: (src: string, ev: string, data: Record<string, unknown> = {}) => ipcRenderer.send("milo:log", src, ev, data),
+  flag: (note?: string) => ipcRenderer.invoke("milo:log-flag", note ?? ""),
+  openLogs: () => ipcRenderer.send("milo:open-logs"),
+  onFlag: (fn: () => void) => {
+    const l = () => fn();
+    ipcRenderer.on("milo:flag", l);
+    return () => ipcRenderer.removeListener("milo:flag", l);
+  },
   setClickable: (clickable: boolean) => ipcRenderer.send("milo:set-clickable", clickable),
   ask: (history: unknown) => ipcRenderer.invoke("milo:ask", history),
   route: (text: string, ctx?: Record<string, unknown>) => ipcRenderer.invoke("milo:route", text, ctx ?? {}),

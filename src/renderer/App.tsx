@@ -49,6 +49,8 @@ const homeSpot = () => {
 const home = (): Pos => spot(homeSpot());
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Black-box log (what Milo decided and why). Lands in ~/Milo Logs on the Mac. */
+const bb = (ev: string, data: Record<string, unknown> = {}) => window.milo.log("app", ev, data);
 /** Is this transcript just Milo's own line coming back through the mic? */
 function isEcho(heard: string, said: string) {
   const words = (t: string) => t.toLowerCase().replace(/[^a-z0-9' ]+/g, " ").split(/\s+/).filter(Boolean);
@@ -297,6 +299,8 @@ export default function App() {
     setBubble(text);
     setHeard(null);
     lastSaid.current = text;
+    const t0 = Date.now();
+    bb("say", { text, voiceOn: voiceRef.current, bargeIn: !opts.noBarge });
     ears.current?.mute(true, !opts.noBarge); // don't let Milo hear himself
     try {
       if (!voiceRef.current) {
@@ -309,6 +313,7 @@ export default function App() {
         ears.current?.started();
       });
     } finally {
+      bb("say_done", { ms: Date.now() - t0, text: text.slice(0, 60) });
       setSpeaking(false);
       setTimeout(() => ears.current?.mute(false), 250);
     }
@@ -1058,6 +1063,10 @@ export default function App() {
     lastCommand: lastCommand.current || undefined,
   });
   routeRef.current = (text: string, spoken = true) => {
+    if (/^(flag (that|this|it)|that was (wrong|bad|weird|a bug|broken)|log (that|this)|report (a |that |this )?bug|bug report|that'?s a bug)\b/i.test(text.trim())) {
+      flagNow(text);
+      return;
+    }
     if (quiz && quizRef.current?.active()) {
       const t = text.toLowerCase().trim().replace(/[.!?]+$/, "");
       if (/^(end|stop|quit|exit|close)( the)? quiz$|^(i'?m )?done$/.test(t)) return closeQuiz();
@@ -1107,12 +1116,15 @@ export default function App() {
     const LESSON_SURE = ["close", "goto", "mode", "answer", "show", "copy", "practice", "skip", "repeat", "fill"];
     if (!SURE.includes(intent.kind) && !(inLesson && LESSON_SURE.includes(intent.kind))) {
       setMood("thinking");
+      const r0 = Date.now();
       getRoute(text).then((rt) => {
+        bb("route_ai", { text, ...rt, waitedMs: Date.now() - r0, keywordGuess: intent.kind });
         if (rt.failed) return runIntent(intent.kind === "chat" ? { kind: "chat", text } : intent);
         applyRoute(rt, text, spoken, intent);
       });
       return;
     }
+    bb("route_instant", { text, kind: intent.kind });
     runIntent(intent);
     function runIntent(intent: Intent) {
     switch (intent.kind) {
@@ -1270,6 +1282,18 @@ export default function App() {
     }
   };
 
+  /** Mark this moment in the black-box log, so the bug is easy to find. */
+  const flagNow = (note = "") => {
+    window.milo.flag(note).then(() => {
+      sfx.lock();
+      setBubble("Flagged. I saved what just happened.");
+      setTimeout(() => setBubble((b) => (b === "Flagged. I saved what just happened." ? null : b)), 2500);
+    });
+  };
+  const flagRef = useRef(flagNow);
+  flagRef.current = flagNow;
+  useEffect(() => window.milo.onFlag(() => flagRef.current("shortcut")), []);
+
   /** "Milo, move to the bottom left": go there and make it his new spot. */
   const moveMilo = (where: string) => {
     let w = where;
@@ -1324,7 +1348,9 @@ export default function App() {
     let inFlight = false;
     const queued: { wav: ArrayBuffer; pushToTalk: boolean; forced: boolean }[] = []; // waiting utterances, in order (never drop any)
     e.onPause = (p) => setPause(p);
+    e.onDebug = (ev, d) => window.milo.log("ears", ev, d);
     e.onBargeIn = () => {
+      bb("interrupted_by_voice", { saying: lastSaid.current.slice(0, 80), working: workingRef.current });
       interrupted.current = true;
       tts.stop();
       setSpeaking(false);
@@ -1366,9 +1392,11 @@ export default function App() {
         return;
       }
       let text = r.text;
-      const addressed = stripWake(r.text, true).woke; // you said "Milo" again: that's a NEW command, not more of the last one
+      const addressed = stripWake(r.text, true).woke;
+      bb("heard", { text, direct, addressed, pushToTalk, forced, followWindow: Date.now() < followUntil.current, cardUp: !!pendingRef.current }); // you said "Milo" again: that's a NEW command, not more of the last one
       // Did Milo just hear HIMSELF? (Speakers leaking into the mic right after an "interruption".)
       if (Date.now() - e.bargedAt < 20000 && isEcho(text, lastSaid.current)) {
+        bb("ignored_own_echo", { heard: text, said: lastSaid.current.slice(0, 80) });
         e.bargedAt = 0;
         followUntil.current = 0;
         setEarState(e.mode === "off" ? "off" : "waiting");
@@ -1389,6 +1417,7 @@ export default function App() {
         // Hands-free: only act when you start with "Milo".
         const w = stripWake(text, true);
         if (!w.woke) {
+          bb("ignored_no_wake_word", { text });
           setMood((m) => (m === "thinking" || m === "listening" ? "idle" : m));
           return;
         }
@@ -1415,6 +1444,7 @@ export default function App() {
       if (!pendingRef.current && !addressed && R && Date.now() - R.at < 15000 && !isBareGo(text) &&
           !/^(close|stop|cancel|done|thanks|thank you|never ?mind|full ?screen|half|smaller|bigger|expand|shrink|make it|move|go to the|get out|open|launch)\b/i.test(text.trim())) {
         const q = `${R.q.replace(/[?.!\s]+$/, "")}. ${stripGo(text)}`;
+        bb("merged_into_research", { was: R.q, now: q });
         setHeard(q);
         startResearchRef.current(q, true, true);
         return;
@@ -1428,6 +1458,7 @@ export default function App() {
         const connects = /^(and|then|also|plus|after that|so|but|with|to|in|on|about|that|which|where|make|write|type|put|have it|and then)\b/.test(tt);
         if (!isStop && !isBareGo(tt) && (connects || soundsUnfinished(LR.text) || Date.now() - LR.at < 5000)) {
           lastRun.current = null;
+          bb("merged_into_last_command", { was: LR.text, added: text, msSinceStart: Date.now() - LR.at, stoppedTask: workingRef.current });
           if (workingRef.current) {
             quietStop.current = true;
             window.milo.stopTask();
@@ -1451,6 +1482,7 @@ export default function App() {
           return;
         }
         const added = stripGo(text);
+        bb("card_added", { was: P.text, added });
         setPendingCmd(`${P.text} ${added}`.trim(), added !== text.trim()); // ended with "go" -> run now
         return;
       }
@@ -1495,6 +1527,7 @@ export default function App() {
   // ---- "Got it" card --------------------------------------------------------------
   const AUTO_GO_MS = 4000;
   const runPending = (text: string) => {
+    bb("card_run", { text, waitedMs: pendingRef.current ? Date.now() - (pendingRef.current.first ?? pendingRef.current.started) : 0 });
     pendingRef.current = null;
     setPending(null);
     followUntil.current = Date.now() + 8000; // if you keep talking, the rest still counts (no "Milo" needed)
@@ -1510,6 +1543,7 @@ export default function App() {
     if (goNow && !soundsUnfinished(text)) return runPending(text);
     const unfinished = soundsUnfinished(text);
     if (!unfinished) getRoute(text); // think about it now, so it's ready when the card runs
+    bb("card_shown", { text, unfinished, goNow });
     pendingRef.current = { text, started: Date.now(), unfinished };
     setPending({ text, progress: 0, unfinished });
     setHeard(null);
@@ -1523,6 +1557,7 @@ export default function App() {
     if (P) runPending(P.text);
   }
   function cancelPending() {
+    bb("card_cancel", { text: pendingRef.current?.text });
     pendingRef.current = null;
     setPending(null);
     followUntil.current = 0;
@@ -1969,6 +2004,9 @@ export default function App() {
                 title="Free voice uses your Mac's built-in voice and saves ElevenLabs credits. Listening still works."
               >
                 {freeVoice ? "Free voice" : "Natural voice"}
+              </button>
+              <button className="chip" onClick={() => window.milo.openLogs()} title="Open Milo's black-box log (Cmd+Shift+B flags a bug)">
+                Logs
               </button>
               <button className="chip" onClick={closeChat}>
                 Hide
