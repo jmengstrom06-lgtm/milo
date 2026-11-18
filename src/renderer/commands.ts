@@ -103,3 +103,13 @@ export function stripGo(text: string): string {
 
 /** Just "go" / "do it" on its own, with nothing else. */
 export const isBareGo = (text: string) => /^(okay |ok )?(go|go ahead|do it|start|begin|complete( the)? task)[.!?]*$/i.test(text.trim());
+
+/** Does this sound like the student stopped mid-sentence? ("go", "open the", "go to chrome and") */
+export function soundsUnfinished(text: string): boolean {
+  const t = text.trim().toLowerCase().replace(/[.!?,]+$/, "");
+  if (!t) return true;
+  if (/^(stop|wait|thanks|thank you|yes|yeah|yep|no|nope|refresh|reload|go back|new tab|next tab|close (this )?tab|scroll (up|down)|never ?mind|hint|copy( it)?|skip|repeat)$/.test(t)) return false;
+  if (/\d/.test(t) && t.split(/\s+/).length <= 4) return false; // spoken answers like "0.69"
+  if (/\b(to|the|a|an|and|or|but|in|on|at|with|for|of|my|your|then|so|open|type|write|search|about|into|onto|from|like|um|uh|is|are|can you|could you|please|go|go to|and then|some)$/.test(t)) return true;
+  return t.split(/\s+/).length === 1 && !/^(hi|hello|hey|help|chrome|notes|spotify)$/.test(t);
+}

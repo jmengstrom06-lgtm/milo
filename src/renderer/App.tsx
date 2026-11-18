@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Milo, { Character, CHARACTERS, Mood } from "./Milo";
 import Notebook, { NotebookHandle } from "./Notebook";
 import { Ears, EarState } from "./ears";
-import { isBareGo, parse, stripGo, stripWake } from "./commands";
+import { isBareGo, parse, soundsUnfinished, stripGo, stripWake } from "./commands";
 import { Bubble, Confetti, Highlight } from "./Effects";
 import * as tts from "./voice";
 
@@ -27,6 +27,29 @@ function detectMode(text: string, fallback: MiloMode): MiloMode {
   if (/(teach|explain|how do|walk me|show me how)/.test(t)) return "teach";
   return fallback;
 }
+// A tiny two-note "I'm listening" chime (no speech, so the mic stays open).
+let chimeCtx: AudioContext | null = null;
+function chime() {
+  try {
+    chimeCtx = chimeCtx ?? new AudioContext();
+    const t = chimeCtx.currentTime;
+    [880, 1320].forEach((f, i) => {
+      const o = chimeCtx!.createOscillator();
+      const g = chimeCtx!.createGain();
+      o.frequency.value = f;
+      o.type = "sine";
+      g.gain.setValueAtTime(0, t + i * 0.09);
+      g.gain.linearRampToValueAtTime(0.12, t + i * 0.09 + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.09 + 0.16);
+      o.connect(g).connect(chimeCtx!.destination);
+      o.start(t + i * 0.09);
+      o.stop(t + i * 0.09 + 0.18);
+    });
+  } catch {
+    /* no audio */
+  }
+}
+
 // Accept the lock-on result only if it overlaps the first guess (guards against jumping to a different question).
 function closeEnough(a: MiloBox, b: MiloBox) {
   const ix = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
@@ -92,7 +115,9 @@ export default function App() {
   const voiceSession = useRef(false); // the current lesson was started by voice
   const routeRef = useRef<(text: string, spoken?: boolean) => void>(() => {});
   const pendingTask = useRef<string | null>(null);
-  const lastCommand = useRef<string | null>(null); // last thing you asked for (so a bare "go" can redo it)
+  const lastCommand = useRef<string | null>(null);
+  const lastCommandAt = useRef(0);
+  const partial = useRef<{ text: string; timer: number } | null>(null); // a sentence you haven't finished yet // last thing you asked for (so a bare "go" can redo it)
   const restoreHandsFree = useRef(false);
   const lastStepSay = useRef("");
   const lastStepPoint = useRef<{ x: number; y: number } | null>(null); // a task waiting on the student's yes/no
@@ -596,27 +621,27 @@ export default function App() {
       }
     };
     let inFlight = false;
-    let queued: { wav: ArrayBuffer; pushToTalk: boolean } | null = null; // newest waiting utterance (never drop yours)
+    let queued: { wav: ArrayBuffer; pushToTalk: boolean; forced: boolean } | null = null; // newest waiting utterance (never drop yours)
     e.onPause = (p) => setPause(p);
-    e.onUtterance = async (wav, pushToTalk) => {
+    e.onUtterance = async (wav, pushToTalk, forced) => {
       if (inFlight) {
-        queued = { wav, pushToTalk };
+        queued = { wav, pushToTalk, forced };
         return;
       }
       inFlight = true;
       try {
-        await handle(wav, pushToTalk);
+        await handle(wav, pushToTalk, forced);
       } finally {
         inFlight = false;
         if (queued) {
           const q = queued;
           queued = null;
-          e.onUtterance(q.wav, q.pushToTalk);
+          e.onUtterance(q.wav, q.pushToTalk, q.forced);
         }
       }
     };
-    const handle = async (wav: ArrayBuffer, pushToTalk: boolean) => {
-      const direct = pushToTalk || Date.now() < followUntil.current; // you were clearly talking to Milo
+    const handle = async (wav: ArrayBuffer, pushToTalk: boolean, forced: boolean) => {
+      const direct = pushToTalk || !!partial.current || Date.now() < followUntil.current; // you were clearly talking to Milo
       const longEnough = e.voicedFrames * 1024 > 16000 * 1.0; // over ~1s of real talking
       if (direct) {
         setEarState("thinking");
@@ -644,9 +669,13 @@ export default function App() {
         }
         e.learnVoice(); // that was you, so remember how loud you are
         if (!w.rest) {
-          setMood("happy");
+          // Just "Hey Milo": chime and show "Yeah?" without talking, so his ears stay open for your command.
+          setMood("listening");
           followUntil.current = Date.now() + 10000;
-          say("Yeah?").then(() => setBubble(null));
+          chime();
+          setHeard(null);
+          setBubble("Yeah?");
+          setTimeout(() => setBubble((b) => (b === "Yeah?" ? null : b)), 4000);
           return;
         }
         text = w.rest;
@@ -654,8 +683,34 @@ export default function App() {
         text = stripWake(text).rest || text;
         if (text) e.learnVoice();
       }
-      followUntil.current = 0;
       if (!text) return;
+
+      // Join with the start of a sentence you paused in the middle of.
+      if (partial.current) {
+        text = `${partial.current.text} ${text}`.trim();
+        window.clearTimeout(partial.current.timer);
+        partial.current = null;
+      }
+      // Sounds unfinished ("go", "open the", "go to chrome and")? Keep listening for the rest.
+      if (!forced && soundsUnfinished(stripGo(text)) && !(isBareGo(text) && Date.now() - lastCommandAt.current < 30000)) {
+        const sofar = text;
+        partial.current = {
+          text: sofar,
+          // If nothing else comes, go with what we have.
+          timer: window.setTimeout(() => {
+            if (partial.current?.text !== sofar) return;
+            partial.current = null;
+            setHeard(sofar);
+            routeRef.current(stripGo(sofar));
+          }, 6000),
+        };
+        followUntil.current = Date.now() + 8000;
+        setHeard(`${sofar}…`);
+        setMood("listening");
+        if (e.mode === "off") listen();
+        return;
+      }
+      followUntil.current = 0;
       // A bare "go" means: do the last thing I asked (if it didn't happen).
       if (isBareGo(text)) {
         if (lastCommand.current) text = lastCommand.current;
@@ -668,6 +723,7 @@ export default function App() {
       } else {
         text = stripGo(text);
         lastCommand.current = text;
+        lastCommandAt.current = Date.now();
       }
       setHeard(text);
       setBubble(null);

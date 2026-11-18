@@ -11,12 +11,12 @@ export type EarState = "off" | "waiting" | "hearing" | "timeout";
 
 const RATE = 16000;
 const FRAME = 1024; // 64 ms per frame at 16 kHz
-const PRE_ROLL = 6; // ~380 ms kept from before speech starts
+const PRE_ROLL = 12; // ~770 ms kept from before speech starts (so soft first words aren't lost)
 const START_FRAMES = 4; // ~256 ms of voice to count as speech
 const MIN_VOICED_S = 0.5; // shorter than this is a cough/click, not words
 const VOICE_RATIO = 0.45; // share of energy that must sit in the human-voice band (300-3400 Hz)
-const END_SILENCE = 14; // ~900 ms of quiet ends the utterance (plain quiet room)
-const END_NO_VOICE = 24; // ~1.5 s without YOUR voice ends it, even if other people keep talking
+const END_SILENCE = 20; // ~1.3 s of quiet ends the utterance (plain quiet room)
+const END_NO_VOICE = 30; // ~1.9 s without YOUR voice ends it, even if other people keep talking
 const MAX_FRAMES = Math.round((15 * RATE) / FRAME); // 15 s cap (push-to-talk)
 const MAX_FRAMES_HF = Math.round((10 * RATE) / FRAME); // 8 s cap in hands-free so background chatter can't hang him
 const ONCE_TIMEOUT = Math.round((7 * RATE) / FRAME); // give up after 7 s of nothing
@@ -47,7 +47,7 @@ export class Ears {
   onState: (s: EarState) => void = () => {};
   /** 0..1 while waiting for you to finish (drives the "sending…" bar). */
   onPause: (progress: number) => void = () => {};
-  onUtterance: (wav: ArrayBuffer, pushToTalk: boolean) => void = () => {};
+  onUtterance: (wav: ArrayBuffer, pushToTalk: boolean, forced: boolean) => void = () => {};
 
   async setMode(mode: EarMode) {
     this.mode = mode;
@@ -113,7 +113,7 @@ export class Ears {
 
   /** Push-to-talk: "I'm done talking", send what we have now. */
   flush() {
-    if (this.speaking && this.speech.length > 4) this.finish();
+    if (this.speaking && this.speech.length > 4) this.finish(true);
     else if (this.mode === "once") this.setMode("off");
   }
 
@@ -185,13 +185,16 @@ export class Ears {
     // "Your voice" = clearly as loud as you were talking. Other people, quieter, don't reset the timer.
     const yours = rms > Math.max(off * 1.3, this.uttPeak * 0.5);
     this.noVoiceRun = yours ? 0 : this.noVoiceRun + 1;
-    if (this.noVoiceRun > 4) this.onPause(Math.min(1, (this.noVoiceRun - 4) / (END_NO_VOICE - 4)));
+    const quietP = this.quietRun / END_SILENCE;
+    const voiceP = this.noVoiceRun / END_NO_VOICE;
+    const p = Math.max(quietP, voiceP);
+    if (p > 0.25) this.onPause(Math.min(1, (p - 0.25) / 0.75));
     else this.onPause(0);
     const cap = this.mode === "always" ? MAX_FRAMES_HF : MAX_FRAMES;
     if (this.quietRun >= END_SILENCE || this.noVoiceRun >= END_NO_VOICE || this.speech.length >= cap) this.finish();
   }
 
-  private finish() {
+  private finish(forced = false) {
     const frames = this.speech;
     const energy = this.uttEnergy.filter((e) => e > 0.011).sort((a, b) => a - b);
     this.resetUtterance();
@@ -212,7 +215,7 @@ export class Ears {
     const once = this.mode === "once";
     if (once) this.setMode("off");
     else this.onState("waiting");
-    this.onUtterance(wav, once);
+    this.onUtterance(wav, once, forced);
   }
 }
 
