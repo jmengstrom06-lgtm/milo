@@ -387,6 +387,8 @@ export default function App() {
       setBubble("On it!");
       const r = await window.milo.task(task);
       setWorking(false);
+      // Done working: hop back to the corner so he's not sitting on top of what he just made.
+      moveTo(home(), "jump");
       if (!r.ok) {
         setMood("thinking");
         await say(r.text);
@@ -439,7 +441,19 @@ export default function App() {
           setBubble(st.say);
           tts.play(st.say, () => setSpeaking(true)).then(() => setSpeaking(false));
         }
-        if (st.action === "typing" || st.action === "type") setMood("writing");
+        if (st.action === "typing" || st.action === "type") {
+          // Step aside so the text he's typing isn't hidden behind him:
+          // go to the screen edge farther from where he clicked.
+          const p = lastStepPoint.current;
+          const W = window.innerWidth;
+          const x = p && p.x < W / 2 ? W - MILO_W - 20 : 20;
+          const y = clamp((p?.y ?? window.innerHeight / 2) - MILO_H / 2, MARGIN, window.innerHeight - MILO_H - 8);
+          lastStepPoint.current = null;
+          moveTo({ x, y }, "jump").then(() => {
+            setFacing(x > W / 2 ? "left" : "right");
+            setMood("writing");
+          });
+        }
         if (st.point && lastStepPoint.current && Math.hypot(st.point.x - lastStepPoint.current.x, st.point.y - lastStepPoint.current.y) < 30) {
           setMood("pointing"); // already standing there
         } else if (st.point) {

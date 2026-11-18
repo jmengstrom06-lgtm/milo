@@ -13,7 +13,7 @@ import path from "node:path";
 import dotenv from "dotenv";
 import { speak } from "./voice";
 import { transcribe } from "./ears";
-import { click, ensureBrowser, openApp, openFolder, openLatestDownload, openUrl, pressKeys, typeText } from "./hands";
+import { click, ensureBrowser, frontApp, openApp, openFolder, openLatestDownload, openUrl, pressKeys, typeText } from "./hands";
 import { plan } from "./quick";
 import { Action, askMilo, classify, ChatMessage, checkAnswer, locateInCrop, nextAction, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
@@ -235,6 +235,9 @@ ipcMain.handle("milo:task", async (_e, task: string) => {
   if (taskRunning) return { ok: false, text: "I'm already doing something. Say stop first." };
   taskRunning = true;
   taskAbort = false;
+  // Milo must never hold the keyboard while he works, or his typing lands in his own window.
+  overlay?.setFocusable(false);
+  overlay?.blur();
   globalShortcut.register("Escape", () => (taskAbort = true));
   const history: string[] = [];
 
@@ -279,6 +282,7 @@ ipcMain.handle("milo:task", async (_e, task: string) => {
     }
   } catch (err) {
     taskRunning = false;
+    overlay?.setFocusable(true);
     globalShortcut.unregister("Escape");
     return { ok: false, text: (err as Error).message };
   }
@@ -286,11 +290,13 @@ ipcMain.handle("milo:task", async (_e, task: string) => {
     // Hand the rest back to the renderer: it decides if it's homework ("…and solve the problem")
     // or more computer work ("…and write a poem").
     taskRunning = false;
+    overlay?.setFocusable(true);
     globalShortcut.unregister("Escape");
     return { ok: true, status: "quick", text: "", rest: quick.rest, did: history };
   }
 
   let lastClick: { x: number; y: number } | null = null; // screen point of the previous action if it was a click
+  let typeTarget: { x: number; y: number } | null = null; // last place he clicked (to refocus before typing)
   let lastSig = ""; // the previous action, to catch loops ("open Chrome", "open Chrome", "open Chrome"...)
   let stuck = 0;
   try {
@@ -352,13 +358,21 @@ ipcMain.handle("milo:task", async (_e, task: string) => {
         case "double_click":
           if (!screenPt) throw new Error("Click without a point");
           await click(screenPt.x, screenPt.y, a.action === "double_click" ? 2 : 1);
+          typeTarget = screenPt;
           history.push(`${a.action === "click" ? "Clicked" : "Double-clicked"} at (${a.x}, ${a.y}): ${a.say}`);
           break;
-        case "type":
+        case "type": {
           sendStep({ say: a.say, action: "typing", point: null });
+          // If Milo's own window somehow has the keyboard, click the box again before typing.
+          const front = await frontApp();
+          if (/^(Electron|Milo)$/i.test(front) && typeTarget) {
+            await click(typeTarget.x, typeTarget.y);
+            await sleep(250);
+          }
           await typeText(a.text ?? "");
           history.push(`Typed "${(a.text ?? "").slice(0, 80)}"`);
           break;
+        }
         case "key":
           await pressKeys(a.keys ?? "");
           history.push(`Pressed ${a.keys}`);
@@ -379,6 +393,7 @@ ipcMain.handle("milo:task", async (_e, task: string) => {
     return { ok: false, text: (err as Error).message };
   } finally {
     taskRunning = false;
+    overlay?.setFocusable(true);
     globalShortcut.unregister("Escape");
   }
 });
