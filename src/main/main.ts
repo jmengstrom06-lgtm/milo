@@ -21,6 +21,7 @@ import { runWebTask } from "./webagent";
 import { registerKit } from "./kitipc";
 import { registerLibrary } from "./library";
 import { quitAfterTest, runSelfTest, selfTestOn } from "./selftest";
+import { makeGamePlan } from "./homework";
 import { transcribe } from "./ears";
 import { stopNative } from "./native";
 import { account, onAccountChange, sendCode, signOut, startCallbackServer, userId, verifyCode } from "./account";
@@ -722,6 +723,19 @@ ipcMain.handle("milo:screen-ask", async (_e, question: string) => {
   if (!jpeg && !page?.text) return { ok: false, text: cap.ok ? "I couldn't see your screen." : cap.text };
   bb("screen", "ask", { q, front, usedPage: !!page?.text, url: page?.url });
   return askScreen(q, { jpeg, pageText: page?.canvasHeavy ? undefined : page?.text, url: page?.url, title: page?.title });
+});
+// "Start my homework": read the assignment that's open (page text + screenshot) and make a game plan.
+ipcMain.handle("milo:gameplan", async (_e, hint: string) => {
+  const front = await frontApp().catch(() => "");
+  let page: { text?: string; url?: string; title?: string; canvasHeavy?: boolean } | null = null;
+  if (bridgeConnected() && /Google Chrome/i.test(front)) page = await ext("snapshot", { max: 30 }, 8000).catch(() => null);
+  const cap = await captureScreen();
+  const jpeg = cap.ok ? toJpeg(cap.shot.full, 1568).b64 : undefined;
+  if (!jpeg && !page?.text) return { ok: false, text: cap.ok ? "I couldn't see your screen." : cap.text };
+  bb("homework", "plan_start", { front, usedPage: !!page?.text, url: page?.url });
+  const r = await makeGamePlan({ hint: String(hint ?? "").slice(0, 300), jpeg, pageText: page?.canvasHeavy ? undefined : page?.text, url: page?.url, title: page?.title });
+  if (r.ok) bb("homework", "plan", { found: r.data.found, title: r.data.title, steps: r.data.steps.length, minutes: r.data.total_minutes });
+  return r;
 });
 ipcMain.handle("milo:mac-say", (_e, text: string) => macSpeak(String(text ?? "")));
 ipcMain.handle("milo:hands-access", () =>

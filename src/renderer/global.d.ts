@@ -1,6 +1,9 @@
 export {};
 
 declare global {
+  type PlanStep = { text: string; minutes: number; kind: "read" | "solve" | "write" | "research" | "review" | "submit"; detail: string };
+  type GamePlan = { found: boolean; title: string; course: string; due: string; steps: PlanStep[]; total_minutes: number; say: string; missing: string };
+
   type MiloFluxEvent =
     | { type: "open" }
     | { type: "start"; turn: number }
@@ -126,6 +129,7 @@ declare global {
       saveClip: (wav: ArrayBuffer, note?: string) => void;
       bridgeStatus: () => Promise<boolean>;
       screenAsk: (q: string) => Promise<{ ok: boolean; text: string }>;
+      gameplan: (hint: string) => Promise<{ ok: true; data: GamePlan } | { ok: false; text: string }>;
       macSay: (text: string) => Promise<{ ok: true; audio: string } | { ok: false; text: string }>;
       onFlag: (fn: () => void) => () => void;
       setClickable: (clickable: boolean) => void;

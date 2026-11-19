@@ -14,7 +14,8 @@ import { setSounds, sfx, soundsOn } from "./sfx";
 import ToolPanel, { SavedTool, loadTools, saveTools } from "./ToolPanel";
 import QuizPanel, { QuizHandle } from "./QuizPanel";
 import { BriefCard, BriefLoader, BriefState, SignInPanel } from "./Brief";
-import { fastDecide, stripFiller, type DecideState } from "./decide";
+import { fastDecide, parseHomework, parsePlanVoice, stripFiller, type DecideState } from "./decide";
+import GamePlanCard, { findPlan, loadPlans, nextStep, planKey, savePlan, type SavedPlan } from "./GamePlan";
 import AccountChip from "./Account";
 import LockIn, { type LockInHandle } from "./LockIn";
 import { parseLockIn } from "../main/focusRules";
@@ -650,6 +651,183 @@ export default function App() {
     [say, hover, listen, look]
   );
 
+  // ---- "Start my stats homework": the Game Plan ---------------------------------------------------
+  // Finds the assignment (D2L), opens it, reads it, splits it into small steps (step 1 is tiny), coaches each step.
+  const [gp, setGp] = useState<SavedPlan | null>(null);
+  const [gpPop, setGpPop] = useState<number | null>(null);
+  const gpRef = useRef<SavedPlan | null>(null);
+  gpRef.current = gp;
+  const hwRun = useRef(0);
+  const showPlan = (sp: SavedPlan) => {
+    savePlan(sp);
+    gpRef.current = sp;
+    setGp(sp);
+  };
+  const stepLine = (sp: SavedPlan, i: number) => {
+    const st = sp.plan.steps[i];
+    return st ? `Step ${i + 1}: ${st.text}. About ${st.minutes} minutes.` : "";
+  };
+  const CHEER = ["Nice.", "Boom.", "One down.", "Let's go.", "Easy.", "Nailed it."];
+  const finishStep = async (i?: number) => {
+    const sp = gpRef.current;
+    if (!sp) return;
+    const k = i ?? nextStep(sp);
+    if (k < 0 || k >= sp.plan.steps.length || sp.done.includes(k)) return;
+    const next: SavedPlan = { ...sp, done: [...sp.done, k], at: Date.now() };
+    showPlan(next);
+    setGpPop(k);
+    setTimeout(() => setGpPop((x) => (x === k ? null : x)), 900);
+    bb("homework_step_done", { step: k + 1, of: sp.plan.steps.length });
+    const n = nextStep(next);
+    if (n < 0) {
+      sfx.success();
+      setMood("happy");
+      setConfetti({ x: posRef.current.x + MILO_W / 2, y: posRef.current.y + 40, seed: Date.now() });
+      await say(`That's every step of ${sp.plan.title}. Submit it and you're done. Proud of you.`);
+      setBubble(null);
+      return;
+    }
+    sfx.tick();
+    await say(`${CHEER[Math.floor(Math.random() * CHEER.length)]} ${stepLine(next, n)}`);
+    setBubble(null);
+  };
+  const undoStep = (i?: number) => {
+    const sp = gpRef.current;
+    if (!sp || !sp.done.length) return;
+    const k = i ?? sp.done[sp.done.length - 1];
+    showPlan({ ...sp, done: sp.done.filter((x) => x !== k), at: Date.now() });
+  };
+  /** "skip": that step moves to the end; everything stays checked off where it was. */
+  const skipStep = (i?: number) => {
+    const sp = gpRef.current;
+    if (!sp) return;
+    const k = i ?? nextStep(sp);
+    if (k < 0 || k >= sp.plan.steps.length - 1) return;
+    const order = sp.plan.steps.map((_s, j) => j).filter((j) => j !== k).concat(k);
+    const steps = order.map((j) => sp.plan.steps[j]);
+    const done = sp.done.map((d) => order.indexOf(d));
+    const next = { ...sp, plan: { ...sp.plan, steps }, done, at: Date.now() };
+    showPlan(next);
+    say(`Okay, saving that for last. ${stepLine(next, nextStep(next))}`).then(() => setBubble(null));
+  };
+  const stepWithMe = (i?: number, byVoice = false) => {
+    const sp = gpRef.current;
+    if (!sp) return;
+    const k = i ?? nextStep(sp);
+    const st = sp.plan.steps[k];
+    if (!st) return;
+    bb("homework_with_me", { step: k + 1, text: st.text });
+    setMode("teach");
+    look("teach", `Coach me through step ${k + 1} of my game plan for "${sp.plan.title}": ${st.text}. ${st.detail} Only this step. Find it on my screen.`, null, byVoice);
+  };
+  const planLockIn = () => {
+    const sp = gpRef.current;
+    if (!sp || lockOn) return;
+    const left = sp.plan.steps.reduce((a, st, j) => a + (sp.done.includes(j) ? 0 : st.minutes), 0);
+    lockRef.current?.start(Math.min(90, Math.max(10, left)), sp.plan.title);
+  };
+  const closePlan = () => {
+    gpRef.current = null;
+    setGp(null);
+  };
+  const startHomework = async (text: string, byVoice: boolean, hw: { target: string; here: boolean }) => {
+    const id = ++hwRun.current;
+    hush();
+    setChatOpen(false);
+    setRingOpen(false);
+    closePlan();
+    if (!hw.here && portal) {
+      let items: { title: string; course: string; due: string }[] = [];
+      try {
+        items = JSON.parse(localStorage.getItem("milo.briefItems") || "[]");
+      } catch {
+        /* ignore */
+      }
+      const cls = hw.target ? await window.milo.kit.classFor(hw.target).catch(() => null) : null;
+      const words = [hw.target, cls?.name, cls?.code].filter(Boolean).map((w) => String(w).toLowerCase());
+      const item = items.find((it) => !words.length || words.some((w) => `${it.course} ${it.title}`.toLowerCase().includes(w)));
+      const course = item?.course || cls?.name || hw.target;
+      if (item || course) {
+        setMood("happy");
+        await say(item ? `Let's go. Opening ${item.title}.` : `Let's go. Finding your ${course} homework.`);
+        if (id !== hwRun.current) return;
+        const ok = await runTask(
+          item
+            ? `In Chrome, go to ${portal}, open my ${item.course} course, and open the assignment "${item.title}"${item.due ? ` (due ${item.due})` : ""}. Stop as soon as the assignment's own page is open.`
+            : `In Chrome, go to ${portal}, open my ${course} course, and open the next assignment that's due. Stop as soon as the assignment's own page is open.`,
+          byVoice,
+          true
+        );
+        if (id !== hwRun.current) return;
+        if (!ok) {
+          await say("Open the assignment page and say “start this.” I'll take it from there.");
+          setBubble(null);
+          return;
+        }
+      }
+    }
+    setMood("looking");
+    setBubble("Reading the assignment…");
+    const r = await window.milo.gameplan(text);
+    if (id !== hwRun.current) return;
+    if (!r.ok) {
+      setMood("idle");
+      await say(r.text);
+      setBubble(null);
+      return;
+    }
+    if (!r.data.found) {
+      setMood("thinking");
+      await say(r.data.missing || "Open the assignment and say “start this.”");
+      setBubble(null);
+      return;
+    }
+    const key = planKey(r.data);
+    const old = loadPlans().find((x) => x.key === key && x.plan.steps.length === r.data.steps.length);
+    const sp: SavedPlan = { key, plan: r.data, done: old?.done ?? [], at: Date.now() };
+    showPlan(sp);
+    sfx.lock();
+    setMood("happy");
+    bb("homework_plan_shown", { title: r.data.title, steps: r.data.steps.length, minutes: r.data.total_minutes, resumed: !!old?.done.length });
+    await say(old?.done.length ? `Welcome back. ${stepLine(sp, nextStep(sp))}` : r.data.say);
+    setBubble(null);
+  };
+  const resumeHomework = async (text: string) => {
+    const sp = findPlan(text);
+    if (!sp) {
+      await say("No plan saved yet. Say “start my stats homework” and I'll make one.");
+      setBubble(null);
+      return;
+    }
+    hush();
+    setChatOpen(false);
+    showPlan({ ...sp, at: Date.now() });
+    sfx.lock();
+    await say(`Back to ${sp.plan.title}. ${stepLine(sp, nextStep(sp))}`);
+    setBubble(null);
+  };
+  /** While a plan is up: "next", "what's next", "do this step with me", "skip", "close the plan". */
+  const planVoice = (text: string, spoken: boolean): boolean => {
+    const sp = gpRef.current;
+    if (!sp) return false;
+    const v = parsePlanVoice(text, !!lessonRef.current);
+    if (!v) return false;
+    bb("route_instant", { text, kind: "plan_voice", ...v });
+    const idx = v.step ? v.step - 1 : undefined;
+    if (v.do === "done") void finishStep(idx);
+    else if (v.do === "with_me") stepWithMe(idx, spoken);
+    else if (v.do === "skip") skipStep(idx);
+    else if (v.do === "undo") undoStep(idx);
+    else if (v.do === "next_info") {
+      const n = nextStep(sp);
+      say(n < 0 ? "Every step's done. Submit it!" : stepLine(sp, n)).then(() => setBubble(null));
+    } else {
+      closePlan();
+      say("Saved. Say “pick up my homework” anytime.").then(() => setBubble(null));
+    }
+    return true;
+  };
+
   /** "Open chrome, find a worksheet, and complete it": the computer part first, then the screen job on what's open. */
   const runChain = async (steps: Intent[], spoken: boolean) => {
     const last = steps[steps.length - 1];
@@ -1153,6 +1331,21 @@ export default function App() {
         const p = parseLockIn(lt);
         bb("route_instant", { text, kind: "lockin", minutes: p.minutes, topic: p.topic });
         lockRef.current?.start(p.minutes ?? 25, p.topic);
+        return;
+      }
+    }
+    // "Start my stats homework" / "pick up my bio lab", and the plan's own words ("next", "do this step with me").
+    {
+      if (planVoice(text, spoken)) return;
+      const hw = parseHomework(text);
+      if (hw?.kind === "start") {
+        bb("route_instant", { text, kind: "homework", target: hw.target, here: hw.here });
+        void startHomework(text, spoken, hw);
+        return;
+      }
+      if (hw?.kind === "resume") {
+        bb("route_instant", { text, kind: "homework_resume" });
+        void resumeHomework(text);
         return;
       }
     }
@@ -1764,8 +1957,9 @@ export default function App() {
       // "what can you do", "open sketch", "hold this", "flag that". Those happen the moment you finish.
       const cleaned = stripGo(text);
       const sure = fastDecide(cleaned, { kitOpen: null, researchOpen: false, toolOpen: false, lessonOpen: false, hasLastAnswer: false });
-      if (sure && ["kit_menu", "open_kit", "hold", "flag"].includes(sure.do)) {
-        bb("card_skipped", { text: cleaned, do: sure.do });
+      const planWords = !!gpRef.current && !!parsePlanVoice(cleaned, !!lessonRef.current);
+      if ((sure && ["kit_menu", "open_kit", "hold", "flag"].includes(sure.do)) || parseHomework(cleaned) || planWords) {
+        bb("card_skipped", { text: cleaned, do: sure?.do ?? (planWords ? "plan_voice" : "homework") });
         return runPending(cleaned);
       }
       setPendingCmd(cleaned, cleaned !== text.trim());
@@ -1972,7 +2166,7 @@ export default function App() {
   // ---- self-test hooks (dev only) -------------------------------------------------
   // `npm run test:milo` drives Milo through these: the same path your voice takes after it becomes text.
   const testSnap = useRef<Record<string, unknown>>({});
-  testSnap.current = { speaking, bubble, heard, pending: pending?.text ?? null, chatOpen, ringOpen, kitApp, lockOn, research: !!researchQ, tool: !!tool, quiz: !!quiz, notebook: !!box, mood, pos, name };
+  testSnap.current = { plan: gp ? { title: gp.plan.title, steps: gp.plan.steps.length, done: gp.done.length } : null, speaking, bubble, heard, pending: pending?.text ?? null, chatOpen, ringOpen, kitApp, lockOn, research: !!researchQ, tool: !!tool, quiz: !!quiz, notebook: !!box, mood, pos, name };
   useEffect(() => {
     if (!location.protocol.startsWith("http")) return; // dev server only, never in the packaged app
     (window as unknown as { __milo: unknown }).__milo = {
@@ -1982,6 +2176,7 @@ export default function App() {
       key: (k: string) => window.dispatchEvent(new KeyboardEvent("keydown", { key: k })),
       move: (x: number, y: number) => setPos({ x, y }),
       chat: (on: boolean) => setChatOpen(on),
+      plan: (p: GamePlan) => showPlan({ key: planKey(p), plan: p, done: [], at: Date.now() }),
       quietEars: () => {
         testDeaf.current = true;
         ears.current?.setMode("off");
@@ -2055,6 +2250,18 @@ export default function App() {
         ? { left: clamp(a.x - w - 12, 16, W - w - 16), top, width: w, height: h }
         : { left: clamp(a.x + MILO_W + 12, 16, W - w - 16), top, width: w, height: h };
   }
+
+  // Game plan card: beside Milo; shrinks to a pill at the top while another panel or his notebook is up.
+  const gpMini = !!box || !!lesson || !!kitApp || !!researchQ || !!tool || !!quiz || chatOpen;
+  const gpStyle: React.CSSProperties = (() => {
+    if (gpMini) return { left: W / 2, top: 12, translate: "-50% 0" };
+    const w = 372;
+    const h = Math.min(H - 32, 190 + (gp?.plan.steps.length ?? 4) * 46);
+    const top = clamp(pos.y + MILO_H - h, 16, H - h - 16);
+    return pos.x > W / 2
+      ? { left: clamp(pos.x - w - 14, 16, W - w - 16), top, width: w, maxHeight: H - 32 }
+      : { left: clamp(pos.x + MILO_W + 14, 16, W - w - 16), top, width: w, maxHeight: H - 32 };
+  })();
 
   // While Milo is using the computer, his own panels get out of the way (they come back when he's done).
   const panelStyle: React.CSSProperties = working ? { ...rpStyle, visibility: "hidden", pointerEvents: "none" } : rpStyle;
@@ -2332,6 +2539,20 @@ export default function App() {
       {!bubble && !pending && !heard && earState === "thinking" && <Bubble text="…" style={bStyle} heard />}
       {!bubble && !pending && !heard && live && earState !== "thinking" && <Bubble text={live} style={bStyle} heard />}
       {confetti && <Confetti key={confetti.seed} {...confetti} />}
+      {gp && !working && (
+        <GamePlanCard
+          sp={gp}
+          style={gpStyle}
+          hover={hover}
+          lockedIn={lockOn}
+          mini={gpMini}
+          justDone={gpPop}
+          onToggle={(i) => (gp.done.includes(i) ? undoStep(i) : void finishStep(i))}
+          onWithMe={(i) => stepWithMe(i)}
+          onLockIn={planLockIn}
+          onClose={closePlan}
+        />
+      )}
       <LockIn
         ref={lockRef}
         miloPos={pos}

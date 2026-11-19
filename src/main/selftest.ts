@@ -342,6 +342,35 @@ export async function runSelfTest(win: BrowserWindow) {
   await make("T2", "Sheet ('make a table of the planets and their number of moons')", "make a table of the planets and their number of moons", "sheet", 15000);
   await make("T3", "Plan ('plan my week for my calculus exam on Friday')", "plan my week for my calculus exam on Friday", "planner", 20000);
 
+  // ======================= START MY HOMEWORK =======================
+  await test("H1", "Study power", "'Help me start this' reads the screen and answers sensibly", async () => {
+    // Whatever's on screen during the test isn't an assignment, so the right answer is a plan OR a clear "open the assignment".
+    await hear("help me start this");
+    const ms = await waitFor("s.plan || (s.bubble && !/reading the assignment/i.test(s.bubble) && /open|assignment|page|start this/i.test(s.bubble))", 45000);
+    const s = await S();
+    return { ms, score: ms < 0 ? 0 : 1, detail: ms < 0 ? `no plan and no guidance (bubble: "${String(s.bubble ?? "").slice(0, 60)}")` : s.plan ? `made a ${s.plan.steps}-step plan` : `said: "${String(s.bubble).slice(0, 80)}"` };
+  });
+  await test("H2", "Control", "Game plan voice: 'next', 'what's next', 'close the plan'", async () => {
+    await js(`window.__milo.plan(${JSON.stringify({
+      found: true, title: "Test Homework", course: "TEST 101", due: "Fri", total_minutes: 30, say: "", missing: "",
+      steps: [
+        { text: "Read the prompt", minutes: 4, kind: "read", detail: "Skim it." },
+        { text: "Solve questions 1 to 3", minutes: 12, kind: "solve", detail: "Show work." },
+        { text: "Check and submit", minutes: 6, kind: "submit", detail: "Upload it." },
+      ],
+    })})`);
+    if ((await waitFor("s.plan && document.querySelector('.gp')", 3000)) < 0) return { score: 0, detail: "plan card didn't show" };
+    await hear("next");
+    const done = await waitFor("s.plan && s.plan.done === 1", 3000);
+    await reset();
+    await hear("what's next");
+    const info = await waitFor("s.bubble && /step 2/i.test(s.bubble)", 8000);
+    await hear("close the plan");
+    const closed = await waitFor("!s.plan", 3000);
+    const score = (done < 0 ? 0 : 0.4) + (info < 0 ? 0 : 0.3) + (closed < 0 ? 0 : 0.3);
+    return { score, detail: [done < 0 ? "'next' didn't check it off" : `'next' checked off in ${done}ms`, info < 0 ? "'what's next' didn't say step 2" : "told step 2", closed < 0 ? "plan stayed open" : "closed"].join("; ") };
+  });
+
   // ======================= PERSONAL =======================
   await test("M1", "Personal", "Remembers your name", async () => {
     await hear("call me Jake");
@@ -387,6 +416,8 @@ export async function runSelfTest(win: BrowserWindow) {
     /* ignore */
   }
   await js(`window.__milo.move(${startPos.x}, ${startPos.y})`).catch(() => {});
+  // game plans the test made don't stay in "pick up my homework"
+  await js(`(() => { const k = "milo.gameplans"; try { const xs = JSON.parse(localStorage.getItem(k) || "[]"); localStorage.setItem(k, JSON.stringify(xs.filter((x) => x.at < ${libStart}))); } catch {} })()`).catch(() => {});
   off();
 
   // ---------- score + report ----------

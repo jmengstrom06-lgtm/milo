@@ -102,3 +102,37 @@ describe("misheard commands", () => {
     expect(stripFiller("I opened it already")).toBe("I opened it already");
   });
 });
+
+import { parseHomework, parsePlanVoice } from "../src/renderer/decide";
+describe("start my homework", () => {
+  it.each([
+    ["Milo, start my stats homework", "stats"],
+    ["let's start my bio lab", "bio"],
+    ["help me get started on my English essay", "english"],
+    ["I need to work on my calc problem set", "calc"],
+    ["start my homework", ""],
+    ["start my homework for chem", "chem"],
+    ["make a game plan for my history paper", "history"],
+  ])("%s", (said, target) => expect(parseHomework(said)).toEqual({ kind: "start", target, here: false }));
+  it.each(["start this", "help me start this", "let's tackle this assignment", "get started", "break this down"])("here: %s", (said) =>
+    expect(parseHomework(said)).toMatchObject({ kind: "start", here: true }));
+  it.each([["pick up my stats homework", "stats"], ["resume my essay", ""], ["where was i", ""], ["back to my bio lab", "bio"]])("resume: %s", (said, target) =>
+    expect(parseHomework(said)).toEqual({ kind: "resume", target, here: false }));
+  it.each(["start a timer", "what's my homework", "do this whole worksheet", "open sketch", "lock in for 25 minutes", "start the lock in"])("not: %s", (said) => expect(parseHomework(said)).toBeNull());
+});
+describe("plan voice", () => {
+  it("done / next", () => {
+    expect(parsePlanVoice("next", false)).toEqual({ do: "done", step: undefined });
+    expect(parsePlanVoice("I finished step 2", false)).toEqual({ do: "done", step: 2 });
+    expect(parsePlanVoice("done", true)).toBeNull(); // notebook owns "done" while a lesson is up
+    expect(parsePlanVoice("check it off", true)).toMatchObject({ do: "done" });
+  });
+  it("with me / info / skip / close", () => {
+    expect(parsePlanVoice("do this step with me", false)).toMatchObject({ do: "with_me" });
+    expect(parsePlanVoice("walk me through step three", false)).toEqual({ do: "with_me", step: 3 });
+    expect(parsePlanVoice("what's next", false)).toEqual({ do: "next_info" });
+    expect(parsePlanVoice("skip this step", false)).toMatchObject({ do: "skip" });
+    expect(parsePlanVoice("close the plan", false)).toEqual({ do: "close" });
+    expect(parsePlanVoice("what's the capital of France", false)).toBeNull();
+  });
+});

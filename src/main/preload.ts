@@ -64,6 +64,7 @@ contextBridge.exposeInMainWorld("milo", {
   macSay: (text: string) => ipcRenderer.invoke("milo:mac-say", text),
   bridgeStatus: () => ipcRenderer.invoke("milo:bridge-status"),
   screenAsk: (q: string) => ipcRenderer.invoke("milo:screen-ask", q),
+  gameplan: (hint: string) => ipcRenderer.invoke("milo:gameplan", hint),
   onFlag: (fn: () => void) => {
     const l = () => fn();
     ipcRenderer.on("milo:flag", l);
