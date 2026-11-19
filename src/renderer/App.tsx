@@ -1952,6 +1952,22 @@ export default function App() {
   const H = window.innerHeight;
   const panelW = 360;
   const panelLeft = clamp(pos.x + MILO_W / 2 - panelW / 2, MARGIN, W - panelW - MARGIN);
+  // Chat panel: above Milo if it fits, else below him, else beside him. Always fully on screen.
+  const chatStyle = ((): React.CSSProperties => {
+    const GAP = 16;
+    const FULL = 420; // its normal height
+    const MIN = 260; // smallest that's still comfortable
+    const above = pos.y - GAP - MARGIN;
+    const below = H - (pos.y + MILO_H + GAP) - MARGIN;
+    if (above >= FULL || (above >= MIN && above >= below)) return { left: panelLeft, bottom: H - pos.y + GAP, width: panelW, maxHeight: Math.min(FULL, above) };
+    if (below >= MIN) return { left: panelLeft, top: pos.y + MILO_H + GAP, width: panelW, maxHeight: Math.min(FULL, below) };
+    const h = Math.min(FULL, H - 2 * MARGIN);
+    const top = clamp(pos.y + MILO_H / 2 - h / 2, MARGIN, H - h - MARGIN);
+    const right = W - (pos.x + MILO_W) - GAP - MARGIN;
+    return right >= panelW || pos.x - GAP - MARGIN < panelW
+      ? { left: clamp(pos.x + MILO_W + GAP, MARGIN, W - panelW - MARGIN), top, width: panelW, maxHeight: h }
+      : { left: pos.x - GAP - panelW, top, width: panelW, maxHeight: h };
+  })();
 
   let nbStyle: React.CSSProperties = {};
   if (box) {
@@ -2271,7 +2287,7 @@ export default function App() {
       />
 
       {chatOpen && (
-        <div className="panel" style={{ left: panelLeft, bottom: H - pos.y + 16, width: panelW }} onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)}>
+        <div className="panel" style={chatStyle} onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)}>
           <div className="panel__head">
             <span>Milo</span>
             <div className="panel__actions">
