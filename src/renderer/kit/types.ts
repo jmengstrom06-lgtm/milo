@@ -64,3 +64,7 @@ export const SUBJECT_NAMES: Record<Subject, string> = {
   math: "Math", stats: "Statistics", science: "Science", english: "English / Writing", history: "History / Social science",
   language: "Language", cs: "Computer science", business: "Business / Econ", arts: "Arts", other: "Other",
 };
+
+// The class library: everything Milo makes is filed under a class (mirror of src/main/library.ts).
+export type LibApp = "sketch" | "sheet" | "study" | "planner";
+export type LibItem = { id: string; classId: string | null; app: LibApp; title: string; created: number; updated: number; data: unknown };

@@ -7,6 +7,13 @@ function on(channel: string, cb: () => void) {
 }
 
 contextBridge.exposeInMainWorld("milo", {
+  lib: {
+    save: (item: unknown) => ipcRenderer.invoke("lib:save", item),
+    list: (f?: unknown) => ipcRenderer.invoke("lib:list", f),
+    move: (id: string, classId: string | null) => ipcRenderer.invoke("lib:move", id, classId),
+    remove: (id: string) => ipcRenderer.invoke("lib:delete", id),
+    counts: () => ipcRenderer.invoke("lib:counts"),
+  },
   kit: {
     study: (request: string, mode: string, count: number, context?: string) => ipcRenderer.invoke("kit:study", request, mode, count, context),
     mastery: () => ipcRenderer.invoke("kit:mastery"),

@@ -11,8 +11,9 @@ import SheetView, { type SheetHandle } from "./SheetView";
 import SketchView from "./SketchView";
 import StudyDeck, { type StudyHandle } from "./StudyDeck";
 import { ClassBar, ClassesEditor } from "./Classes";
+import Library, { classLabel, matchClass, parseBrowse, RecentShelf, SavedPill, type LibFilter } from "./Library";
 import { startersFor } from "./subjects";
-import { KIT_APPS, SUBJECT_NAMES, type ClassStore, type GraphSpec, type KitApp, type Plan, type PocketItem, type Sketch, type StudyMode, type StudySet, type Subject, type Table } from "./types";
+import { KIT_APPS, SUBJECT_NAMES, type ClassStore, type GraphSpec, type KitApp, type Plan, type PocketItem, type Sketch, type StudyMode, type StudySet, type Subject, type Table, type LibApp, type LibItem } from "./types";
 
 export type KitHandle = {
   open: (app: KitApp, request?: string) => void;
@@ -104,17 +105,72 @@ const KitHost = forwardRef<KitHandle, {
     window.milo.kit.classFor(request).then((c) => {
       if (c && c.id !== classes.active) pickClass(c.id);
     });
+  // The class library: what's on screen is saved under a class; the library shows every class's folder.
+  const [item, setItem] = useState<{ id: string; app: LibApp; classId: string | null; fresh: boolean } | null>(null);
+  const [lib, setLib] = useState<{ filter: LibFilter; cls: string | null | "all" } | null>(null);
+  const [tableKey, setTableKey] = useState(0);
+  const sheetSave = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Save what Milo just made under the right class: the one named in the request, else the class that's on. */
+  const file = async (a: LibApp, title: string, data: unknown, request: string, isEdit = false) => {
+    if (isEdit && item && item.app === a) {
+      await window.milo.lib.save({ id: item.id, app: a, title, data });
+      return;
+    }
+    const named = matchClass(request, classes.classes);
+    const classId = named?.id ?? classes.active ?? null;
+    const saved = await window.milo.lib.save({ app: a, title, data, classId });
+    if (!saved) return;
+    setItem({ id: saved.id, app: a, classId: saved.classId, fresh: true });
+    setTimeout(() => setItem((it) => (it && it.id === saved.id ? { ...it, fresh: false } : it)), 2600);
+  };
+  const moveItem = async (classId: string | null) => {
+    if (!item) return;
+    await window.milo.lib.move(item.id, classId);
+    setItem({ ...item, classId, fresh: true });
+    setTimeout(() => setItem((it) => (it ? { ...it, fresh: false } : it)), 2600);
+  };
+  const openLibrary = (filter: LibFilter, cls?: string | null | "all") => {
+    req.current++;
+    setLoading(null);
+    setError(null);
+    setEditClasses(null);
+    setLib({ filter, cls: cls === undefined ? classes.active ?? "all" : cls });
+  };
+  /** Reopen something from the library, exactly as it was. */
+  const openItem = (it: LibItem) => {
+    req.current++;
+    setLoading(null);
+    setError(null);
+    setLib(null);
+    if (it.app === "sketch") setSketch(it.data as Sketch);
+    else if (it.app === "sheet") {
+      setTable(it.data as Table);
+      setTableKey((k) => k + 1);
+    } else if (it.app === "study") {
+      const d = it.data as { set: StudySet; mode: StudyMode };
+      setStudy({ set: d.set, mode: d.mode, id: Date.now() });
+    } else if (it.app === "planner") setPlan(it.data as Plan);
+    show(it.app);
+    setItem({ id: it.id, app: it.app, classId: it.classId, fresh: false });
+    if (it.classId && it.classId !== classes.active) pickClass(it.classId);
+  };
+  const libFilterFor = (a: KitApp | null): LibFilter => (a === "sketch" || a === "sheet" || a === "study" || a === "planner" ? a : a === "notes" ? "notes" : "all");
   const studyRef = useRef<StudyHandle>(null);
   const notesRef = useRef<NotesHandle>(null);
   const sheetRef = useRef<SheetHandle>(null);
   const req = useRef(0);
 
   const show = (a: KitApp | null) => {
+    if (a !== app) {
+      setItem(null);
+      setLib(null);
+    }
     setApp(a);
     p.onOpenChange(a);
   };
   const begin = (a: KitApp, text: string) => {
     show(a);
+    setLib(null);
     setError(null);
     setLoading(text);
     return ++req.current;
@@ -135,6 +191,7 @@ const KitHost = forwardRef<KitHandle, {
     if (!r.ok || !r.data.items.length) return fail(id, r.ok ? "No problems came back." : r.text);
     setLoading(null);
     setStudy({ set: r.data, mode: m, id: Date.now() });
+    void file("study", r.data.title, { set: r.data, mode: m }, request);
   };
   /** "Shade above 80" / "add labels": change what's showing instead of starting over. */
   const editRequest = (r: string) =>
@@ -153,6 +210,7 @@ const KitHost = forwardRef<KitHandle, {
     setLoading(null);
     setSketch(r.data);
     p.say(r.data.say);
+    void file("sketch", r.data.title, r.data, request, request.includes("(Change this existing"));
   };
   const loadTable = async (request: string) => {
     const id = begin("sheet", "Building the table");
@@ -161,7 +219,9 @@ const KitHost = forwardRef<KitHandle, {
     if (!r.ok) return fail(id, r.text);
     setLoading(null);
     setTable(r.data);
+    setTableKey((k) => k + 1);
     p.say(r.data.say);
+    void file("sheet", r.data.title, r.data, request);
   };
   const loadPlan = async (request: string) => {
     const id = begin("planner", "Planning your week");
@@ -171,6 +231,7 @@ const KitHost = forwardRef<KitHandle, {
     setLoading(null);
     setPlan(r.data);
     p.say(r.data.say);
+    void file("planner", r.data.title, r.data, request);
   };
   const askNotes = async (q: string) => {
     const id = begin("notes", "Looking through your notes");
@@ -201,6 +262,26 @@ const KitHost = forwardRef<KitHandle, {
   const open = (a: KitApp, request = "") => {
     const r = request.trim();
     setEditClasses(null);
+    const browse = r ? parseBrowse(r) : null;
+    if (browse) {
+      const named = matchClass(r, classes.classes);
+      const filter = browse.filter === "all" && a !== "pocket" ? libFilterFor(a) : browse.filter;
+      if (browse.latest) {
+        const want = filter === "all" || filter === "notes" ? undefined : filter;
+        window.milo.lib.list({ classId: named ? named.id : "all", app: want ?? "all" }).then((xs) => {
+          if (xs[0]) openItem(xs[0]);
+          else {
+            show(a);
+            openLibrary(filter, named ? named.id : "all");
+          }
+        });
+        return;
+      }
+      show(a === "pocket" ? "study" : a);
+      openLibrary(filter, named ? named.id : /\b(all|every)\b/.test(r.toLowerCase()) ? "all" : undefined);
+      p.say(named ? `Here's your ${classLabel(named)} folder.` : "Here's everything you've saved.");
+      return;
+    }
     if (r) noteClass(r);
     const meaningful = r && !/^(open |show |pull up |bring up )?(up )?(your |my |the )?(notes|study( deck)?|sketch( ?pad)?|sheet|spreadsheet|planner|pocket|kit|tool ?box|tools)( app)?$/i.test(r);
     setError(null);
@@ -239,6 +320,21 @@ const KitHost = forwardRef<KitHandle, {
       const t = clean(text);
       if (editClasses && !/^(close|stop|go|never ?mind|cancel)\b/.test(t) && !/\b(close|open|chrome|move)\b/.test(t)) {
         setEditClasses({ seed: text });
+        return true;
+      }
+      // "save this to bio" / "move it to my stats class"
+      const mv = t.match(/^(?:save|put|move|file|add|keep|stick) (?:this|it|that)(?: (?:drawing|sketch|diagram|graph|sheet|table|chart|set|plan|one))?\s+(?:to|in|into|under|for|with) (.+)$/);
+      if (mv) {
+        const c = matchClass(mv[1], classes.classes);
+        if (!item) p.say("There's nothing to file yet. Make something first.");
+        else if (!c) p.say(`Which class? I have ${classes.classes.map((k) => classLabel(k)).join(", ") || "none yet"}.`);
+        else void moveItem(c.id).then(() => p.say(`Saved to ${classLabel(c)}.`));
+        return true;
+      }
+      // "show my math sketches" / "open my bio folder" / "open my last drawing"
+      const br = parseBrowse(t);
+      if (br) {
+        open(app, text);
         return true;
       }
       if (/^(switch to|change to|go to|use|i'?m (working on|doing|studying)( for)?|let'?s do|now) (my |the )?.{2,40}\b(class|course)$/.test(t)) {
@@ -320,6 +416,7 @@ const KitHost = forwardRef<KitHandle, {
     },
     describe: () => {
       if (!app) return "";
+      if (lib) return `Milo's library of saved work (folder: ${lib.cls === "all" ? "all classes" : classLabel(classes.classes.find((c) => c.id === lib.cls))})`;
       const name = KIT_APPS.find((x) => x.id === app)!.name;
       const cls = activeClass ? ` (class: ${activeClass.name})` : "";
       if (app === "sheet" && table) return `Milo's Sheet${cls}, showing ${sheetRef.current?.describe() ?? `"${table.title}"`}`;
@@ -383,6 +480,21 @@ const KitHost = forwardRef<KitHandle, {
         }}
       />
     );
+  else if (lib)
+    body = (
+      <Library
+        classes={classes}
+        initialClass={lib.cls}
+        initialFilter={lib.filter}
+        onOpen={openItem}
+        onOpenNote={(n) => {
+          setLib(null);
+          setNotesFocus(n.id);
+          show("notes");
+        }}
+        onBack={() => setLib(null)}
+      />
+    );
   else if (loading) body = <KitLoading text={loading} />;
   else if (error) body = <div className="rp-error">{error}</div>;
   else if (app === "study") {
@@ -396,7 +508,10 @@ const KitHost = forwardRef<KitHandle, {
         onMore={(r, m) => loadStudy(r, m)}
       />
     ) : (
-      <StudyStart subject={subject} onGo={(r, m) => loadStudy(r, m)} />
+      <>
+        <StudyStart subject={subject} onGo={(r, m) => loadStudy(r, m)} />
+        <RecentShelf app="study" cls={activeClass} onOpen={openItem} onAll={() => openLibrary("study")} />
+      </>
     );
   } else if (app === "sketch") {
     body = sketch ? (
@@ -405,13 +520,20 @@ const KitHost = forwardRef<KitHandle, {
       <>
         <AskBox placeholder={starters.sketchHint} onGo={loadSketch} />
         <Starters label={activeClass ? `For ${activeClass.code || activeClass.name}` : "Try"} items={starters.sketch} onGo={loadSketch} />
+        <RecentShelf app="sketch" cls={activeClass} onOpen={openItem} onAll={() => openLibrary("sketch")} />
       </>
     );
   } else if (app === "sheet") {
     body = table ? (
       <SheetView
+        key={tableKey}
         ref={sheetRef}
         table={table}
+        onChange={(t: Table) => {
+          if (!item || item.app !== "sheet") return;
+          if (sheetSave.current) clearTimeout(sheetSave.current);
+          sheetSave.current = setTimeout(() => void window.milo.lib.save({ id: item.id, app: "sheet", title: t.title, data: t }), 800);
+        }}
         say={(t) => p.say(t)}
         needRoom={() => {
           if (p.size === "compact") p.onSize("half");
@@ -419,6 +541,7 @@ const KitHost = forwardRef<KitHandle, {
         onBig={(spec: GraphSpec, t: string) => {
           setSketch({ title: t, say: "Here's your data.", graph: spec, image_prompt: null });
           show("sketch");
+          setItem(null);
           p.onSize("full");
         }}
       />
@@ -426,19 +549,41 @@ const KitHost = forwardRef<KitHandle, {
       <>
         <AskBox placeholder={starters.sheetHint} onGo={loadTable} />
         <Starters label={activeClass ? `For ${activeClass.code || activeClass.name}` : "Try"} items={starters.sheet} onGo={loadTable} />
+        <RecentShelf app="sheet" cls={activeClass} onOpen={openItem} onAll={() => openLibrary("sheet")} />
       </>
     );
   } else if (app === "planner") {
-    body = plan ? <PlannerView plan={plan} say={(t) => p.say(t)} onPractice={(topic) => loadStudy(`practice problems: ${topic}`, "practice")} onRebuild={() => loadPlan("Rebuild my study plan")} /> : <AskBox placeholder="Plan my week for Exam 3 on Nov 25…" onGo={loadPlan} />;
+    body = plan ? <PlannerView plan={plan} say={(t) => p.say(t)} onPractice={(topic) => loadStudy(`practice problems: ${topic}`, "practice")} onRebuild={() => loadPlan("Rebuild my study plan")} /> : (
+      <>
+        <AskBox placeholder="Plan my week for Exam 3 on Nov 25…" onGo={loadPlan} />
+        <RecentShelf app="planner" cls={activeClass} onOpen={openItem} onAll={() => openLibrary("planner")} />
+      </>
+    );
   } else if (app === "notes") body = <NotesView ref={notesRef} cls={activeClass} focusId={notesFocus} answer={notesAnswer} say={(t) => p.say(t)} onStudy={studyNote} />;
   else body = <PocketView version={pocketV} onDrop={(it: PocketItem) => (async () => { await window.milo.kit.pocketCopy(it.id); show(null); await p.runTask(`switch to ${it.from && !/milo|electron/i.test(it.from) ? it.from : "the app I was just using"} and paste`); })()} />;
 
   return (
     <KitPanel
       app={app}
-      kicker={editClasses ? "Your classes" : `${meta.name}${activeClass ? ` · ${activeClass.code || activeClass.name}` : study && app === "study" ? ` · ${study.set.subject}` : ""}`}
-      sub={editClasses ? null : <ClassBar store={classes} onPick={pickClass} onEdit={() => setEditClasses({})} />}
-      title={editClasses ? "Every app fits the class you pick" : stripMath(title)}
+      kicker={editClasses ? "Your classes" : lib ? "Library" : `${meta.name}${activeClass ? ` · ${activeClass.code || activeClass.name}` : study && app === "study" ? ` · ${study.set.subject}` : ""}`}
+      sub={
+        editClasses || lib ? null : (
+          <div className="kit-subrow">
+            <ClassBar store={classes} onPick={pickClass} onEdit={() => setEditClasses({})} />
+            {item && !lib && !loading && <SavedPill classes={classes.classes} classId={item.classId} fresh={item.fresh} onMove={(id) => void moveItem(id)} />}
+          </div>
+        )
+      }
+      actions={
+        app !== "pocket" && !editClasses ? (
+          <button className={`rp-icon ${lib ? "rp-icon--on" : ""}`} onClick={() => (lib ? setLib(null) : openLibrary(libFilterFor(app)))} title="Your saved work, by class">
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden>
+              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+            </svg>
+          </button>
+        ) : null
+      }
+      title={editClasses ? "Every app fits the class you pick" : lib ? "Your saved work" : stripMath(title)}
       working={!!loading}
       size={p.size}
       onSize={p.onSize}

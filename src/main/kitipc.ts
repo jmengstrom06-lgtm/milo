@@ -7,6 +7,7 @@ import path from "node:path";
 import { log as bb } from "./blackbox";
 import { bridgeConnected, call as ext } from "./bridge";
 import { classFor, classLine, loadClasses, parseClasses, saveClasses, type Klass } from "./classes";
+import { unfileMissing } from "./library";
 import { askNotes, tableOps, checkStudy, generateImage, makeNote, makePlan, makeSketch, makeStudySet, makeTable, setClassCtx } from "./kit";
 
 type Deps = {
@@ -161,7 +162,11 @@ export function registerKit(d: Deps) {
 
   // ---- Your classes
   ipcMain.handle("kit:classes", () => loadClasses());
-  ipcMain.handle("kit:classes-save", (_e, classes: Klass[], active: string | null) => saveClasses({ classes: Array.isArray(classes) ? classes : [], active: active ?? null }));
+  ipcMain.handle("kit:classes-save", (_e, classes: Klass[], active: string | null) => {
+    const saved = saveClasses({ classes: Array.isArray(classes) ? classes : [], active: active ?? null });
+    unfileMissing(saved.classes.map((c) => c.id)); // a removed class's work stays, just unfiled
+    return saved;
+  });
   ipcMain.handle("kit:class-active", (_e, id: string | null) => {
     const s = loadClasses();
     return saveClasses({ ...s, active: id || null });

@@ -287,13 +287,24 @@ const SheetView = forwardRef<SheetHandle, {
   say: (t: string) => Promise<void>;
   needRoom: () => void;
   className?: string;
-}>(function SheetView({ table, onBig, say, needRoom }, ref) {
+  onChange?: (t: Table) => void;
+}>(function SheetView({ table, onBig, say, needRoom, onChange }, ref) {
   const [title, setTitle] = useState(table.title);
   const [cols, setCols] = useState<string[]>(table.columns);
   const [rows, setRows] = useState<Cell[][]>(table.rows);
   const [chart, setChart] = useState<ChartPick | null>(table.chart ?? null);
   const [history, setHistory] = useState<{ cols: string[]; rows: Cell[][]; chart: ChartPick | null }[]>([]);
   const [busy, setBusy] = useState(false);
+  // Every edit is saved back to the library (skips the first render, which is just the table loading).
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    onChange?.({ title, columns: cols, rows, chart, say: table.say });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [title, cols, rows, chart]);
   const [toast, setToast] = useState("");
   const [answer, setAnswer] = useState("");
   const [fresh, setFresh] = useState<number | null>(null);

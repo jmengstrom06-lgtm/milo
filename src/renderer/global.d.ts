@@ -74,6 +74,13 @@ declare global {
 
   interface Window {
     milo: {
+      lib: {
+        save: (item: { id?: string; classId?: string | null; app: import("./kit/types").LibApp; title: string; data: unknown }) => Promise<import("./kit/types").LibItem | null>;
+        list: (f?: { classId?: string | null | "all"; app?: import("./kit/types").LibApp | "all" }) => Promise<import("./kit/types").LibItem[]>;
+        move: (id: string, classId: string | null) => Promise<import("./kit/types").LibItem | null>;
+        remove: (id: string) => Promise<boolean>;
+        counts: () => Promise<Record<string, Record<import("./kit/types").LibApp, number>>>;
+      };
       kit: {
         mastery: () => Promise<Record<string, { right: number; wrong: number; last: number }>>;
         study: (request: string, mode: import("./kit/types").StudyMode, count: number, context?: string) => Promise<import("./kit/types").Res<import("./kit/types").StudySet>>;

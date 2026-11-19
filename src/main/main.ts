@@ -19,6 +19,7 @@ import { macSpeak } from "./macvoice";
 import { bridgeConnected, call as ext, startBridge } from "./bridge";
 import { runWebTask } from "./webagent";
 import { registerKit } from "./kitipc";
+import { registerLibrary } from "./library";
 import { transcribe } from "./ears";
 import { stopNative } from "./native";
 import { account, onAccountChange, sendCode, signOut, startCallbackServer, userId, verifyCode } from "./account";
@@ -693,6 +694,7 @@ ipcMain.on("milo:save-clip", (_e, wav: ArrayBuffer, note?: string) => {
 });
 ipcMain.handle("milo:bridge-status", () => bridgeConnected());
 
+registerLibrary();
 registerKit({
   captureJpeg: async () => {
     const cap = await captureScreen();
