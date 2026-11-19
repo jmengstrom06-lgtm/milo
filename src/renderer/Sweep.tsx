@@ -26,7 +26,7 @@ export function SweepHUD({ s, onStop, hover }: { s: SweepState; onStop: () => vo
               ? "Stopped"
               : s.message ?? "Something went wrong";
   return (
-    <div className="hud" onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)}>
+    <div className="hud" onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)} onMouseLeave={() => hover(false)}>
       <span className={`hud-orb ${s.status === "done" ? "hud-orb--done" : s.status === "error" ? "hud-orb--err" : ""}`} />
       <div className="hud-text">
         <div className="hud-kicker">Worksheet{total > 0 && ` · ${Math.min(doneCount + (s.status === "working" ? 1 : 0), total)} of ${total}`}</div>
@@ -94,7 +94,7 @@ export function SweepSummary({
   const filled = s.results.filter((r) => r.filled).length;
   const copyAll = () => window.milo.copy(s.results.map((r) => `${r.label}. ${r.answer}`).join("\n"));
   return (
-    <div className="rp rp--compact sweep-sum" style={style} onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)}>
+    <div className="rp rp--compact sweep-sum" style={style} onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)} onMouseLeave={() => hover(false)}>
       <div className="rp-inner">
         <div className="rp-head">
           <span className="rp-orb" />

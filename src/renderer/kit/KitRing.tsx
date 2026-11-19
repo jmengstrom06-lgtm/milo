@@ -72,7 +72,7 @@ export default function KitRing({
 }) {
   const L = ringLayout(center, window.innerWidth, window.innerHeight);
   return (
-    <div className="kit-ring" onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)}>
+    <div className="kit-ring" onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)} onMouseLeave={() => hover(false)}>
       <button className="kit-ring__scrim" onClick={onClose} aria-label="Close" />
       {KIT_APPS.map((a, k) => (
         <button

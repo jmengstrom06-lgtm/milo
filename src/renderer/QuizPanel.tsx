@@ -91,7 +91,7 @@ const QuizPanel = forwardRef<QuizHandle, Props>(function QuizPanel(p, ref) {
   const pct = Math.round((score / Math.max(1, questions.length)) * 100);
 
   return (
-    <div className={`rp rp--${p.size}`} style={p.style} onMouseEnter={() => p.hover(true)} onMouseLeave={() => p.hover(false)}>
+    <div className={`rp rp--${p.size}`} style={p.style} onMouseEnter={() => p.hover(true)} onMouseMove={() => p.hover(true)} onMouseLeave={() => p.hover(false)}>
       <div className="rp-inner">
         <div className="rp-head">
           <span className="rp-orb" />

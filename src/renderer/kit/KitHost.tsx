@@ -407,14 +407,27 @@ const KitHost = forwardRef<KitHandle, {
         open(app, text);
         return true;
       }
-      if (/^(switch to|change to|go to|use|i'?m (working on|doing|studying)( for)?|let'?s do|now) (my |the )?.{2,40}\b(class|course)$/.test(t)) {
-        window.milo.kit.classFor(text).then((c) => {
-          if (c) {
-            switchClass(c.id);
-            p.say(`${c.name}. Everything fits it now.`);
-          } else p.say("I don't have that class yet. Say: my classes are, then list them.");
-        });
-        return true;
+      // "go to the math tab" / "switch to my bio class" / "open English" / "math tab": the class chips are tabs.
+      const sw = t.match(/^(?:((?:switch|change|go|flip|jump|move)(?: over)? to|open(?: up)?|i'?m (?:working on|doing|studying)(?: for)?|let'?s do|now)\s+)?(?:my |the )?(.{2,40}?)(?: (tab|class|course))?$/);
+      if (sw && !/\b(sketch|sheet|study|notes?|planner|pocket|library|chrome|safari|app|it|that|this)\b/.test(sw[2])) {
+        const said = sw[2];
+        const explicit = !!sw[3];
+        const hasVerb = !!sw[1];
+        if (/^(all|all classes|everything)$/.test(said) && (explicit || hasVerb)) {
+          switchClass(null);
+          p.say("All classes.");
+          return true;
+        }
+        const c = matchClass(said, classes.classes);
+        if (c && (explicit || hasVerb)) {
+          switchClass(c.id);
+          p.say(`${classLabel(c)}. Everything fits it now.`);
+          return true;
+        }
+        if (explicit) {
+          p.say(classes.classes.length ? `I don't see a ${said} tab. I have ${classes.classes.map((k) => classLabel(k)).join(", ")}. Tap the pencil to add it.` : "You don't have any class tabs yet. Say: my classes are, then list them.");
+          return true;
+        }
       }
       if (app === "study" && study && studyRef.current) {
         const s = studyRef.current;

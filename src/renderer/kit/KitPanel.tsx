@@ -32,7 +32,7 @@ export default function KitPanel({
   children: React.ReactNode;
 }) {
   return (
-    <div className={`rp kit kit--${app} rp--${size} ${working ? "rp--working" : ""}`} style={style} onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)}>
+    <div className={`rp kit kit--${app} rp--${size} ${working ? "rp--working" : ""}`} style={style} onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)} onMouseLeave={() => hover(false)}>
       <div className="rp-inner">
         <div className="rp-head">
           <span className="kit-badge">

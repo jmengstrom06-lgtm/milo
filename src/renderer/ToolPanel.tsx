@@ -90,7 +90,7 @@ export default function ToolPanel({
   };
 
   return (
-    <div className={`rp rp--${size} ${phase === "building" ? "rp--working" : ""}`} style={style} onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)}>
+    <div className={`rp rp--${size} ${phase === "building" ? "rp--working" : ""}`} style={style} onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)} onMouseLeave={() => hover(false)}>
       <div className="rp-inner">
         <div className="rp-head">
           <span className={`rp-orb ${phase === "building" ? "rp-orb--on" : ""}`} />

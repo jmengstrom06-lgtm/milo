@@ -73,7 +73,7 @@ export function BriefCard({
 }) {
   const [draft, setDraft] = useState(portal);
   return (
-    <div className="rp rp--compact brief" style={style} onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)}>
+    <div className="rp rp--compact brief" style={style} onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)} onMouseLeave={() => hover(false)}>
       <div className="rp-inner">
         <div className="rp-head">
           <span className={`rp-orb ${state.phase === "loading" ? "rp-orb--on" : ""}`} />
@@ -154,7 +154,7 @@ export function BriefCard({
 /** One-time sign-in: the portal, live, in a panel. The login is remembered. */
 export function SignInPanel({ url, style, onDone, hover }: { url: string; style: React.CSSProperties; onDone: () => void; hover: (on: boolean) => void }) {
   return (
-    <div className="rp rp--half" style={style} onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)}>
+    <div className="rp rp--half" style={style} onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)} onMouseLeave={() => hover(false)}>
       <div className="rp-inner">
         <div className="rp-head">
           <span className="rp-orb" />

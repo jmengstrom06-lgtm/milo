@@ -116,7 +116,7 @@ export default function ResearchPanel({
     <div
       className={`rp rp--${size} ${working ? "rp--working" : ""}`}
       style={style}
-      onMouseEnter={() => hover(true)}
+      onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)}
       onMouseLeave={() => hover(false)}
     >
       <div className="rp-inner">

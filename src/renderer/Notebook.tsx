@@ -79,7 +79,7 @@ const Notebook = forwardRef<NotebookHandle, Props>(function Notebook(p, ref) {
     <div
       className="notebook"
       style={p.style}
-      onMouseEnter={() => p.hover(true)}
+      onMouseEnter={() => p.hover(true)} onMouseMove={() => p.hover(true)}
       onMouseLeave={() => p.hover(false)}
     >
       <div className="notebook__rings">

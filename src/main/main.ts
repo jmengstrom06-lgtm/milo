@@ -20,6 +20,7 @@ import { bridgeConnected, call as ext, startBridge } from "./bridge";
 import { runWebTask } from "./webagent";
 import { registerKit } from "./kitipc";
 import { registerLibrary } from "./library";
+import { quitAfterTest, runSelfTest, selfTestOn } from "./selftest";
 import { transcribe } from "./ears";
 import { stopNative } from "./native";
 import { account, onAccountChange, sendCode, signOut, startCallbackServer, userId, verifyCode } from "./account";
@@ -833,6 +834,12 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === "media"));
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === "media");
   createOverlay();
+  // `npm run test:milo`: drive Milo through his self-test, write the report, quit. (Sound muted so it runs quietly.)
+  if (selfTestOn() && overlay) {
+    const win = overlay;
+    win.webContents.setAudioMuted(true);
+    win.webContents.once("did-finish-load", () => void runSelfTest(win).finally(quitAfterTest));
+  }
   // Ready for an emailed sign-in link even if Milo restarted after sending it.
   void startCallbackServer();
   // Pick up where we left off: account, memories.

@@ -187,6 +187,8 @@ export default function App() {
   const runId = useRef(0); // bumps to cancel an in-flight lesson
   const lastRequest = useRef("");
   const ears = useRef<Ears | null>(null);
+  /** Self-test: feed a sentence in exactly as if the ears just heard it (see src/main/selftest.ts). */
+  const heardRef = useRef<((t: string, ptt: boolean) => void) | null>(null);
   if (!ears.current) ears.current = new Ears();
   const notebookRef = useRef<NotebookHandle>(null);
   const lessonRef = useRef<MiloLesson | null>(null);
@@ -269,7 +271,15 @@ export default function App() {
     }
   }, [name]);
 
-  const hover = useCallback((on: boolean) => window.milo.setClickable(on), []);
+  // Re-send "clickable" while the mouse moves over a panel (throttled): Milo's hands turn clicks off
+  // while he works, and a plain mouseenter never fires again if the cursor never left the panel.
+  const lastHover = useRef({ on: false, at: 0 });
+  const hover = useCallback((on: boolean) => {
+    const now = Date.now();
+    if (on && lastHover.current.on && now - lastHover.current.at < 400) return;
+    lastHover.current = { on, at: now };
+    window.milo.setClickable(on);
+  }, []);
 
   // ---- movement ---------------------------------------------------------------
   const moveTo = useCallback((target: Pos, styleIn: "walk" | "jump" | "zip" = "walk") => {
@@ -1749,6 +1759,7 @@ export default function App() {
       const cleaned = stripGo(text);
       setPendingCmd(cleaned, cleaned !== text.trim());
     };
+    heardRef.current = (t: string, ptt: boolean) => void handle(new ArrayBuffer(0), ptt, false, t);
     return () => {
       offFlux();
       e.setMode("off");
@@ -1946,6 +1957,37 @@ export default function App() {
 
     routeRef.current(text, false);
   };
+
+  // ---- self-test hooks (dev only) -------------------------------------------------
+  // `npm run test:milo` drives Milo through these: the same path your voice takes after it becomes text.
+  const testSnap = useRef<Record<string, unknown>>({});
+  testSnap.current = { speaking, bubble, heard, pending: pending?.text ?? null, chatOpen, ringOpen, kitApp, lockOn, research: !!researchQ, tool: !!tool, quiz: !!quiz, notebook: !!box, mood, pos, name };
+  useEffect(() => {
+    if (!location.protocol.startsWith("http")) return; // dev server only, never in the packaged app
+    (window as unknown as { __milo: unknown }).__milo = {
+      ready: true,
+      state: () => testSnap.current,
+      hear: (t: string, ptt = true) => heardRef.current?.(t, ptt),
+      key: (k: string) => window.dispatchEvent(new KeyboardEvent("keydown", { key: k })),
+      move: (x: number, y: number) => setPos({ x, y }),
+      chat: (on: boolean) => setChatOpen(on),
+      quietEars: () => ears.current?.setMode("off"),
+      reset: () => {
+        hush();
+        pendingRef.current = null;
+        setPending(null);
+        setBubble(null);
+        setHeard(null);
+        setRingOpen(false);
+        setChatOpen(false);
+        kitRef.current?.close();
+        setResearchQ(null);
+        followUntil.current = 0;
+        lastRun.current = null;
+        researchStart.current = null;
+      },
+    };
+  });
 
   // ---- layout -----------------------------------------------------------------
   const W = window.innerWidth;
@@ -2170,7 +2212,7 @@ export default function App() {
             key={i}
             className="other-tag"
             style={{ left: o.box.x - 8, top: Math.max(2, o.box.y - 14), animationDelay: `${0.4 + i * 0.08}s` }}
-            onMouseEnter={() => hover(true)}
+            onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)}
             onMouseLeave={() => hover(false)}
             onClick={() => look(lessonMode, `question ${o.label}`, o.box)}
             title={`Switch to ${o.label}`}
@@ -2204,7 +2246,7 @@ export default function App() {
       <div
         className="milo-wrap"
         style={{ left: pos.x, top: pos.y, width: MILO_W, height: MILO_H }}
-        onMouseEnter={() => hover(true)}
+        onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)}
         onMouseLeave={() => !chatOpen && hover(false)}
         onClick={() => {
           if (speaking) {
@@ -2225,7 +2267,7 @@ export default function App() {
         {watching && !working && !pending && !sweep && (
           <button
             className="watch-pill"
-            onMouseEnter={() => hover(true)}
+            onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)}
             onClick={(e) => {
               e.stopPropagation();
               setWatch(false);
@@ -2240,7 +2282,7 @@ export default function App() {
 
       {bubble && <Bubble text={short(bubble)} style={bStyle} />}
       {pending && (
-        <div className="got-it" style={bStyle} onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)}>
+        <div className="got-it" style={bStyle} onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)} onMouseLeave={() => hover(false)}>
           <div className="got-it__label">{pending.unfinished ? "Keep going…" : "Got it"}</div>
           <div className="got-it__text">“{short(pending.text)}{pending.unfinished ? "…" : ""}”</div>
           <div className="got-it__row">
@@ -2259,7 +2301,7 @@ export default function App() {
         <button
           className="stop-pill"
           style={{ left: pos.x + MILO_W / 2 - 50, top: pos.y + MILO_H + 4 }}
-          onMouseEnter={() => hover(true)}
+          onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)}
           onMouseLeave={() => hover(false)}
           onClick={() => window.milo.stopTask()}
         >
@@ -2287,7 +2329,7 @@ export default function App() {
       />
 
       {chatOpen && (
-        <div className="panel" style={chatStyle} onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)}>
+        <div className="panel" style={chatStyle} onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)} onMouseLeave={() => hover(false)}>
           <div className="panel__head">
             <span>Milo</span>
             <div className="panel__actions">

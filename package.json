@@ -11,6 +11,7 @@
     "build": "npm run build:hands && npm run build:main && npm run build:renderer",
     "start": "npm run build && electron .",
     "setkey": "node scripts/setkey.js",
+    "test:milo": "npm run build:hands && npm run build:main && concurrently -k -s command-electron -n vite,electron \"vite\" \"wait-on tcp:127.0.0.1:5173 && cross-env MILO_DEV=1 MILO_TEST=1 electron .\"",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "eval": "tsx evals/run-router.ts",
