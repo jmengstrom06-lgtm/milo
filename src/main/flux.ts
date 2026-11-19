@@ -2,6 +2,7 @@
 // from the words themselves (not just silence), so a pause mid-sentence doesn't cut you off.
 // Lives in the main process so the key never reaches the overlay.
 
+import { account, backend } from "./account";
 import WebSocket from "ws";
 import { log as bb } from "./blackbox";
 
@@ -21,10 +22,31 @@ let emit: (e: FluxEvent) => void = () => {};
 let openedAt = 0;
 let lastTurnText = "";
 
-export const fluxAvailable = () => !!process.env.DEEPGRAM_API_KEY;
+export const fluxAvailable = () => !!process.env.DEEPGRAM_API_KEY || account().signedIn;
 
 export function onFlux(fn: (e: FluxEvent) => void) {
   emit = fn;
+}
+
+// Signed in: a 10-minute Deepgram token from the backend (our key never touches the Mac).
+let grant: { token: string; until: number } | null = null;
+async function fluxAuth(): Promise<string | null> {
+  if (account().signedIn) {
+    if (grant && grant.until > Date.now() + 30_000) return `Bearer ${grant.token}`;
+    try {
+      const res = await backend("deepgram-token", { body: "{}" });
+      if (res?.ok) {
+        const d = (await res.json()) as { access_token: string; expires_in: number };
+        grant = { token: d.access_token, until: Date.now() + d.expires_in * 1000 };
+        return `Bearer ${grant.token}`;
+      }
+      bb("flux", "grant_failed", { status: res?.status });
+    } catch (e) {
+      bb("flux", "grant_error", { error: (e as Error).message });
+    }
+  }
+  const key = process.env.DEEPGRAM_API_KEY;
+  return key ? `Token ${key}` : null;
 }
 
 function url() {
@@ -46,10 +68,13 @@ function url() {
 export function openFlux(): Promise<boolean> {
   if (ws && ws.readyState === WebSocket.OPEN) return Promise.resolve(true);
   if (opening) return opening;
-  const key = process.env.DEEPGRAM_API_KEY;
-  if (!key) return Promise.resolve(false);
-  opening = new Promise<boolean>((resolve) => {
-    const sock = new WebSocket(url(), { headers: { Authorization: `Token ${key}` } });
+  opening = new Promise<boolean>(async (resolve) => {
+    const auth = await fluxAuth();
+    if (!auth) {
+      opening = null;
+      return resolve(false);
+    }
+    const sock = new WebSocket(url(), { headers: { Authorization: auth } });
     let settled = false;
     const settle = (ok: boolean) => {
       if (!settled) {

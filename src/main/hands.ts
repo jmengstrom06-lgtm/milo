@@ -1,11 +1,22 @@
 // Milo's hands: clicks, typing and shortcuts on macOS.
-// Uses only built-in tools (osascript / JavaScript for Automation), so there are no native modules to install.
+// Fast path: the native helper (native.ts + native/hands.swift), one process that stays running.
+// Fallback: built-in osascript / JavaScript for Automation, if the helper isn't built.
 // Needs Accessibility permission for Terminal (dev) or Milo (packaged app).
 
 import { execFile } from "node:child_process";
 import { app, clipboard } from "electron";
 import fs from "node:fs";
 import path from "node:path";
+import { native } from "./native";
+
+/** Try the native helper. true = done, false = not available (use osascript). Throws on a real error. */
+async function viaNative(cmd: string, args: Record<string, unknown>, timeoutMs?: number): Promise<boolean> {
+  const r = await native(cmd, args, timeoutMs);
+  if (!r) return false;
+  if (r.ok) return true;
+  if (r.error === "accessibility") throw new Error(ACCESSIBILITY_HELP);
+  return false; // anything else: let the old way try
+}
 
 function run(cmd: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -51,6 +62,7 @@ function run(argv) {
 export async function click(x: number, y: number, count = 1) {
   const X = String(Math.round(x));
   const Y = String(Math.round(y));
+  if (await viaNative("click", { x: Math.round(x), y: Math.round(y), count })) return;
   try {
     await run("osascript", ["-l", "JavaScript", "-e", CLICK_JXA, X, Y, String(count)]);
   } catch (e) {
@@ -91,6 +103,7 @@ export function keyScript(combo: string): string {
 }
 
 export async function pressKeys(combo: string) {
+  if (await viaNative("key", { combo })) return;
   try {
     await run("osascript", ["-e", keyScript(combo)]);
   } catch (e) {
@@ -116,6 +129,8 @@ const KEYSTROKE = ["-e", "on run argv", "-e", 'tell application "System Events" 
  * Long or non-English text falls back to a paste.
  */
 export async function typeText(text: string) {
+  // Native typing handles any character (accents, math symbols, emoji) and looks smooth on video.
+  if (text.length <= 2500 && (await viaNative("type", { text: text.replace(/\r\n?/g, "\n"), delayMs: 10 }, 15000 + text.length * 40))) return;
   const t = plainify(text);
   try {
     if (/^[\x20-\x7E\n\t]*$/.test(t) && t.length <= 2500) {
@@ -274,6 +289,8 @@ export async function openUrl(url: string) {
 
 
 export async function frontApp(): Promise<string> {
+  const r = await native("front", {}, 1500);
+  if (r?.ok && typeof r.name === "string" && r.name) return r.name;
   try {
     return await run("osascript", ["-e", 'tell application "System Events" to get name of first application process whose frontmost is true']);
   } catch {

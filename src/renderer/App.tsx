@@ -15,6 +15,7 @@ import ToolPanel, { SavedTool, loadTools, saveTools } from "./ToolPanel";
 import QuizPanel, { QuizHandle } from "./QuizPanel";
 import { BriefCard, BriefLoader, BriefState, SignInPanel } from "./Brief";
 import { fastDecide, stripFiller, type DecideState } from "./decide";
+import AccountChip from "./Account";
 import { stripMath } from "./MathText";
 
 type Msg = { role: "user" | "assistant"; content: string };
@@ -2192,7 +2193,7 @@ export default function App() {
       {confetti && <Confetti key={confetti.seed} {...confetti} />}
 
       {chatOpen && (
-        <div className="panel" style={{ left: panelLeft, bottom: H - pos.y + 16, width: panelW }} onMouseEnter={() => hover(true)}>
+        <div className="panel" style={{ left: panelLeft, bottom: H - pos.y + 16, width: panelW }} onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)}>
           <div className="panel__head">
             <span>Milo</span>
             <div className="panel__actions">
@@ -2232,6 +2233,7 @@ export default function App() {
               <button className="chip chip--kit" onClick={() => { closeChat(); setRingOpen(true); }} title="Milo's apps: Study, Sketch, Notes, Sheet, Planner, Pocket">
                 Kit
               </button>
+              <AccountChip />
               <button className="chip" onClick={() => window.milo.openLogs()} title="Open Milo's black-box log (Cmd+Shift+B flags a bug)">
                 Logs
               </button>

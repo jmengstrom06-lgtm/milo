@@ -20,6 +20,10 @@ import { bridgeConnected, call as ext, startBridge } from "./bridge";
 import { runWebTask } from "./webagent";
 import { registerKit } from "./kitipc";
 import { transcribe } from "./ears";
+import { stopNative } from "./native";
+import { account, onAccountChange, sendCode, signOut, startCallbackServer, userId, verifyCode } from "./account";
+import { forgetAll, memories, syncMemories } from "./memory";
+import { captureError, identify, startTelemetry, track } from "./telemetry";
 import { click, ensureBrowser, frontApp, openApp, openFolder, openLatestDownload, openUrl, pressKeys, quitApp, typeText } from "./hands";
 import { plan } from "./quick";
 import { research } from "./research";
@@ -28,6 +32,7 @@ import { askScreen } from "./brain";
 import { Action, askMilo, classify, RouteCtx, makeQuiz, readBrief, setUserName, sweepPlan, watchCheck, ChatMessage, checkAnswer, locateInCrop, nextActions, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
 dotenv.config({ path: path.join(app.getAppPath(), ".env") });
+startTelemetry();
 
 // ---------- black-box log: every request Milo handles, how long it took, what came back ----------
 const QUIET = new Set(["milo:watch-check", "milo:mic-access", "milo:hands-access", "milo:log-flag"]);
@@ -718,7 +723,44 @@ ipcMain.handle("milo:mic-access", async () => {
   if (systemPreferences.getMediaAccessStatus("microphone") === "granted") return true;
   return systemPreferences.askForMediaAccess("microphone");
 });
-ipcMain.handle("milo:tts", (_e, text: string, urgent?: boolean) => speak(text, !!urgent));
+ipcMain.handle("milo:tts", (_e, text: string, urgent?: boolean, around?: { previous?: string; next?: string }) => speak(text, !!urgent, around ?? {}));
+
+// ---------- account + memory ----------
+ipcMain.handle("milo:account", () => account());
+ipcMain.handle("milo:account-send", (_e, email: string) => sendCode(email));
+ipcMain.handle("milo:account-verify", async (_e, email: string, code: string) => {
+  const r = await verifyCode(email, code);
+  if (r.ok) {
+    const id = userId();
+    if (id) identify(id, account().email);
+    await syncMemories();
+  }
+  return r;
+});
+ipcMain.handle("milo:account-signout", () => {
+  signOut();
+  track("sign_out");
+  return account();
+});
+// Signed in from the browser link: catch up and tell the window.
+onAccountChange(async () => {
+  const id = userId();
+  if (id) identify(id, account().email);
+  await syncMemories();
+  overlay?.webContents.send("milo:account-changed");
+});
+ipcMain.handle("milo:memories", () => memories());
+ipcMain.handle("milo:forget-all", async () => {
+  await forgetAll();
+  return true;
+});
+// Errors from Milo's window, so they reach crash reports too.
+ipcMain.on("milo:renderer-error", (_e, err: { name?: string; message?: string; stack?: string }) => {
+  const e = new Error(err?.message || "renderer error");
+  e.name = err?.name || "Error";
+  e.stack = err?.stack || e.stack;
+  captureError(e, "renderer", { process: "renderer" });
+});
 ipcMain.on("milo:copy", (_e, text: string) => clipboard.writeText(text));
 ipcMain.on("milo:set-character", (_e, desc: string) => setCharacter(desc));
 ipcMain.on("milo:set-name", (_e, name: string) => setUserName(name));
@@ -749,6 +791,12 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === "media"));
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === "media");
   createOverlay();
+  // Ready for an emailed sign-in link even if Milo restarted after sending it.
+  void startCallbackServer();
+  // Pick up where we left off: account, memories.
+  const uid = userId();
+  if (uid) identify(uid, account().email);
+  void syncMemories();
 
   // Open Milo's chat from anywhere.
   globalShortcut.register("CommandOrControl+Shift+B", () => overlay?.webContents.send("milo:flag"));
@@ -766,5 +814,8 @@ app.whenReady().then(() => {
   });
 });
 
-app.on("will-quit", () => globalShortcut.unregisterAll());
+app.on("will-quit", () => {
+  globalShortcut.unregisterAll();
+  stopNative();
+});
 app.on("window-all-closed", () => app.quit());

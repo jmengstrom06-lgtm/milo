@@ -62,6 +62,15 @@ An animated AI companion that lives on your screen.
 First time you use Look: macOS asks for Screen Recording. Turn on **Terminal** (and Electron if listed) in
 System Settings > Privacy & Security > Screen & System Audio Recording, then restart Milo.
 
+## Under the hood (Nov 2026 upgrade)
+
+- **Native hands** (`native/hands.swift`, `src/main/native.ts`): one small Swift process that stays running, so clicks, keys and typing are instant and can type any character. `npm run dev` builds it automatically if Xcode Command Line Tools are installed (`xcode-select --install`). If it isn't built, Milo falls back to osascript. It can also read the real buttons and fields of the front window (`screenElements()`).
+- **Model routing + prompt caching** (`src/main/gateway.ts`): quick chat, answer checking and memory go to the fast model; teaching, vision and building go to the smart one. Stable prompt parts are cached.
+- **Backend** (Supabase project `milo`, edge function `milo`): signed-in students never need keys. It holds the Anthropic, ElevenLabs and Deepgram keys and enforces daily limits per plan (`plan_limits` table).
+- **Accounts + memory** (`src/main/account.ts`, `src/main/memory.ts`, `src/renderer/Account.tsx`): sign in with an emailed 6-digit code. Milo picks up lasting facts (classes, goals, what you find hard) and uses them in replies. See and clear them from the Sign in chip.
+- **Crash reports + analytics** (`src/main/telemetry.ts`): Sentry (`milo-vz/milo-desktop`) and PostHog. Only event names and small facts are sent, never what you say or see.
+- **Faster voice**: long lines are split into sentences; the first plays while the rest are made.
+
 ## How it's built
 
 | Piece | File |

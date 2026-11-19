@@ -1,3 +1,4 @@
+import { anthropic, limitText, models } from "./gateway";
 // Milo's research: Claude with the built-in web search tool, streamed so the panel can show
 // each search, each source, and the answer as it's written.
 
@@ -29,34 +30,30 @@ const thread = (history: Turn[], question: string) => [
 ];
 
 function model() {
-  return process.env.MILO_MODEL || "claude-sonnet-5-5";
+  return models.smart();
 }
 
 export async function research(question: string, emit: (e: ResearchEvent) => void, signal?: AbortSignal, history: Turn[] = []) {
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) return emit({ type: "error", text: "I need my Anthropic key to research." });
-
   emit({ type: "status", text: "Thinking about where to look" });
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    signal,
-    headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({
+  const res = await anthropic(
+    {
       model: model(),
       max_tokens: 1400,
       stream: true,
       system: SYSTEM,
       tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 4 }],
       messages: thread(history, question),
-    }),
-  }).catch((e) => e as Error);
+    },
+    signal
+  ).catch((e) => e as Error);
 
   if (res instanceof Error) return emit({ type: "error", text: `I couldn't reach the internet: ${res.message}` });
   if (!res.ok || !res.body) {
     const detail = await res.text().catch(() => "");
     // Web search not turned on for this account: answer from memory instead.
-    if (res.status === 400 && /web_search|web search|tool/i.test(detail)) return fallback(question, emit, key, history);
-    return emit({ type: "error", text: `Research hit an error (${res.status}).` });
+    if (res.status === 400 && /web_search|web search|tool/i.test(detail)) return fallback(question, emit, history);
+    const limit = await limitText(res);
+    return emit({ type: "error", text: limit ?? `Research hit an error (${res.status}).` });
   }
 
   const blocks = new Map<number, { type: string; name?: string; json: string }>();
@@ -156,13 +153,9 @@ export async function research(question: string, emit: (e: ResearchEvent) => voi
   emit({ type: "done", answer: answer.trim(), top: top ?? firstSource, live: true });
 }
 
-async function fallback(question: string, emit: (e: ResearchEvent) => void, key: string, history: Turn[] = []) {
+async function fallback(question: string, emit: (e: ResearchEvent) => void, history: Turn[] = []) {
   emit({ type: "status", text: "Answering from what I know" });
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model: model(), max_tokens: 900, system: SYSTEM, messages: thread(history, question) }),
-  });
+  const res = await anthropic({ model: model(), max_tokens: 900, system: SYSTEM, messages: thread(history, question) });
   if (!res.ok) return emit({ type: "error", text: `Research hit an error (${res.status}).` });
   const data = (await res.json()) as { content?: { type: string; text?: string }[] };
   const answer = (data.content ?? []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();

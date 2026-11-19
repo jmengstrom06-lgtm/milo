@@ -39,14 +39,14 @@ function macClip(key: string): Promise<Clip> {
 }
 
 /** Start generating audio for a line now, so it's ready when Milo needs it. */
-export function prefetch(text: string, urgent = false): Promise<Clip> {
+export function prefetch(text: string, urgent = false, around?: { previous?: string; next?: string }): Promise<Clip> {
   const key = text.trim();
   if (!key) return Promise.resolve({ ok: false });
   const useMac = elevenDown();
   const ck = (useMac ? "mac:" : "el:") + key;
   let p = cache.get(ck);
   if (!p) {
-    p = useMac ? macClip(key) : window.milo.tts(key, urgent).then((r): Clip | Promise<Clip> => {
+    p = useMac ? macClip(key) : window.milo.tts(key, urgent, around).then((r): Clip | Promise<Clip> => {
       if (r.ok) return { ok: true, bytes: b64ToBytes(r.audio), engine: "elevenlabs" };
       if (r.text === "no-key") elevenDownUntil = Date.now() + 10 * 60_000;
       else if (r.text === "quota") {
@@ -202,10 +202,57 @@ async function playBytes(bytes: Uint8Array, onStart: () => void): Promise<boolea
   return true;
 }
 
-/** Speak a line. Resolves when Milo finishes talking. */
+/** Is this exact line already being made (someone prefetched it)? */
+const alreadyFetching = (text: string) => {
+  const k = text.trim();
+  return cache.has("el:" + k) || cache.has("mac:" + k);
+};
+
+/** Sentences grouped into chunks: a short first one (so Milo starts fast), then fuller ones. */
+function speechChunks(text: string): string[] {
+  const sentences = splitSentences(text);
+  const out: string[] = [];
+  for (const s of sentences) {
+    const last = out[out.length - 1];
+    if (out.length >= 1 && last.length < 60) out[out.length - 1] = `${last} ${s}`;
+    else if (out.length >= 2 && last.length + s.length < 220) out[out.length - 1] = `${last} ${s}`;
+    else out.push(s);
+  }
+  return out;
+}
+
+/**
+ * Speak a line. Resolves when Milo finishes talking.
+ * Long lines are split into sentences: the first one is made and played right away while the rest
+ * are made in the background, so Milo starts talking in a fraction of the time.
+ */
 export async function play(text: string, onStart: () => void): Promise<void> {
   stop();
   const token = speakToken;
+  const parts = text.length > 140 && !alreadyFetching(text) && !elevenDown() ? speechChunks(text) : [text];
+
+  if (parts.length > 1) {
+    let begun = false;
+    const begin = () => {
+      if (!begun) {
+        begun = true;
+        onStart();
+      }
+    };
+    const clips = parts.map((p, i) => prefetch(p, i === 0, { previous: parts[i - 1], next: parts[i + 1] }));
+    window.milo.log("voice", "play", { engine: "elevenlabs_chunks", chunks: parts.length, chars: text.length });
+    for (let i = 0; i < parts.length; i++) {
+      const clip = await clips[i];
+      if (token !== speakToken) return;
+      if (!clip.ok || !(await playBytes(clip.bytes, begin))) {
+        await systemSpeak(parts.slice(i).join(" "), begin);
+        return;
+      }
+      if (token !== speakToken) return;
+    }
+    return;
+  }
+
   const clip = await prefetch(text, true);
   if (token !== speakToken) return; // stopped while it was loading
   window.milo.log("voice", "play", { engine: clip.ok ? clip.engine : "chromium_speech", free: freeVoice, chars: text.length });

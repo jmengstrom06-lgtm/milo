@@ -1,4 +1,6 @@
 import { log as bb } from "./blackbox";
+import { anthropic, limitText, models, NoBrainError } from "./gateway";
+import { memoryPrompt, noteTurn } from "./memory";
 // Milo's brain: all Anthropic API calls live in the main process,
 // so the API key never touches the renderer.
 
@@ -29,7 +31,7 @@ export function setUserName(name: string) {
   userName = (name || "").slice(0, 40);
 }
 const persona = () => `You are Milo, ${characterDesc}, an animated companion who lives on a college student's computer screen.${userName ? ` The student's name is ${userName}.` : ""}
-You are friendly, sharp and quick. You talk like a smart friend: short, precise, confident. No hype, no cheesy jokes, no exclamation marks everywhere, never like a textbook.`;
+You are friendly, sharp and quick. You talk like a smart friend: short, precise, confident. No hype, no cheesy jokes, no exclamation marks everywhere, never like a textbook.${memoryPrompt()}`;
 
 const chatPrompt = () => `${persona()}
 You live on the student's Mac. You CAN look at their screen, jump to homework questions and teach them in your notebook,
@@ -171,32 +173,24 @@ type ApiOk<T> = { ok: true; data: T };
 type ApiErr = { ok: false; text: string };
 
 function model() {
-  return process.env.MILO_MODEL || "claude-sonnet-5-5";
+  return models.smart();
 }
 
 async function callClaude(body: Record<string, unknown>): Promise<ApiOk<Block[]> | ApiErr> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return { ok: false, text: "I don't have a brain yet! Add your ANTHROPIC_API_KEY to the .env file and restart me." };
-  }
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({ model: model(), ...body }),
-    });
+    const res = await anthropic({ model: model(), ...body });
     if (!res.ok) {
+      const limit = await limitText(res);
+      if (limit) return { ok: false, text: limit };
       const detail = await res.text();
       bb("brain", "api_error", { status: res.status, model: (body.model as string) ?? model(), detail: detail.slice(0, 500) });
       return { ok: false, text: `My brain hit an error (${res.status}). ${detail.slice(0, 200)}` };
     }
-    const data = (await res.json()) as { content?: Block[] };
+    const data = (await res.json()) as { content?: Block[]; usage?: Record<string, number> };
+    if (data.usage?.cache_read_input_tokens) bb("brain", "cache_hit", { tokens: data.usage.cache_read_input_tokens });
     return { ok: true, data: data.content ?? [] };
   } catch (err) {
+    if (err instanceof NoBrainError) return { ok: false, text: err.message };
     bb("brain", "network_error", { error: (err as Error).message });
     return { ok: false, text: `I couldn't reach my brain: ${(err as Error).message}` };
   }
@@ -232,15 +226,57 @@ async function callTool<T>(body: Record<string, unknown>, toolName: string): Pro
 
 // ---------------------------------------------------------------------------
 
+/**
+ * Quick back-and-forth goes to the fast model (replies land in about a second);
+ * real explaining goes to the smart one.
+ */
+export function chatTier(history: ChatMessage[]): "fast" | "smart" {
+  const last = history[history.length - 1]?.content ?? "";
+  if (last.length > 160) return "smart";
+  if (/\b(explain|why|how (do|does|did|would|can)|prove|derive|essay|compare|difference|step by step|walk me|teach|solve|calculate|what if)\b/i.test(last)) return "smart";
+  return "fast";
+}
+
 export async function askMilo(history: ChatMessage[]): Promise<{ ok: boolean; text: string }> {
-  const r = await callClaude({ max_tokens: 600, system: chatPrompt(), messages: history.slice(-20) });
+  const tier = chatTier(history);
+  const r = await callClaude({ model: models[tier](), max_tokens: 600, system: chatPrompt(), messages: history.slice(-20) });
   if (!r.ok) return r;
   const text = r.data
     .filter((b) => b.type === "text")
     .map((b) => b.text)
     .join("\n")
     .trim();
+  if (text) noteTurn([...history, { role: "assistant", content: text }], extractFacts);
   return { ok: true, text: text || "Hmm, I blanked on that one. Try again?" };
+}
+
+const FACTS_TOOL = {
+  name: "save_facts",
+  description: "Save lasting facts about the student.",
+  input_schema: {
+    type: "object",
+    properties: { facts: { type: "array", items: { type: "string" }, description: "Short third-person facts. Empty if nothing new." } },
+    required: ["facts"],
+  },
+};
+
+/** Lasting, useful facts from a chat (classes, goals, deadlines, what they find hard, how they like help). */
+export async function extractFacts(chat: string, known: string[]): Promise<string[]> {
+  const r = await callTool<{ facts: string[] }>(
+    {
+      model: models.fast(),
+      max_tokens: 400,
+      system: `You pick out facts worth remembering about a college student from their chat with Milo, their study companion.
+Keep: classes and majors, goals, upcoming exams, topics they find hard or easy, how they like to be helped, their name, routines.
+Skip: one-off requests, small talk, anything about health, money, relationships, religion, politics or other private matters.
+Each fact under 20 words, third person ("Takes STAT 2023 with Dr. Lee"). Never repeat something already known. Usually return 0 to 2 facts.`,
+      tools: [FACTS_TOOL],
+      tool_choice: { type: "tool", name: FACTS_TOOL.name },
+      messages: [{ role: "user", content: `Already known:\n${known.map((k) => "- " + k).join("\n") || "(nothing)"}\n\nChat:\n${chat}` }],
+    },
+    FACTS_TOOL.name
+  );
+  return r.ok && Array.isArray(r.data.facts) ? r.data.facts.filter((f) => typeof f === "string" && f.trim()) : [];
 }
 
 export async function teachFromScreen(
@@ -295,6 +331,7 @@ If there is nothing to help with, set found=false and use intro to say so playfu
 
 export async function checkAnswer(lesson: TeachResult, studentAnswer: string): Promise<ApiOk<CheckResult> | ApiErr> {
   return callTool<CheckResult>({
+    model: models.fast(), // grading against a known answer is quick work
     max_tokens: 1000,
     system: `${persona()}\nYou are checking a student's answer to your own lesson. Accept equivalent forms and reasonable rounding.`,
     tools: [CHECK_TOOL],

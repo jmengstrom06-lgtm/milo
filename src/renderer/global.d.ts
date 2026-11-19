@@ -126,7 +126,15 @@ declare global {
       practice: (lesson: MiloLesson) => Promise<{ ok: true; data: { problems: { question: string; answer: string }[] } } | Err>;
       stt: (audio: ArrayBuffer) => Promise<{ ok: true; text: string } | Err>;
       micAccess: () => Promise<boolean>;
-      tts: (text: string, urgent?: boolean) => Promise<{ ok: true; audio: string } | Err>;
+      tts: (text: string, urgent?: boolean, around?: { previous?: string; next?: string }) => Promise<{ ok: true; audio: string } | Err>;
+      account: () => Promise<{ signedIn: boolean; email: string }>;
+      accountSend: (email: string) => Promise<{ ok: boolean; text: string }>;
+      accountVerify: (email: string, code: string) => Promise<{ ok: boolean; text: string }>;
+      accountSignOut: () => Promise<{ signedIn: boolean; email: string }>;
+      memories: () => Promise<string[]>;
+      onAccountChange: (cb: () => void) => () => void;
+      forgetAll: () => Promise<boolean>;
+      reportError: (err: { name?: string; message?: string; stack?: string }) => void;
       task: (task: string) => Promise<{ ok: true; status: "done" | "ask" | "stopped" | "quick"; text: string; rest?: string | null; did?: string[] } | Err>;
       stopTask: () => void;
       handsAccess: () => Promise<boolean>;

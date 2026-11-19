@@ -1,5 +1,6 @@
 import { log as bb } from "./blackbox";
 import { limited } from "./limiter";
+import { account, backend } from "./account";
 
 // Milo's ears: ElevenLabs speech-to-text. Audio arrives from the renderer as a 16 kHz mono WAV.
 
@@ -19,8 +20,27 @@ function withTimeout(p: Promise<Heard>, ms: number): Promise<Heard> {
 }
 
 export function transcribe(audio: ArrayBuffer | Uint8Array): Promise<Heard> {
-  // Deepgram when it's set up (fast, and keeps ElevenLabs credits for Milo's voice), else ElevenLabs.
+  // Signed in: the backend hears it (no keys on this Mac). Otherwise Deepgram, else ElevenLabs.
+  if (account().signedIn) return withTimeout(viaBackend(audio), 12000);
   return withTimeout(process.env.DEEPGRAM_API_KEY ? deepgram(audio) : elevenlabs(audio), 12000);
+}
+
+async function viaBackend(audio: ArrayBuffer | Uint8Array): Promise<Heard> {
+  const local = () => (process.env.DEEPGRAM_API_KEY ? deepgram(audio) : elevenlabs(audio));
+  try {
+    const res = await backend("stt", { body: new Uint8Array(Buffer.from(audio as ArrayBuffer)), contentType: "audio/wav" });
+    if (!res) return local();
+    if (res.status === 429) return { ok: false, text: "You've hit today's listening limit. Type to me instead, it resets at midnight." };
+    if (!res.ok) {
+      bb("ears", "backend_error", { status: res.status });
+      return process.env.DEEPGRAM_API_KEY || process.env.ELEVENLABS_API_KEY ? local() : { ok: false, text: "I couldn't hear that. Try again?" };
+    }
+    const d = (await res.json()) as { text?: string };
+    return { ok: true, text: (d.text ?? "").trim() };
+  } catch (err) {
+    bb("ears", "backend_network_error", { error: (err as Error).message });
+    return local();
+  }
 }
 
 async function deepgram(audio: ArrayBuffer | Uint8Array): Promise<Heard> {

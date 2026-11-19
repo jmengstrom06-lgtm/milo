@@ -5,3 +5,4 @@ dist/
 *.log
 extension/config.json
 evals/results/
+.signing/

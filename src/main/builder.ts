@@ -1,3 +1,4 @@
+import { anthropic, limitText } from "./gateway";
 // Build-a-Tool: Claude writes a small, complete web app (one HTML file), streamed so the panel can
 // show the code being written live, then runs it in a sandbox.
 
@@ -26,23 +27,18 @@ function model() {
 }
 
 export async function buildTool(request: string, emit: (e: BuildEvent) => void, signal?: AbortSignal) {
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) return emit({ type: "error", text: "I need my Anthropic key to build things." });
-
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    signal,
-    headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({
+  const res = await anthropic(
+    {
       model: model(),
       max_tokens: 12000,
       stream: true,
       system: SYSTEM,
       messages: [{ role: "user", content: `Build this: ${request}` }],
-    }),
-  }).catch((e) => e as Error);
+    },
+    signal
+  ).catch((e) => e as Error);
   if (res instanceof Error) return emit({ type: "error", text: `I couldn't reach my brain: ${res.message}` });
-  if (!res.ok || !res.body) return emit({ type: "error", text: `Building hit an error (${res.status}).` });
+  if (!res.ok || !res.body) return emit({ type: "error", text: (await limitText(res)) ?? `Building hit an error (${res.status}).` });
 
   let html = "";
   const reader = res.body.getReader();

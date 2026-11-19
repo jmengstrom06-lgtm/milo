@@ -1464,3 +1464,12 @@ body,
 .sh-chart { margin: 0 0 10px; }
 .sh-scroll--short { max-height: 210px; }
 .cls-bar { padding-top: 2px; }
+
+/* account popover */
+.acct { position: absolute; top: 30px; right: 0; z-index: 50; width: 280px; padding: 12px; border-radius: 12px;
+  background: rgba(24, 20, 36, 0.97); color: #fff; box-shadow: 0 10px 30px rgba(0,0,0,0.35); display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.acct__row { font-weight: 600; }
+.acct__in { width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.08); color: #fff; font-size: 14px; }
+.acct__msg { opacity: 0.8; font-size: 12px; }
+.acct__mem { border-top: 1px solid rgba(255,255,255,0.12); padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.acct__mem ul { margin: 0; padding-left: 16px; max-height: 140px; overflow: auto; opacity: 0.85; font-size: 12px; }

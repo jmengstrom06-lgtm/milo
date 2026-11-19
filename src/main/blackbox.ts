@@ -45,8 +45,22 @@ function scrub(v: unknown): unknown {
   return v;
 }
 
+type Listener = (src: string, ev: string, data: Record<string, unknown>) => void;
+const listeners: Listener[] = [];
+/** Get told about every log line (telemetry uses this to count a few safe events). */
+export function onLog(fn: Listener) {
+  listeners.push(fn);
+}
+
 /** Add one line to the timeline. src: "main" | "ears" | "app" | "voice" | ... */
 export function log(src: string, ev: string, data: Record<string, unknown> = {}) {
+  for (const fn of listeners) {
+    try {
+      fn(src, ev, data);
+    } catch {
+      /* a listener must never break logging */
+    }
+  }
   try {
     ensure();
     const line = { t: new Date().toISOString().slice(11, 23), ms: Date.now() - started, src, ev, ...(scrub(data) as object) };
