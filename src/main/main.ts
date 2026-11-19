@@ -98,6 +98,9 @@ function createOverlay() {
       nodeIntegration: false,
       sandbox: true,
       webviewTag: true, // live web pages inside the research panel
+      // Milo's overlay is see-through, so Chromium thinks it's "in the background" and slows its timers
+      // (the "Got it" countdown froze, lock-in timers drift). He's always on screen: never throttle him.
+      backgroundThrottling: false,
     },
   });
 

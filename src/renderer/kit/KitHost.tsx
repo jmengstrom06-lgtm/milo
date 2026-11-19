@@ -11,7 +11,7 @@ import SheetView, { type SheetHandle } from "./SheetView";
 import SketchView from "./SketchView";
 import StudyDeck, { type StudyHandle } from "./StudyDeck";
 import { ClassBar, ClassesEditor } from "./Classes";
-import Library, { classLabel, matchClass, parseBrowse, RecentShelf, SavedPill, type LibFilter } from "./Library";
+import Library, { classLabel, isNewSketch, matchClass, parseBrowse, RecentShelf, SavedPill, type LibFilter } from "./Library";
 import { startersFor } from "./subjects";
 import { KIT_APPS, SUBJECT_NAMES, type ClassStore, type GraphSpec, type KitApp, type Plan, type PocketItem, type Sketch, type StudyMode, type StudySet, type Subject, type Table, type LibApp, type LibItem } from "./types";
 
@@ -473,7 +473,7 @@ const KitHost = forwardRef<KitHandle, {
         return true;
       }
       if (app === "sketch") {
-        loadSketch(sketch ? editRequest(text) : text);
+        loadSketch(sketch && !isNewSketch(text) ? editRequest(text) : text);
         return true;
       }
       if (app === "notes") {

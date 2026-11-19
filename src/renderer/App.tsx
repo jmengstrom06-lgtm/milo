@@ -189,6 +189,7 @@ export default function App() {
   const ears = useRef<Ears | null>(null);
   /** Self-test: feed a sentence in exactly as if the ears just heard it (see src/main/selftest.ts). */
   const heardRef = useRef<((t: string, ptt: boolean) => void) | null>(null);
+  const testDeaf = useRef(false); // during the self-test the real mic is ignored completely
   if (!ears.current) ears.current = new Ears();
   const notebookRef = useRef<NotebookHandle>(null);
   const lessonRef = useRef<MiloLesson | null>(null);
@@ -345,7 +346,7 @@ export default function App() {
     lastSaid.current = text;
     const t0 = Date.now();
     bb("say", { text, voiceOn: voiceRef.current, bargeIn: !opts.noBarge });
-    ears.current?.mute(true, !opts.noBarge); // don't let Milo hear himself
+    ears.current?.mute(true, !opts.noBarge && !testDeaf.current); // don't let Milo hear himself
     try {
       if (!voiceRef.current) {
         setSpeaking(true);
@@ -371,6 +372,7 @@ export default function App() {
   // ---- ears ---------------------------------------------------------------------
   /** Listen for one thing (push-to-talk / follow-up). In hands-free mode, just open a no-wake-word window. */
   const listen = useCallback(async (pushToTalk = false) => {
+    if (testDeaf.current) return;
     const e = ears.current!;
     if (e.mode === "always" && pushToTalk) {
       // Push-to-talk beats hands-free: listen to just you right now, then go back to hands-free.
@@ -1574,17 +1576,20 @@ export default function App() {
         if (q) take(q);
       }
     };
-    e.onUtterance = (wav, pushToTalk, forced) => take({ wav, pushToTalk, forced });
+    e.onUtterance = (wav, pushToTalk, forced) => {
+      if (!testDeaf.current) take({ wav, pushToTalk, forced });
+    };
     // Smart ears: the words are already transcribed (and Flux decided you were done).
     e.onTranscript = (text, pushToTalk, forced, wav) => {
       setLive(null);
+      if (testDeaf.current) return;
       window.milo.saveClip(wav, text);
       take({ wav, text, pushToTalk, forced });
     };
     // Your words, live, while you're still talking (only when you're clearly talking to Milo).
     e.onPartial = (t) => {
       const toMilo = e.mode === "once" || !!pendingRef.current || Date.now() < followUntil.current || /\b(milo|mylo|my low)\b/i.test(t);
-      if (toMilo) setLive(t.length > 140 ? "…" + t.slice(-140) : t);
+      if (toMilo && !testDeaf.current) setLive(t.length > 140 ? "…" + t.slice(-140) : t);
     };
     window.milo.fluxAvailable().then((ok) => e.setSmart(ok));
     const offFlux = window.milo.onFlux((ev) => {
@@ -1755,8 +1760,14 @@ export default function App() {
         return;
       }
 
-      // Everything else goes on the "Got it" card first.
+      // Everything else goes on the "Got it" card first, except a few that can only mean one thing:
+      // "what can you do", "open sketch", "hold this", "flag that". Those happen the moment you finish.
       const cleaned = stripGo(text);
+      const sure = fastDecide(cleaned, { kitOpen: null, researchOpen: false, toolOpen: false, lessonOpen: false, hasLastAnswer: false });
+      if (sure && ["kit_menu", "open_kit", "hold", "flag"].includes(sure.do)) {
+        bb("card_skipped", { text: cleaned, do: sure.do });
+        return runPending(cleaned);
+      }
       setPendingCmd(cleaned, cleaned !== text.trim());
     };
     heardRef.current = (t: string, ptt: boolean) => void handle(new ArrayBuffer(0), ptt, false, t);
@@ -1814,7 +1825,7 @@ export default function App() {
       const P = pendingRef.current;
       if (!P) return;
       P.first = P.first ?? Date.now();
-      const stillTalking = earStateRef.current === "hearing" || earStateRef.current === "thinking" || levelRef.current > 0.3;
+      const stillTalking = !testDeaf.current && (earStateRef.current === "hearing" || earStateRef.current === "thinking" || levelRef.current > 0.3);
       if (stillTalking && Date.now() - P.first < 30000) {
         P.started = Date.now(); // you're still talking: hold
         setPending((p) => (p ? { ...p, progress: 0 } : p));
@@ -1971,7 +1982,16 @@ export default function App() {
       key: (k: string) => window.dispatchEvent(new KeyboardEvent("keydown", { key: k })),
       move: (x: number, y: number) => setPos({ x, y }),
       chat: (on: boolean) => setChatOpen(on),
-      quietEars: () => ears.current?.setMode("off"),
+      quietEars: () => {
+        testDeaf.current = true;
+        ears.current?.setMode("off");
+        // switching the mic off mid-sound must not leave "you're still talking" behind
+        earStateRef.current = "off";
+        setEarState("off");
+        levelRef.current = 0;
+        setLevel(0);
+        setLive(null);
+      },
       reset: () => {
         hush();
         pendingRef.current = null;

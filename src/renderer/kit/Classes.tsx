@@ -18,7 +18,7 @@ export function ClassBar({ store, onPick, onEdit }: { store: ClassStore; onPick:
     <div className="cls-bar">
       <button className={`cls-chip ${!store.active ? "cls-chip--on" : ""}`} onClick={() => onPick(null)}>All</button>
       {store.classes.map((c) => (
-        <button key={c.id} className={`cls-chip ${store.active === c.id ? "cls-chip--on" : ""}`} onClick={() => onPick(store.active === c.id ? null : c.id)} title={`${c.code ? c.code + " · " : ""}${c.name} (${SUBJECT_NAMES[c.subject]})`}>
+        <button key={c.id} className={`cls-chip ${store.active === c.id ? "cls-chip--on" : ""}`} onClick={() => onPick(c.id)} title={`${c.code ? c.code + " · " : ""}${c.name} (${SUBJECT_NAMES[c.subject]})`}>
           <span className="cls-dot" style={{ background: c.color }} />
           {short(c)}
         </button>

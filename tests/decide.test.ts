@@ -90,3 +90,15 @@ describe("kit instants", () => {
     ["open the spreadsheet", "sheet"],
   ])("%s", (t, app) => expect(d(t)).toEqual({ do: "open_kit", app }));
 });
+
+describe("misheard commands", () => {
+  it.each([
+    ["Milo closed the message tab.", "close the message tab."],
+    ["Milo, closed messages", "close messages"],
+    ["opened sketch", "open sketch"],
+  ])("%s", (a, b) => expect(stripFiller(a)).toBe(b));
+  it("leaves normal sentences alone", () => {
+    expect(stripFiller("the store closed early")).toBe("the store closed early");
+    expect(stripFiller("I opened it already")).toBe("I opened it already");
+  });
+});

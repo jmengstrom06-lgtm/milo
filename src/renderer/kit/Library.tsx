@@ -71,6 +71,14 @@ export function matchClass(text: string, classes: Klass[]): Klass | null {
   return null;
 }
 
+/** While a drawing is open: is this a NEW drawing ("draw a plant cell", "graph y = x^3")
+ *  or a change to the one on screen ("add labels", "make it bigger", "show the roots")? */
+export function isNewSketch(text: string): boolean {
+  const t = text.toLowerCase().trim();
+  if (/^(make it|make the|make them|change|add|remove|delete|label|zoom|color|colour|move|show the|shade|highlight|rename|fix|undo|bigger|smaller)\b/.test(t)) return false;
+  return /^(?:can you |could you |please |now )?(draw|sketch|graph|plot|diagram|illustrate|create|make|show)( me)? (a|an|another|some|y\b|f\(|x\b|the graph of|the function|the (water|life|cell|krebs|nitrogen|carbon|rock) cycle)/.test(t);
+}
+
 /** "show my math sketches" / "open my bio folder" / "what did I save for stats" -> a library view. */
 export function parseBrowse(text: string): { filter: LibFilter; latest: boolean } | null {
   const t = text.toLowerCase().replace(/[.!?]+$/, "");

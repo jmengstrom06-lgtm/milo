@@ -6,7 +6,7 @@ import path from "node:path";
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "milo-lib-"));
 vi.mock("electron", () => ({ app: { getPath: () => dir }, ipcMain: { handle: () => {} } }));
 
-import { matchClass, parseBrowse, noteInClass } from "../src/renderer/kit/Library";
+import { isNewSketch, matchClass, parseBrowse, noteInClass } from "../src/renderer/kit/Library";
 import * as lib from "../src/main/library";
 
 const classes = [
@@ -69,4 +69,9 @@ describe("library storage", () => {
     lib.deleteItem(a.id);
     expect(lib.listItems({ classId: "all" }).length).toBe(1);
   });
+});
+
+describe("isNewSketch", () => {
+  it.each(["draw a plant cell for Math", "graph y = x^3", "sketch the water cycle", "plot f(x) = sin x", "draw me a cell", "make a diagram of a neuron", "can you draw another one"])("new: %s", (t) => expect(isNewSketch(t)).toBe(true));
+  it.each(["add labels", "make it bigger", "show the roots", "label the nucleus", "change the color to blue", "draw the tangent line at x = 1", "zoom in"])("edit: %s", (t) => expect(isNewSketch(t)).toBe(false));
 });

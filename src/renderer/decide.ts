@@ -25,7 +25,9 @@ export type Fast =
 
 /** "Uh, cool, okay, so…" -> the actual command. Filler never decides anything. */
 export function stripFiller(raw: string): string {
-  return raw.replace(/^(?:(?:hey|ok(?:ay)?|so|uh+|um+|cool|alright|all right|yeah|well|and|milo)\b[,.]?\s*)+/i, "").trim() || raw;
+  const t = raw.replace(/^(?:(?:hey|ok(?:ay)?|so|uh+|um+|cool|alright|all right|yeah|well|and|milo)\b[,.]?\s*)+/i, "").trim() || raw;
+  // Speech-to-text often hears "Milo, close…" as "Milo closed…". A sentence that starts that way is a command.
+  return t.replace(/^(clos|open)ed\b/i, (_m, w: string) => (w.toLowerCase() === "clos" ? "close" : "open"));
 }
 /** Lowercase, no end punctuation, no politeness ("can you", "would you", "for me"). */
 export function plainOf(text: string): string {

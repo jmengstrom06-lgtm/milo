@@ -13,7 +13,8 @@ const RATE = 16000;
 const FRAME = 1024; // 64 ms per frame at 16 kHz
 const PRE_ROLL = 12; // ~770 ms kept from before speech starts (so soft first words aren't lost)
 const WARMUP_FRAMES = 13; // ~830 ms at the start of each line: just learn Milo's own loudness
-const BARGE_FRAMES = 7; // ~450 ms of you talking over him to interrupt
+const BARGE_FRAMES = 4; // ~260 ms of you talking over him to interrupt (a quick "stop" is ~300 ms)
+const BARGE_FRAMES_LOUD = 3; // ~190 ms if you're clearly louder than usual
 const START_FRAMES = 4; // ~256 ms of voice to count as speech
 const MIN_VOICED_S = 0.5; // shorter than this is a cough/click, not words
 const VOICE_RATIO = 0.45; // share of energy that must sit in the human-voice band (300-3400 Hz)
@@ -196,6 +197,7 @@ export class Ears {
     if (mode === "off") {
       this.stopStream();
       this.close();
+      this.onLevel(0); // a closed mic is silent: never leave the last loud reading behind
       this.onState("off");
       return;
     }
@@ -327,13 +329,14 @@ export class Ears {
         return;
       }
       if (!this.bargeOk) return;
-      const thresh = Math.max(0.06, this.echo * 2.2, this.userLevel * 0.85);
+      // You have to be clearly louder than his own voice in the mic, and about as loud as you normally talk.
+      const thresh = Math.max(0.05, this.echo * 2.2, this.userLevel * 0.7);
       if (rms > thresh) this.bargeRun++;
       else {
         this.bargeRun = 0;
         this.echo = Math.max(this.echo * 0.997, rms); // keep tracking his peaks, slowly forget
       }
-      if (this.bargeRun >= BARGE_FRAMES) {
+      if (this.bargeRun >= BARGE_FRAMES || (this.bargeRun >= BARGE_FRAMES_LOUD && rms > thresh * 1.6)) {
         this.onDebug("barge_in", { rms: +rms.toFixed(4), thresh: +thresh.toFixed(4), echo: +this.echo.toFixed(4), userLevel: +this.userLevel.toFixed(4) });
         this.bargedAt = Date.now();
         this.bargeRun = 0;
