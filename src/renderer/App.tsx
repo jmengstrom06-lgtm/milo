@@ -7,7 +7,7 @@ import { Bubble, Confetti, Highlight } from "./Effects";
 import * as tts from "./voice";
 import ResearchPanel, { PanelSize } from "./ResearchPanel";
 import KitHost, { type KitHandle } from "./kit/KitHost";
-import KitRing from "./kit/KitRing";
+import KitRing, { ringLayout } from "./kit/KitRing";
 import type { KitApp } from "./kit/types";
 import { Pin, SweepHUD, SweepState, SweepSummary, WorkCard } from "./Sweep";
 import { setSounds, sfx, soundsOn } from "./sfx";
@@ -1985,6 +1985,15 @@ export default function App() {
   // otherwise beside him on the side away from the notebook, otherwise below.
   const bubblePos = (): React.CSSProperties => {
     const maxW = 280;
+    // His apps are fanned out around him: stack the bubble above the ring (or below it, near the top), centered.
+    if (ringOpen) {
+      const L = ringLayout({ x: pos.x + MILO_W / 2, y: pos.y + MILO_H / 2 }, W, H);
+      const cx = clamp((L.box.left + L.box.right) / 2, MARGIN + maxW / 2, W - MARGIN - maxW / 2);
+      const above = L.dir === "up" && L.box.top > 110;
+      return above
+        ? { left: cx, translate: "-50% 0", bottom: H - L.box.top + 14, maxWidth: maxW, zIndex: 61 }
+        : { left: cx, translate: "-50% 0", top: L.box.bottom + 14, maxWidth: maxW, zIndex: 61 };
+    }
     if (pos.y > 170) {
       return { left: clamp(pos.x + MILO_W / 2 - maxW / 2, MARGIN, W - maxW - MARGIN), bottom: H - pos.y + 4, maxWidth: maxW };
     }
