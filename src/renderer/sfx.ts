@@ -53,6 +53,10 @@ export const sfx = {
   tick: () => play(() => tone(1760, 0, 0.07, 0.04)),
   /** finished something */
   success: () => play(() => [659, 831, 988].forEach((f, i) => tone(f, i * 0.07, 0.35, 0.05))),
+  /** knuckles on glass: two quick taps (lock-in mode) */
+  knock: () => play(() => [0, 0.16].forEach((t) => { tone(190, t, 0.07, 0.11, "triangle"); tone(95, t, 0.05, 0.07, "sine"); })),
+  /** lock-in starts: a low rising "whoomp" */
+  lockin: () => play(() => [196, 294, 392, 587].forEach((f, i) => tone(f, i * 0.06, 0.5 - i * 0.05, 0.05, "triangle"))),
   /** wrong / mistake spotted */
   alert: () => play(() => [440, 370].forEach((f, i) => tone(f, i * 0.1, 0.18, 0.05, "triangle"))),
 };

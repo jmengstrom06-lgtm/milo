@@ -24,6 +24,9 @@ import { stopNative } from "./native";
 import { account, onAccountChange, sendCode, signOut, startCallbackServer, userId, verifyCode } from "./account";
 import { forgetAll, memories, syncMemories } from "./memory";
 import { captureError, identify, startTelemetry, track } from "./telemetry";
+import { allowForSession, backToWork, startFocus, stopFocus } from "./focus";
+import { planBlocks } from "./focusRules";
+import { rest } from "./account";
 import { click, ensureBrowser, frontApp, openApp, openFolder, openLatestDownload, openUrl, pressKeys, quitApp, typeText } from "./hands";
 import { plan } from "./quick";
 import { research } from "./research";
@@ -749,6 +752,43 @@ onAccountChange(async () => {
   await syncMemories();
   overlay?.webContents.send("milo:account-changed");
 });
+// ---------- lock-in mode ----------
+ipcMain.handle("milo:focus-start", (_e, minutes: number) => {
+  startFocus((st) => overlay?.webContents.send("milo:focus-state", st));
+  const m = Math.max(5, Math.min(240, Math.round(Number(minutes) || 25)));
+  track("lockin_start", { minutes: m });
+  return planBlocks(m);
+});
+ipcMain.handle("milo:focus-stop", () => {
+  stopFocus();
+  return true;
+});
+ipcMain.handle("milo:focus-allow", (_e, label: string) => {
+  allowForSession(String(label || "").slice(0, 40));
+  return true;
+});
+ipcMain.handle("milo:focus-back", () => backToWork());
+ipcMain.handle(
+  "milo:focus-save",
+  async (_e, s: { topic?: string; plannedMinutes: number; focusedSeconds: number; slips: number; longestStreakSeconds: number; completed: boolean; startedAt: string }) => {
+    track("lockin_done", { minutes: Math.round(s.focusedSeconds / 60), slips: s.slips, completed: s.completed });
+    if (!userId()) return false;
+    const r = await rest("focus_sessions", {
+      method: "POST",
+      prefer: "return=minimal",
+      body: {
+        topic: s.topic?.slice(0, 60) || null,
+        planned_minutes: Math.max(1, Math.min(600, Math.round(s.plannedMinutes))),
+        focused_seconds: Math.max(0, Math.round(s.focusedSeconds)),
+        slips: Math.max(0, Math.round(s.slips)),
+        longest_streak_seconds: Math.max(0, Math.round(s.longestStreakSeconds)),
+        completed: !!s.completed,
+        started_at: s.startedAt,
+      },
+    });
+    return !!r;
+  }
+);
 ipcMain.handle("milo:memories", () => memories());
 ipcMain.handle("milo:forget-all", async () => {
   await forgetAll();
@@ -816,6 +856,7 @@ app.whenReady().then(() => {
 
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
+  stopFocus();
   stopNative();
 });
 app.on("window-all-closed", () => app.quit());

@@ -36,6 +36,13 @@ An animated AI companion that lives on your screen.
 
 "Hey Milo" (hands-free) is on by default; turn it off with the Hands-free chip.
 
+### Lock-in mode
+- "Milo, lock in for 45 minutes on stats" (or "lock in", "focus mode", "pomodoro", "help me focus on my essay")
+- Big LOCKED IN intro, then Milo sits in the corner studying with a timer badge. Long sessions get 25/5 breaks.
+- Drift to TikTok, Instagram, YouTube, Reddit, Messages, Discord… and after 6 seconds Milo walks over to that window and knocks on it. Still there at 25 seconds: he covers it with a card and stands on top. **Take me back** returns you to the exact app and Chrome tab you were working in. **It's for school** stops counting that site this session. **2-min pass** gives you two minutes.
+- Class videos on YouTube (lectures, tutorials, "explained") don't count. Shorts always do.
+- "How much time is left?", "I'm done" / "stop the lock in" end it. Recap card with focus score, slips, longest streak and day streak. Sessions save to your account.
+
 ### Final boss features
 - **Worksheet Sweep:** "do this whole worksheet". Every question solved, answers typed into each box or pinned on the page, progress bar, summary with Copy all
 - **Build-a-Tool:** "make me a final grade calculator". Watch the code write itself, then use the app; save to My Tools

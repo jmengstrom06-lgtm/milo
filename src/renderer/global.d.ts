@@ -9,8 +9,15 @@ declare global {
     | { type: "end"; turn: number; text: string; confidence: number; trigger?: string }
     | { type: "closed"; reason: string }
     | { type: "error"; text: string };
+  type MiloFocusState = {
+    status: "work" | "distracted" | "neutral";
+    label?: string;
+    app: string;
+    box?: MiloBox | null;
+  };
   type MiloRoute = {
-    kind: "chat" | "look" | "task" | "research" | "move" | "close" | "open_result" | "screen_question" | "kit" | "in_app" | "kit_menu" | "hold" | "drop" | "sweep" | "build" | "quiz" | "brief" | "watch" | "checkwork";
+    kind: "chat" | "look" | "task" | "research" | "move" | "close" | "open_result" | "screen_question" | "kit" | "in_app" | "kit_menu" | "hold" | "drop" | "sweep" | "build" | "quiz" | "brief" | "watch" | "checkwork" | "lockin";
+    minutes?: number;
     mode?: MiloMode;
     followUp?: boolean;
     where?: string;
@@ -118,7 +125,7 @@ declare global {
       ask: (history: { role: "user" | "assistant"; content: string }[]) => Promise<{ ok: boolean; text: string }>;
       route: (
         text: string,
-        ctx?: { researchOpen?: boolean; researchTopic?: string; inLesson?: boolean; lessonTopic?: string; toolOpen?: string; kitOpen?: string; quizOpen?: boolean; lastCommand?: string }
+        ctx?: { researchOpen?: boolean; researchTopic?: string; inLesson?: boolean; lessonTopic?: string; toolOpen?: string; kitOpen?: string; quizOpen?: boolean; lockinOn?: boolean; lastCommand?: string }
       ) => Promise<MiloRoute>;
       look: (mode: MiloMode, request: string, focus?: MiloBox | null) => Promise<{ ok: true; lesson: MiloLesson; box: MiloBox | null; others: MiloOther[] } | Err>;
       refine: (box: MiloBox, topic: string) => Promise<{ ok: true; box: MiloBox } | Err>;
@@ -133,6 +140,20 @@ declare global {
       accountSignOut: () => Promise<{ signedIn: boolean; email: string }>;
       memories: () => Promise<string[]>;
       onAccountChange: (cb: () => void) => () => void;
+      focusStart: (minutes: number) => Promise<{ focus: number; rest: number }[]>;
+      focusStop: () => Promise<boolean>;
+      focusAllow: (label: string) => Promise<boolean>;
+      focusBack: () => Promise<string | null>;
+      focusSave: (s: {
+        topic?: string;
+        plannedMinutes: number;
+        focusedSeconds: number;
+        slips: number;
+        longestStreakSeconds: number;
+        completed: boolean;
+        startedAt: string;
+      }) => Promise<boolean>;
+      onFocusState: (cb: (s: MiloFocusState) => void) => () => void;
       forgetAll: () => Promise<boolean>;
       reportError: (err: { name?: string; message?: string; stack?: string }) => void;
       task: (task: string) => Promise<{ ok: true; status: "done" | "ask" | "stopped" | "quick"; text: string; rest?: string | null; did?: string[] } | Err>;

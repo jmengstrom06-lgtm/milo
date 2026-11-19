@@ -78,6 +78,16 @@ contextBridge.exposeInMainWorld("milo", {
   accountSignOut: () => ipcRenderer.invoke("milo:account-signout"),
   memories: () => ipcRenderer.invoke("milo:memories"),
   onAccountChange: (cb: () => void) => on("milo:account-changed", cb),
+  focusStart: (minutes: number) => ipcRenderer.invoke("milo:focus-start", minutes),
+  focusStop: () => ipcRenderer.invoke("milo:focus-stop"),
+  focusAllow: (label: string) => ipcRenderer.invoke("milo:focus-allow", label),
+  focusBack: () => ipcRenderer.invoke("milo:focus-back"),
+  focusSave: (s: unknown) => ipcRenderer.invoke("milo:focus-save", s),
+  onFocusState: (cb: (s: unknown) => void) => {
+    const l = (_e: unknown, s: unknown) => cb(s);
+    ipcRenderer.on("milo:focus-state", l);
+    return () => ipcRenderer.removeListener("milo:focus-state", l);
+  },
   forgetAll: () => ipcRenderer.invoke("milo:forget-all"),
   reportError: (err: { name?: string; message?: string; stack?: string }) => ipcRenderer.send("milo:renderer-error", err),
   task: (task: string) => ipcRenderer.invoke("milo:task", task),

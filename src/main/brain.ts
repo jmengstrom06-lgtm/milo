@@ -502,8 +502,8 @@ How to work:
 // Router: decides what the student wants, knowing what's open on screen right now.
 export type RouteKind =
   | "chat" | "look" | "task" | "research" | "move" | "close" | "open_result" | "screen_question" | "kit" | "in_app" | "kit_menu" | "hold" | "drop"
-  | "sweep" | "build" | "quiz" | "brief" | "watch" | "checkwork";
-export type Route = { kind: RouteKind; mode?: Mode; followUp?: boolean; where?: string; question?: string; on?: boolean; after?: string; app?: string; target?: string; request?: string; failed?: boolean };
+  | "sweep" | "build" | "quiz" | "brief" | "watch" | "checkwork" | "lockin";
+export type Route = { kind: RouteKind; minutes?: number; mode?: Mode; followUp?: boolean; where?: string; question?: string; on?: boolean; after?: string; app?: string; target?: string; request?: string; failed?: boolean };
 export type RouteCtx = {
   researchOpen?: boolean;
   researchTopic?: string;
@@ -512,6 +512,7 @@ export type RouteCtx = {
   toolOpen?: string;
   kitOpen?: string;
   quizOpen?: boolean;
+  lockinOn?: boolean;
   lastCommand?: string;
 };
 
@@ -523,7 +524,7 @@ const ROUTE_TOOL = {
     properties: {
       kind: {
         type: "string",
-        enum: ["chat", "look", "task", "research", "move", "close", "open_result", "screen_question", "kit", "in_app", "kit_menu", "hold", "drop", "sweep", "build", "quiz", "brief", "watch", "checkwork"],
+        enum: ["chat", "look", "task", "research", "move", "close", "open_result", "screen_question", "kit", "in_app", "kit_menu", "hold", "drop", "sweep", "build", "quiz", "brief", "watch", "checkwork", "lockin"],
         description: [
           "in_app = ONLY when one of Milo's apps is open (see 'Right now'): the request is something to do INSIDE that open app. Sheet: change the data or chart ('make it a box plot', 'add a z-score column', 'sort by score', 'who's above average', 'more bins', 'make another example'). Study: answer the problem, next, hint, another one, harder, explain. Sketch: change the drawing/graph ('shade above 80', 'add labels'). Notes: add to / ask about / quiz on the open note. Planner: change the plan. NOT in_app: closing it, opening a different app, anything outside the app (Chrome, moving, research).",
           "research = a request for information about the world (people, events, news, weather, scores, prices, facts, 'look up', 'tell me about', 'do some research on') when the student did NOT ask for Chrome / a browser / a tab / a website. Shown in Milo's own research box.",
@@ -537,6 +538,7 @@ const ROUTE_TOOL = {
           "close = close / dismiss what Milo has open himself: one of his apps (Sheet, Study, Notes, Sketch, Planner: 'close that', 'close the sheet', 'get rid of this'), his research box (it looks like a browser window, the student may call it 'the tab', 'this tab', 'the research tab', 'that page', 'the window'), a tool he built, or a lesson. When Milo's research box is open, 'close this tab' / 'close that' means the research box, not Chrome.",
           "open_result = open the page shown in the research box in Chrome ('open it in Chrome', 'open that article').",
           "sweep = do every question on the page. build = make a small working app/tool/calculator. quiz = quiz me. brief = what's due / daily brief. watch = watch me work (on:false to stop). checkwork = check my work once.",
+          "lockin = start a focus session where Milo studies alongside the student and pulls them back when they drift to TikTok, Instagram, YouTube etc.: 'lock in', 'lock in for 45 minutes on stats', 'focus mode', 'help me focus', 'start a pomodoro', 'keep me off my phone while I study', 'I need to grind out this essay'. Set minutes if they gave a length and request = the subject if they named one. on:false to end a running session: 'stop the lock in', 'end focus', 'I'm done studying'.",
           "chat = conversation, or a quick question about a concept ('what is a derivative?'). But 'teach me X' / 'help me learn X' / 'I don't understand X' = kit study (a real lesson with practice).",
         ].join(" "),
       },
@@ -548,7 +550,8 @@ const ROUTE_TOOL = {
         description: "For move: where Milo should go. 'away' = out of the way / other side.",
       },
       question: { type: "string", description: "For research: the question, cleaned up (drop filler like 'do some research on')." },
-      on: { type: "boolean", description: "For watch: true to start, false to stop." },
+      on: { type: "boolean", description: "For watch and lockin: true to start, false to stop." },
+      minutes: { type: "number", description: "For lockin: session length in minutes, if the student said one ('an hour' = 60)." },
       app: { type: "string", enum: ["study", "sketch", "notes", "sheet", "planner", "pocket"], description: "For kit: which of Milo's apps." },
       target: { type: "string", description: "For drop: where to paste it, in their words (e.g. 'ChatGPT', 'my Google Doc'). Empty = where they were." },
       after: { type: "string", description: "When the student asked for more than one thing: EVERYTHING after the first thing, in their words and order, e.g. 'close that and open your notes and make a note that I have a flight' -> kind close, after 'open your notes and make a note that I have a flight'. Milo routes it again after doing the first part." },
@@ -565,6 +568,7 @@ function routeSystem(ctx: RouteCtx) {
   if (ctx.toolOpen) now.push(`A tool Milo built is open: "${ctx.toolOpen}".`);
   if (ctx.kitOpen) now.push(`Milo's app is OPEN on screen: ${ctx.kitOpen}. Requests to change or use it are in_app; 'close that' closes it.`);
   if (ctx.quizOpen) now.push("A quiz is open.");
+  if (ctx.lockinOn) now.push("A lock-in focus session is RUNNING. 'I'm done' / 'stop' / 'end it' about studying = lockin with on:false.");
   if (ctx.lastCommand) now.push(`The student's previous command was: "${ctx.lastCommand}".`);
   return [
     "You route requests for Milo, a desktop study companion (an animated frog that lives on the student's screen).",

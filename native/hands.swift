@@ -199,6 +199,22 @@ func handle(_ m: [String: Any]) {
         reply(id, ["ok": true, "name": app?.localizedName ?? "", "bundle": app?.bundleIdentifier ?? ""])
     case "elements":
         reply(id, ["ok": true, "elements": readElements(limit: Int(num(m["limit"]) ?? 250))])
+    case "window":
+        // The front app's focused window: name, title and where it is on screen (points).
+        let app = NSWorkspace.shared.frontmostApplication
+        var out: [String: Any] = ["ok": true, "name": app?.localizedName ?? "", "bundle": app?.bundleIdentifier ?? ""]
+        if trusted, let pid = app?.processIdentifier {
+            let axApp = AXUIElementCreateApplication(pid)
+            if let win = attr(axApp, kAXFocusedWindowAttribute) {
+                let w = win as! AXUIElement
+                out["title"] = short(attr(w, kAXTitleAttribute))
+                if let f = frameOf(w) {
+                    out["x"] = Int(f.origin.x); out["y"] = Int(f.origin.y)
+                    out["w"] = Int(f.width); out["h"] = Int(f.height)
+                }
+            }
+        }
+        reply(id, out)
     default:
         reply(id, ["ok": false, "error": "unknown command \(cmd)"])
     }

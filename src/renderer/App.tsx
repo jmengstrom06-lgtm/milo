@@ -16,6 +16,8 @@ import QuizPanel, { QuizHandle } from "./QuizPanel";
 import { BriefCard, BriefLoader, BriefState, SignInPanel } from "./Brief";
 import { fastDecide, stripFiller, type DecideState } from "./decide";
 import AccountChip from "./Account";
+import LockIn, { type LockInHandle } from "./LockIn";
+import { parseLockIn } from "../main/focusRules";
 import { stripMath } from "./MathText";
 
 type Msg = { role: "user" | "assistant"; content: string };
@@ -155,6 +157,9 @@ export default function App() {
   const [tool, setTool] = useState<{ request: string; id: number; existing?: SavedTool | null } | null>(null);
   const [tools, setTools] = useState<SavedTool[]>(loadTools);
   const [watching, setWatching] = useState(false);
+  // Lock-in mode (focus sessions)
+  const lockRef = useRef<LockInHandle>(null);
+  const [lockOn, setLockOn] = useState(false);
   const [quiz, setQuiz] = useState<{ id: number; topic: string; questions: QuizQ[]; focus: string } | null>(null);
   const quizRef = useRef<QuizHandle>(null);
   const [brief, setBrief] = useState<BriefState | null>(null);
@@ -310,7 +315,7 @@ export default function App() {
 
   // Wander along the bottom when nothing is going on.
   useEffect(() => {
-    if (chatOpen || lesson || busy || working || researchQ || kitApp) return; // stay put while a box is open
+    if (chatOpen || lesson || busy || working || researchQ || kitApp || lockOn) return; // stay put while a box is open or locked in
     if (homeSpot() !== "bottom-right") return; // you put him somewhere: he stays there
     const t = window.setInterval(() => {
       if (animRef.current) return;
@@ -321,7 +326,7 @@ export default function App() {
       } else if (r < 0.65) setMood("sitting");
     }, 7000);
     return () => window.clearInterval(t);
-  }, [chatOpen, lesson, busy, working, moveTo, researchQ, kitApp]);
+  }, [chatOpen, lesson, busy, working, moveTo, researchQ, kitApp, lockOn]);
 
   // ---- voice ------------------------------------------------------------------
   const say = useCallback(async (text: string, opts: { minMs?: number; noBarge?: boolean } = {}) => {
@@ -1104,6 +1109,7 @@ export default function App() {
     toolOpen: tool ? tool.request : undefined,
     kitOpen: kitApp ? kitRef.current?.describe() || `Milo's ${kitApp} app` : undefined,
     quizOpen: !!quiz,
+    lockinOn: lockOn,
     lastCommand: lastCommand.current || undefined,
   });
   routeRef.current = (raw: string, spoken = true) => {
@@ -1111,6 +1117,33 @@ export default function App() {
     const text = stripFiller(raw);
     const dstate: DecideState = { kitOpen: (kitApp as DecideState["kitOpen"]) ?? null, researchOpen: !!researchQ, toolOpen: !!tool, lessonOpen: !!lessonRef.current, hasLastAnswer: !!lastAnswer() };
     if (fastDecide(text, dstate)?.do === "flag") return flagNow(text);
+
+    // Lock-in: unmistakable starts and stops, no AI call needed.
+    {
+      const lt = text.toLowerCase().replace(/[.!?]+$/, "").trim();
+      if (lockOn) {
+        if (/^(stop|end|cancel|quit|finish|kill)( the| this| my)?( lock[- ]?in| focus( mode| session)?| session| studying| pomodoro)?$|^(i'?m|we'?re) (done|finished)( studying| here| for (now|today))?$|^unlock( me)?$|^that'?s (it|enough)( for (now|today))?$/.test(lt)) {
+          lockRef.current?.stop("voice");
+          return;
+        }
+        if (/\b(how (much|long)|what'?s the) (time )?(is )?(left|remaining|to go)\b|\bhow long (do i have|until|till|left)\b|\btime left\b/.test(lt)) {
+          const left = lockRef.current?.timeLeftText();
+          say(left ? `${left} left. You've got this.` : "Almost done.").then(() => setBubble(null));
+          return;
+        }
+      }
+      if (/^(let'?s |time to |i (need|want) to |help me )?(lock (me )?in|start (a |the )?(lock[- ]?in|focus (session|mode)|study session|pomodoro)|focus mode|pomodoro|help me focus|study session)\b/.test(lt)) {
+        setChatOpen(false);
+        if (lockOn) {
+          say("We're already locked in.").then(() => setBubble(null));
+          return;
+        }
+        const p = parseLockIn(lt);
+        bb("route_instant", { text, kind: "lockin", minutes: p.minutes, topic: p.topic });
+        lockRef.current?.start(p.minutes ?? 25, p.topic);
+        return;
+      }
+    }
     // Unmistakable commands for the open Milo app ("next", "the answer is 5", "box plot").
     if (kitApp && kitRef.current?.voice(text)) return;
 
@@ -1393,6 +1426,22 @@ export default function App() {
       case "checkwork":
         checkWorkNow();
         return;
+      case "lockin": {
+        setChatOpen(false);
+        if (rt.on === false) {
+          if (lockOn) lockRef.current?.stop("voice");
+          else say("We're not locked in right now.").then(() => setBubble(null));
+          return;
+        }
+        if (lockOn) {
+          say("We're already locked in.").then(() => setBubble(null));
+          return;
+        }
+        const p = parseLockIn(text);
+        const minutes = rt.minutes && rt.minutes > 0 ? Math.round(rt.minutes) : p.minutes ?? 25;
+        lockRef.current?.start(Math.max(5, Math.min(240, minutes)), rt.request?.trim() || p.topic);
+        return;
+      }
       default:
         chat(text, spoken);
     }
@@ -2200,6 +2249,21 @@ export default function App() {
       {!bubble && !pending && !heard && earState === "thinking" && <Bubble text="…" style={bStyle} heard />}
       {!bubble && !pending && !heard && live && earState !== "thinking" && <Bubble text={live} style={bStyle} heard />}
       {confetti && <Confetti key={confetti.seed} {...confetti} />}
+      <LockIn
+        ref={lockRef}
+        miloPos={pos}
+        onActive={setLockOn}
+        api={{
+          say,
+          moveTo,
+          setMood,
+          setBubble,
+          home,
+          confetti: (x, y) => setConfetti({ x, y, seed: Date.now() }),
+          hover,
+          pos: () => posRef.current,
+        }}
+      />
 
       {chatOpen && (
         <div className="panel" style={{ left: panelLeft, bottom: H - pos.y + 16, width: panelW }} onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)}>
