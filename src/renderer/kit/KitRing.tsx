@@ -89,3 +89,43 @@ export default function KitRing({
     </div>
   );
 }
+
+/**
+ * Where Milo's speech bubble goes while his apps are fanned out: never on a button, never on Milo, never off screen.
+ * Tries above everything, then below, then beside, sized for the actual reply.
+ */
+export function bubbleNearRing(
+  L: RingLayout,
+  milo: { x: number; y: number; w: number; h: number },
+  W: number,
+  H: number,
+  text: string,
+): React.CSSProperties {
+  const M = 16;
+  const GAP = 14;
+  const maxW = 280;
+  const u = {
+    left: Math.min(L.box.left, milo.x),
+    right: Math.max(L.box.right, milo.x + milo.w),
+    top: Math.min(L.box.top, milo.y),
+    bottom: Math.max(L.box.bottom, milo.y + milo.h),
+  };
+  // the bubble is handwriting at 21px: about 9.5px a letter, 24px a line, plus padding and its shadow (a safe overestimate)
+  const lines = (w: number) => Math.max(1, Math.ceil((text.length * 9.5) / w));
+  const tall = (w: number) => lines(w) * 24.2 + 26;
+  const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+  const cx = clamp((u.left + u.right) / 2, M + maxW / 2, W - M - maxW / 2);
+  const h = tall(maxW);
+  if (u.top - GAP - h >= M) return { left: cx, translate: "-50% 0", width: "max-content", bottom: H - u.top + GAP, maxWidth: maxW };
+  if (u.bottom + GAP + h <= H - M) return { left: cx, translate: "-50% 0", width: "max-content", top: u.bottom + GAP, maxWidth: maxW };
+  const roomR = W - u.right - GAP - M;
+  const roomL = u.left - GAP - M;
+  const side = roomR >= roomL ? "right" : "left";
+  const w = Math.min(maxW, Math.max(roomR, roomL));
+  if (w >= 170) {
+    const top = clamp((u.top + u.bottom) / 2 - tall(w) / 2, M, H - M - tall(w));
+    return side === "right" ? { left: u.right + GAP, top, maxWidth: w } : { right: W - u.left + GAP, top, maxWidth: w };
+  }
+  // tiny screen: hug the top
+  return { left: cx, translate: "-50% 0", width: "max-content", top: M, maxWidth: maxW };
+}

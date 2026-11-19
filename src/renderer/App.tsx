@@ -7,7 +7,7 @@ import { Bubble, Confetti, Highlight } from "./Effects";
 import * as tts from "./voice";
 import ResearchPanel, { PanelSize } from "./ResearchPanel";
 import KitHost, { type KitHandle } from "./kit/KitHost";
-import KitRing, { ringLayout } from "./kit/KitRing";
+import KitRing, { bubbleNearRing, ringLayout } from "./kit/KitRing";
 import type { KitApp } from "./kit/types";
 import { Pin, SweepHUD, SweepState, SweepSummary, WorkCard } from "./Sweep";
 import { setSounds, sfx, soundsOn } from "./sfx";
@@ -1988,11 +1988,7 @@ export default function App() {
     // His apps are fanned out around him: stack the bubble above the ring (or below it, near the top), centered.
     if (ringOpen) {
       const L = ringLayout({ x: pos.x + MILO_W / 2, y: pos.y + MILO_H / 2 }, W, H);
-      const cx = clamp((L.box.left + L.box.right) / 2, MARGIN + maxW / 2, W - MARGIN - maxW / 2);
-      const above = L.dir === "up" && L.box.top > 110;
-      return above
-        ? { left: cx, translate: "-50% 0", bottom: H - L.box.top + 14, maxWidth: maxW, zIndex: 61 }
-        : { left: cx, translate: "-50% 0", top: L.box.bottom + 14, maxWidth: maxW, zIndex: 61 };
+      return bubbleNearRing(L, { x: pos.x, y: pos.y, w: MILO_W, h: MILO_H }, W, H, short(bubble ?? heard ?? live ?? "…"));
     }
     if (pos.y > 170) {
       return { left: clamp(pos.x + MILO_W / 2 - maxW / 2, MARGIN, W - maxW - MARGIN), bottom: H - pos.y + 4, maxWidth: maxW };
@@ -2009,8 +2005,8 @@ export default function App() {
       ? { right: W - pos.x + 10, top: pos.y + 8, maxWidth: w }
       : { left: pos.x + MILO_W + 10, top: pos.y + 8, maxWidth: w };
   };
-  const bStyle = bubblePos();
   const short = (t: string) => (t.length > 170 ? t.slice(0, 167).trimEnd() + "…" : t);
+  const bStyle = bubblePos();
 
   return (
     <>

@@ -251,7 +251,7 @@ body,
 /* ---------- speech bubble ---------- */
 .bubble-say {
   position: fixed;
-  z-index: 40;
+  z-index: 62; /* above his apps and the tool ring, so what he says is always readable */
   max-width: 280px;
   padding: 8px 12px;
   background: #fff;

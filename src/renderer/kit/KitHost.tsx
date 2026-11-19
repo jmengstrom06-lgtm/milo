@@ -99,11 +99,59 @@ const KitHost = forwardRef<KitHandle, {
   const activeClass = classes.classes.find((c) => c.id === classes.active) ?? null;
   const subject: Subject | undefined = activeClass?.subject;
   const starters = startersFor(subject);
-  const pickClass = (id: string | null) => window.milo.kit.setActiveClass(id).then(setClasses);
+  // Each class is its own tab: it remembers what was open in every app. A class you haven't used yet starts clean.
+  const activeRef = useRef<string | null>(null);
+  activeRef.current = classes.active;
+  const tabKey = (id: string | null) => id ?? "all";
+  const tabs = useRef<Record<string, Partial<Record<LibApp, string>>>>({});
+  const remember = (classId: string | null, a: LibApp, id: string | null) => {
+    const k = tabKey(classId);
+    tabs.current[k] = { ...tabs.current[k], [a]: id ?? undefined };
+  };
+  /** Light up a class without touching what's on screen (Milo is already making something for it). */
+  const pickClass = (id: string | null) => {
+    activeRef.current = id;
+    return window.milo.kit.setActiveClass(id).then(setClasses);
+  };
+  /** Put every app back the way this class left it (or clean, if it's new). */
+  const restoreTab = async (classId: string | null, keepLoading: boolean) => {
+    const mem = tabs.current[tabKey(classId)] ?? {};
+    const ticket = req.current;
+    const all: LibItem[] = Object.values(mem).some(Boolean) ? await window.milo.lib.list({ classId: "all" }).catch(() => []) : [];
+    if (activeRef.current !== classId) return; // they already clicked somewhere else
+    const find = (a: LibApp) => (mem[a] ? all.find((x) => x.id === mem[a]) ?? null : null);
+    const busy = keepLoading && req.current !== ticket;
+    const s = find("sketch"), t = find("sheet"), st = find("study"), pl = find("planner");
+    if (!busy || app !== "sketch") setSketch((s?.data as Sketch) ?? null);
+    if (!busy || app !== "sheet") {
+      setTable((t?.data as Table) ?? null);
+      setTableKey((k) => k + 1);
+    }
+    if (!busy || app !== "study") {
+      const d = st?.data as { set: StudySet; mode: StudyMode } | undefined;
+      setStudy(d ? { set: d.set, mode: d.mode, id: Date.now() } : null);
+    }
+    if (!busy || app !== "planner") setPlan((pl?.data as Plan) ?? null);
+    const cur = app === "sketch" ? s : app === "sheet" ? t : app === "study" ? st : app === "planner" ? pl : null;
+    if (!busy) setItem(cur ? { id: cur.id, app: cur.app, classId: cur.classId, fresh: false } : null);
+  };
+  /** The student tapped a class (or said "switch to bio"): switch tabs. */
+  const switchClass = (id: string | null) => {
+    if (id === classes.active) return;
+    req.current++;
+    setLoading(null);
+    setError(null);
+    setLib(null);
+    void pickClass(id);
+    void restoreTab(id, false);
+  };
   /** "for my English class": light up that class before the app loads. */
   const noteClass = (request: string) =>
     window.milo.kit.classFor(request).then((c) => {
-      if (c && c.id !== classes.active) pickClass(c.id);
+      if (c && c.id !== activeRef.current) {
+        void pickClass(c.id);
+        void restoreTab(c.id, true);
+      }
     });
   // The class library: what's on screen is saved under a class; the library shows every class's folder.
   const [item, setItem] = useState<{ id: string; app: LibApp; classId: string | null; fresh: boolean } | null>(null);
@@ -117,15 +165,20 @@ const KitHost = forwardRef<KitHandle, {
       return;
     }
     const named = matchClass(request, classes.classes);
-    const classId = named?.id ?? classes.active ?? null;
+    const classId = named?.id ?? activeRef.current ?? null;
     const saved = await window.milo.lib.save({ app: a, title, data, classId });
     if (!saved) return;
+    if (saved.classId !== activeRef.current) void pickClass(saved.classId);
+    remember(saved.classId, a, saved.id);
     setItem({ id: saved.id, app: a, classId: saved.classId, fresh: true });
     setTimeout(() => setItem((it) => (it && it.id === saved.id ? { ...it, fresh: false } : it)), 2600);
   };
   const moveItem = async (classId: string | null) => {
     if (!item) return;
     await window.milo.lib.move(item.id, classId);
+    remember(item.classId, item.app, null);
+    remember(classId, item.app, item.id);
+    if (classId !== activeRef.current) void pickClass(classId);
     setItem({ ...item, classId, fresh: true });
     setTimeout(() => setItem((it) => (it ? { ...it, fresh: false } : it)), 2600);
   };
@@ -151,8 +204,24 @@ const KitHost = forwardRef<KitHandle, {
       setStudy({ set: d.set, mode: d.mode, id: Date.now() });
     } else if (it.app === "planner") setPlan(it.data as Plan);
     show(it.app);
+    remember(it.classId, it.app, it.id);
     setItem({ id: it.id, app: it.app, classId: it.classId, fresh: false });
-    if (it.classId && it.classId !== classes.active) pickClass(it.classId);
+    if (it.classId !== activeRef.current) {
+      // the other apps follow the class too
+      const keep = it.app;
+      const mem = tabs.current[tabKey(it.classId)] ?? {};
+      void pickClass(it.classId);
+      void window.milo.lib.list({ classId: "all" }).then((all) => {
+        const find = (a: LibApp) => (mem[a] ? all.find((x) => x.id === mem[a]) ?? null : null);
+        if (keep !== "sketch") setSketch((find("sketch")?.data as Sketch) ?? null);
+        if (keep !== "sheet") setTable((find("sheet")?.data as Table) ?? null);
+        if (keep !== "study") {
+          const d = find("study")?.data as { set: StudySet; mode: StudyMode } | undefined;
+          setStudy(d ? { set: d.set, mode: d.mode, id: Date.now() } : null);
+        }
+        if (keep !== "planner") setPlan((find("planner")?.data as Plan) ?? null);
+      });
+    }
   };
   const libFilterFor = (a: KitApp | null): LibFilter => (a === "sketch" || a === "sheet" || a === "study" || a === "planner" ? a : a === "notes" ? "notes" : "all");
   const studyRef = useRef<StudyHandle>(null);
@@ -162,7 +231,8 @@ const KitHost = forwardRef<KitHandle, {
 
   const show = (a: KitApp | null) => {
     if (a !== app) {
-      setItem(null);
+      const id = a && a !== "notes" && a !== "pocket" ? tabs.current[tabKey(activeRef.current)]?.[a as LibApp] : undefined;
+      setItem(id ? { id, app: a as LibApp, classId: activeRef.current, fresh: false } : null);
       setLib(null);
     }
     setApp(a);
@@ -340,7 +410,7 @@ const KitHost = forwardRef<KitHandle, {
       if (/^(switch to|change to|go to|use|i'?m (working on|doing|studying)( for)?|let'?s do|now) (my |the )?.{2,40}\b(class|course)$/.test(t)) {
         window.milo.kit.classFor(text).then((c) => {
           if (c) {
-            pickClass(c.id);
+            switchClass(c.id);
             p.say(`${c.name}. Everything fits it now.`);
           } else p.say("I don't have that class yet. Say: my classes are, then list them.");
         });
@@ -569,7 +639,7 @@ const KitHost = forwardRef<KitHandle, {
       sub={
         editClasses || lib ? null : (
           <div className="kit-subrow">
-            <ClassBar store={classes} onPick={pickClass} onEdit={() => setEditClasses({})} />
+            <ClassBar store={classes} onPick={switchClass} onEdit={() => setEditClasses({})} />
             {item && !lib && !loading && <SavedPill classes={classes.classes} classId={item.classId} fresh={item.fresh} onMove={(id) => void moveItem(id)} />}
           </div>
         )
