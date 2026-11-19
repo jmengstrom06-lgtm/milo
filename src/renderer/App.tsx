@@ -132,6 +132,13 @@ export default function App() {
   const [handsFree, setHandsFree] = useState(false);
   const [level, setLevel] = useState(0);
   const [heard, setHeard] = useState<string | null>(null);
+  // What you said shows above Milo until he answers. Some commands (like "close that") finish without a
+  // reply, so never let it linger: it fades on its own after a few seconds.
+  useEffect(() => {
+    if (!heard) return;
+    const t = setTimeout(() => setHeard((h) => (h === heard ? null : h)), 6000);
+    return () => clearTimeout(t);
+  }, [heard]);
   const [pause, setPause] = useState(0); // "sending…" bar while you finish talking
   const [working, setWorking] = useState(false); // Milo is using the computer
   const [live, setLive] = useState<string | null>(null); // your words as you say them (smart ears)
@@ -1260,6 +1267,7 @@ export default function App() {
         return;
       case "close":
         closeLesson();
+        setHeard(null);
         return;
       case "goto":
         look(intent.mode ?? lessonModeRef.current, intent.request, null, spoken);
@@ -1358,6 +1366,7 @@ export default function App() {
         else if (quiz) closeQuiz();
         else if (lessonRef.current) closeLesson();
         else setMood("idle");
+        setHeard(null);
         if (rt.after) setTimeout(() => routeRef.current(rt.after!, spoken), 400);
         return;
       case "open_result":
