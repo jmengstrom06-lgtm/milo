@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-type Item = { title: string; course: string; due: string; urgent: boolean };
+export type Item = { title: string; course: string; due: string; urgent: boolean; due_iso?: string; kind?: string };
 export type BriefState =
   | { phase: "loading" }
   | { phase: "ready"; items: Item[]; spoken: string }
@@ -10,8 +10,26 @@ export type BriefState =
 
 type WebviewEl = HTMLElement & {
   capturePage: () => Promise<{ toDataURL: () => string; resize?: (o: { width: number }) => { toDataURL: () => string } }>;
+  executeJavaScript: (code: string) => Promise<unknown>;
   addEventListener: HTMLElement["addEventListener"];
 };
+
+const PAGE_TEXT = `(() => {
+  const out = [];
+  const walk = (n) => {
+    if (!n) return;
+    if (n.nodeType === 3) { const t = n.textContent.replace(/\\s+/g, " ").trim(); if (t) out.push(t); return; }
+    if (n.nodeType === 1) {
+      const tag = n.tagName;
+      if (tag === "SCRIPT" || tag === "STYLE" || tag === "NOSCRIPT") return;
+      if (n.shadowRoot) walk(n.shadowRoot);
+      if (tag === "IFRAME") { try { walk(n.contentDocument && n.contentDocument.body); } catch (e) {} }
+    }
+    for (const c of n.childNodes) walk(c);
+  };
+  walk(document.body);
+  return out.join("\\n").slice(0, 20000);
+})()`;
 
 /** Loads the portal in a hidden, logged-in browser view, snapshots it, and asks Milo what's due. */
 export function BriefLoader({ url, onResult }: { url: string; onResult: (s: BriefState) => void }) {
@@ -26,7 +44,12 @@ export function BriefLoader({ url, onResult }: { url: string; onResult: (s: Brie
       await new Promise((r) => setTimeout(r, 2500)); // let the portal's widgets fill in
       try {
         const img = await wv.capturePage();
-        const r = await window.milo.brief(img.toDataURL());
+        // All the page's text too, even inside D2L's widgets (shadow DOM) and below the fold.
+        const text = await wv
+          .executeJavaScript(PAGE_TEXT)
+          .then((t) => (typeof t === "string" ? t : ""))
+          .catch(() => "");
+        const r = await window.milo.brief(img.toDataURL(), text);
         if (!r.ok) return onResult({ phase: "error", text: r.text });
         if (!r.data.signed_in) return onResult({ phase: "signin" });
         onResult({ phase: "ready", items: r.data.items ?? [], spoken: r.data.spoken ?? "" });
@@ -44,7 +67,7 @@ export function BriefLoader({ url, onResult }: { url: string; onResult: (s: Brie
   }, [url]);
   return (
     <div className="brief-offscreen" aria-hidden>
-      <webview ref={ref} src={url} partition="persist:milo-research" style={{ width: "1280px", height: "860px" }} />
+      <webview ref={ref} src={url} partition="persist:milo-research" style={{ width: "1280px", height: "2200px" }} />
     </div>
   );
 }

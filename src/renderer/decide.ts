@@ -141,3 +141,25 @@ export function parsePlanVoice(raw: string, lessonOpen: boolean): { do: "done" |
   if (doneish.test(t) && (!lessonOpen || /step|check|mark/.test(t))) return { do: "done", step };
   return null;
 }
+
+// ---- Deadline radar ---------------------------------------------------------------------
+/** "what's due this week", "check D2L", "start the next one"; and while the radar card is up: "start it", "later". */
+export function parseRadar(raw: string, cardOpen: boolean): { do: "list"; days: number } | { do: "scan" } | { do: "start_first" } | { do: "later" } | null {
+  const t = plainOf(raw).replace(/[?]/g, "");
+  if (/^(check|refresh|scan|update|recheck)( on)? (d2l|my deadlines|the radar|my radar|my due dates|for new (assignments|homework|stuff))$/.test(t)) return { do: "scan" };
+  if (/^(let'?s )?start (the (next|first) one|what'?s due( first| next)?|the most urgent( one)?|my next assignment|whatever'?s due( first| next)?)$/.test(t)) return { do: "start_first" };
+  if (cardOpen) {
+    if (/^(yes|yeah|yep|sure|ok(ay)?,? (let'?s )?(do it|start( it)?)|let'?s (do it|go|start( it)?)|start( it| that| that one| this one| the first one)?|do it|open it)$/.test(t)) return { do: "start_first" };
+    if (/^(later|not now|remind me later|maybe later|no( thanks| thank you)?|nah|dismiss|close( it| that| this)?|got it|okay|ok|thanks|thank you|cool)$/.test(t)) return { do: "later" };
+  }
+  const list =
+    /^(what'?s|what is|what all is|what do i have) (due|coming up|on my plate)\b/.test(t) ||
+    /^what do i have to do\b/.test(t) ||
+    /^(is there |do i have |is |have i got )?anything (due|coming up)\b/.test(t) ||
+    /^(do i have|have i got) (any )?(homework|assignments|anything) due\b/.test(t) ||
+    /^(show|open)( me)? (my )?(deadlines|deadline radar|radar|due dates|upcoming (assignments|homework))$/.test(t) ||
+    /^(when'?s|when is) (everything|my stuff) due$/.test(t);
+  if (!list) return null;
+  const days = /\btoday|tonight\b/.test(t) ? 0 : /\btomorrow\b/.test(t) ? 1 : /\bnext week\b/.test(t) ? 14 : /\b(this week|week)\b/.test(t) ? 7 : Infinity;
+  return { do: "list", days };
+}

@@ -1666,3 +1666,38 @@ body,
   box-shadow: 0 10px 30px rgba(0,0,0,0.35); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; animation: gpIn .35s ease-out both; }
 .gp-pill b { color: #fff; }
 .gp-pill__ring { width: 18px; height: 18px; border-radius: 50%; flex: none; background: conic-gradient(#34d399 var(--p), rgba(255,255,255,0.12) 0); -webkit-mask: radial-gradient(circle, transparent 5px, #000 6px); mask: radial-gradient(circle, transparent 5px, #000 6px); }
+
+/* ---------- deadline radar ---------- */
+.rd { position: fixed; z-index: 46; box-sizing: border-box; padding: 16px 16px 12px; border-radius: 22px; color: #f4f2fb; overflow-y: auto;
+  background: linear-gradient(165deg, rgba(34,30,52,0.97), rgba(18,16,30,0.97)); border: 1px solid rgba(196,181,253,0.22);
+  box-shadow: 0 24px 60px rgba(0,0,0,0.45); font-family: -apple-system, "Inter", sans-serif; animation: gpIn .45s cubic-bezier(.2,1.2,.3,1) both; }
+.rd--alert { border-color: rgba(251,191,36,0.5); box-shadow: 0 24px 60px rgba(0,0,0,0.45), 0 0 0 4px rgba(251,191,36,0.08); }
+.rd-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 10px; }
+.rd-kicker { display: flex; align-items: center; gap: 7px; font: 700 10.5px/1 -apple-system, sans-serif; letter-spacing: .12em; text-transform: uppercase; color: #a78bfa; margin-bottom: 6px; }
+.rd--alert .rd-kicker { color: #fbbf24; }
+.rd-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 0 currentColor; animation: rdPulse 1.8s ease-out infinite; }
+@keyframes rdPulse { 0% { box-shadow: 0 0 0 0 rgba(167,139,250,0.6); } 100% { box-shadow: 0 0 0 9px rgba(167,139,250,0); } }
+.rd-title { font: 800 17px/1.25 -apple-system, sans-serif; color: #fff; }
+.rd-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.rd-row { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 14px; background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.06); animation: gpIn .4s ease-out both; }
+.rd-row:nth-child(2) { animation-delay: .05s; } .rd-row:nth-child(3) { animation-delay: .1s; } .rd-row:nth-child(4) { animation-delay: .15s; } .rd-row:nth-child(5) { animation-delay: .2s; }
+.rd-chip { flex: none; width: 66px; text-align: center; padding: 6px 0; border-radius: 10px; font: 800 11px -apple-system, sans-serif; }
+.rd-chip--today { background: rgba(248,113,113,0.18); color: #fecaca; border: 1px solid rgba(248,113,113,0.5); }
+.rd-chip--soon { background: rgba(251,191,36,0.16); color: #fde68a; border: 1px solid rgba(251,191,36,0.45); }
+.rd-chip--near { background: rgba(167,139,250,0.16); color: #ddd6fe; border: 1px solid rgba(167,139,250,0.4); }
+.rd-chip--far { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.7); border: 1px solid rgba(255,255,255,0.12); }
+.rd-body { flex: 1; min-width: 0; }
+.rd-name { font: 650 13.5px/1.3 -apple-system, sans-serif; color: #fff; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.rd-sub { margin-top: 2px; font: 500 11.5px/1.35 -apple-system, sans-serif; color: rgba(255,255,255,0.55); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rd-was { color: rgba(253,164,175,0.8); }
+.rd-badge { display: inline-block; margin-right: 6px; padding: 2px 5px; border-radius: 6px; font: 800 9px/1.2 -apple-system, sans-serif; letter-spacing: .08em; vertical-align: 2px; }
+.rd-badge--new { background: #34d399; color: #052e1f; }
+.rd-badge--moved { background: #fb923c; color: #3b1503; }
+.rd-start { flex: none; }
+.rd-empty { padding: 18px 6px; text-align: center; font: 600 13.5px -apple-system, sans-serif; color: rgba(255,255,255,0.75); }
+.rd-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; font: 500 11px -apple-system, sans-serif; color: rgba(255,255,255,0.42); }
+.rd-refresh { border: none; background: none; color: #c4b5fd; font: 600 11.5px -apple-system, sans-serif; cursor: pointer; }
+.rd-refresh:disabled { opacity: .5; cursor: default; }
+.rd-moved { margin-top: 3px; font: 600 11.5px -apple-system, sans-serif; color: #fdba74; }
+.rd-moved s { color: rgba(253,186,116,0.6); }
+.rd-moved b { color: #fed7aa; }

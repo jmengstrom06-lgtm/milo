@@ -136,3 +136,30 @@ describe("plan voice", () => {
     expect(parsePlanVoice("what's the capital of France", false)).toBeNull();
   });
 });
+
+import { parseRadar } from "../src/renderer/decide";
+describe("deadline radar voice", () => {
+  it.each([
+    ["what's due", Infinity],
+    ["Milo, what's due this week?", 7],
+    ["what do I have due tomorrow", 1],
+    ["is anything due today", 0],
+    ["what's coming up", Infinity],
+    ["do I have any homework due next week", 14],
+    ["show me my deadlines", Infinity],
+  ])("%s", (said, days) => expect(parseRadar(said, false)).toEqual({ do: "list", days }));
+  it("scan / start / later", () => {
+    expect(parseRadar("check D2L", false)).toEqual({ do: "scan" });
+    expect(parseRadar("start the next one", false)).toEqual({ do: "start_first" });
+    expect(parseRadar("start it", true)).toEqual({ do: "start_first" });
+    expect(parseRadar("yeah let's do it", true)).toEqual({ do: "start_first" });
+    expect(parseRadar("later", true)).toEqual({ do: "later" });
+    expect(parseRadar("not now", true)).toEqual({ do: "later" });
+  });
+  it("leaves other things alone", () => {
+    expect(parseRadar("start it", false)).toBeNull(); // no card up: that's not the radar's
+    expect(parseRadar("later", false)).toBeNull();
+    expect(parseRadar("what's the capital of France", false)).toBeNull();
+    expect(parseRadar("start my stats homework", false)).toBeNull();
+  });
+});

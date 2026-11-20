@@ -371,6 +371,32 @@ export async function runSelfTest(win: BrowserWindow) {
     return { score, detail: [done < 0 ? "'next' didn't check it off" : `'next' checked off in ${done}ms`, info < 0 ? "'what's next' didn't say step 2" : "told step 2", closed < 0 ? "plan stayed open" : "closed"].join("; ") };
   });
 
+  // ======================= DEADLINE RADAR =======================
+  const radarBackup = await js<string | null>("localStorage.getItem('milo.radar')");
+  const iso = (days: number) => {
+    const d = new Date(Date.now() + days * 86400e3);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}T23:59`;
+  };
+  await test("D1", "Focus", "Deadline radar warns about what's due tomorrow (with Start)", async () => {
+    await js(`window.__milo.radarSet(${JSON.stringify([
+      { title: "Test Homework 9", course: "TEST 101", due: "Tomorrow 11:59 PM", due_iso: iso(1), kind: "assignment" },
+      { title: "Test Essay 2", course: "TEST 102", due: "Next week", due_iso: iso(8), kind: "assignment" },
+    ])})`);
+    await js("window.__milo.radarCheck()");
+    const ms = await waitFor("s.radar && s.radar.mode === 'alert' && s.bubble && /heads up|new in d2l/i.test(s.bubble)", 5000);
+    const start = await js<boolean>("!![...document.querySelectorAll('.rd .rd-start')].length");
+    return { ms, score: ms < 0 ? 0 : start ? 1 : 0.6, detail: ms < 0 ? `no warning (radar: ${JSON.stringify((await S()).radar)})` : `warned in ${ms}ms${start ? " with Start buttons" : ", but no Start button"}` };
+  });
+  await test("D2", "Focus", "'What's due this week' answers instantly; 'later' closes it", async () => {
+    await hear("what's due this week");
+    const ms = await waitFor("s.radar && s.radar.mode === 'list' && s.bubble && /first up|nothing due/i.test(s.bubble)", 6000);
+    if (ms < 0) return { score: 0, detail: `no list (bubble: "${String((await S()).bubble ?? "").slice(0, 60)}")` };
+    await hear("later");
+    const closed = await waitFor("!s.radar", 3000);
+    return { ms, score: closed < 0 ? 0.5 : ms > 2000 ? 0.8 : 1, detail: `listed in ${ms}ms${closed < 0 ? "; 'later' didn't close it" : "; 'later' closed it"}` };
+  });
+  await js(`window.__milo.radarLoad(${JSON.stringify(radarBackup)})`).catch(() => {}); // the test's fake homework never stays
+
   // ======================= PERSONAL =======================
   await test("M1", "Personal", "Remembers your name", async () => {
     await hear("call me Jake");

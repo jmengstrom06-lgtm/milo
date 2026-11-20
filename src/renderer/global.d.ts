@@ -184,8 +184,8 @@ declare global {
       watchCheck: (force?: boolean) => Promise<{ ok: true; changed: boolean; mistake?: boolean; box?: MiloBox | null; hint?: string } | Err>;
       watchReset: () => void;
       quiz: (focus: string) => Promise<{ ok: true; topic: string; questions: QuizQ[] } | Err>;
-      brief: (dataUrl: string) => Promise<
-        | { ok: true; data: { signed_in: boolean; items: { title: string; course: string; due: string; urgent: boolean }[]; spoken: string } }
+      brief: (dataUrl: string, pageText?: string) => Promise<
+        | { ok: true; data: { signed_in: boolean; items: { title: string; course: string; due: string; urgent: boolean; due_iso?: string; kind?: string }[]; spoken: string } }
         | Err
       >;
       copy: (text: string) => void;

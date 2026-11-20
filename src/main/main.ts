@@ -4,6 +4,7 @@ import {
   session,
   clipboard,
   desktopCapturer,
+  nativeImage,
   globalShortcut,
   ipcMain,
   screen,
@@ -636,10 +637,12 @@ ipcMain.handle("milo:quiz", async (_e, focus: string) => {
 });
 
 // ---------- daily brief ------------------------------------------------------------------------
-ipcMain.handle("milo:brief", async (_e, dataUrl: string) => {
-  const b64 = String(dataUrl).replace(/^data:image\/\w+;base64,/, "");
+ipcMain.handle("milo:brief", async (_e, dataUrl: string, pageText?: string) => {
+  // The portal snapshot arrives as a big PNG: shrink it to a JPEG the model reads well.
+  const img = nativeImage.createFromDataURL(String(dataUrl));
+  const b64 = img.isEmpty() ? String(dataUrl).replace(/^data:image\/\w+;base64,/, "") : toJpeg(img, 1800).b64;
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
-  return readBrief(b64, today);
+  return readBrief(b64, today, typeof pageText === "string" ? pageText.slice(0, 20000) : "");
 });
 
 // ---------- research ----------------------------------------------------------------

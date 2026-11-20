@@ -794,7 +794,7 @@ Vary which letter is correct. If there's no study material on screen, quiz on th
 // Daily Brief: read the student's course portal (D2L) homepage and list what's due.
 export type Brief = {
   signed_in: boolean;
-  items: { title: string; course: string; due: string; urgent: boolean }[];
+  items: { title: string; course: string; due: string; urgent: boolean; due_iso?: string; kind?: string }[];
   spoken: string;
 };
 
@@ -807,7 +807,7 @@ const BRIEF_TOOL = {
       signed_in: { type: "boolean", description: "False if this is a login page or asks the student to sign in." },
       items: {
         type: "array",
-        description: "Upcoming assignments, quizzes and exams visible on the page, soonest first (max 6).",
+        description: "EVERY upcoming assignment, quiz, exam, discussion and project visible on the page or in its text, soonest first (max 15). Skip things already past due by more than a day.",
         items: {
           type: "object",
           properties: {
@@ -815,8 +815,10 @@ const BRIEF_TOOL = {
             course: { type: "string", description: "Short course name or code." },
             due: { type: "string", description: "Short human due date, e.g. 'Tomorrow 11:59 PM' or 'Fri, Nov 21'." },
             urgent: { type: "boolean", description: "Due within about 48 hours." },
+            due_iso: { type: "string", description: "Exact local due date-time 'YYYY-MM-DDTHH:mm' worked out from today's date (use T23:59 if no time is shown). '' only if there's no date at all." },
+            kind: { type: "string", enum: ["assignment", "quiz", "exam", "discussion", "project", "reading", "other"] },
           },
-          required: ["title", "course", "due", "urgent"],
+          required: ["title", "course", "due", "urgent", "due_iso", "kind"],
         },
       },
       spoken: {
@@ -828,7 +830,7 @@ const BRIEF_TOOL = {
   },
 };
 
-export async function readBrief(jpegBase64: string, today: string): Promise<ApiOk<Brief> | ApiErr> {
+export async function readBrief(jpegBase64: string, today: string, pageText = ""): Promise<ApiOk<Brief> | ApiErr> {
   return callTool(
     {
       max_tokens: 1500,
@@ -840,7 +842,7 @@ export async function readBrief(jpegBase64: string, today: string): Promise<ApiO
           role: "user",
           content: [
             { type: "image", source: { type: "base64", media_type: "image/jpeg", data: jpegBase64 } },
-            { type: "text", text: "What's coming up?" },
+            { type: "text", text: `What's coming up? Today is ${today} (${new Date().toISOString().slice(0, 10)}).${pageText ? `\n\nAll the text on the page (including widgets the screenshot cuts off):\n${pageText.slice(0, 18000)}` : ""}` },
           ],
         },
       ],

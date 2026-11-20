@@ -14,7 +14,9 @@ import { setSounds, sfx, soundsOn } from "./sfx";
 import ToolPanel, { SavedTool, loadTools, saveTools } from "./ToolPanel";
 import QuizPanel, { QuizHandle } from "./QuizPanel";
 import { BriefCard, BriefLoader, BriefState, SignInPanel } from "./Brief";
-import { fastDecide, parseHomework, parsePlanVoice, stripFiller, type DecideState } from "./decide";
+import { fastDecide, parseHomework, parsePlanVoice, parseRadar, stripFiller, type DecideState } from "./decide";
+import { alertLine, emptyRadar, markWarned, mergeScan, pendingAlerts, upcoming, whenText, type Radar, type RadarItem, type ScanItem, type Warn } from "./radar";
+import RadarCard, { type RadarView } from "./RadarCard";
 import GamePlanCard, { findPlan, loadPlans, nextStep, planKey, savePlan, type SavedPlan } from "./GamePlan";
 import AccountChip from "./Account";
 import LockIn, { type LockInHandle } from "./LockIn";
@@ -730,7 +732,7 @@ export default function App() {
     gpRef.current = null;
     setGp(null);
   };
-  const startHomework = async (text: string, byVoice: boolean, hw: { target: string; here: boolean }) => {
+  const startHomework = async (text: string, byVoice: boolean, hw: { target: string; here: boolean }, preset?: { title: string; course: string; due: string }) => {
     const id = ++hwRun.current;
     hush();
     setChatOpen(false);
@@ -743,9 +745,9 @@ export default function App() {
       } catch {
         /* ignore */
       }
-      const cls = hw.target ? await window.milo.kit.classFor(hw.target).catch(() => null) : null;
+      const cls = hw.target && !preset ? await window.milo.kit.classFor(hw.target).catch(() => null) : null;
       const words = [hw.target, cls?.name, cls?.code].filter(Boolean).map((w) => String(w).toLowerCase());
-      const item = items.find((it) => !words.length || words.some((w) => `${it.course} ${it.title}`.toLowerCase().includes(w)));
+      const item = preset ?? items.find((it) => !words.length || words.some((w) => `${it.course} ${it.title}`.toLowerCase().includes(w)));
       const course = item?.course || cls?.name || hw.target;
       if (item || course) {
         setMood("happy");
@@ -827,6 +829,123 @@ export default function App() {
     }
     return true;
   };
+
+  // ---- Deadline radar ---------------------------------------------------------------------------
+  // Scans D2L in the background (startup + every 3 h), remembers every assignment, catches NEW and MOVED ones,
+  // and warns 3 days out, the day before and the morning of: at a calm moment, with a Start button.
+  const [radar, setRadarState] = useState<Radar>(() => {
+    try {
+      const r = JSON.parse(localStorage.getItem("milo.radar") || "null");
+      return r && Array.isArray(r.items) ? r : emptyRadar();
+    } catch {
+      return emptyRadar();
+    }
+  });
+  const radarRef = useRef(radar);
+  radarRef.current = radar;
+  const setRadar = (r: Radar) => {
+    radarRef.current = r;
+    setRadarState(r);
+    try {
+      localStorage.setItem("milo.radar", JSON.stringify(r));
+    } catch {
+      /* ignore */
+    }
+  };
+  const [radarView, setRadarView] = useState<RadarView | null>(null);
+  const radarViewRef = useRef<RadarView | null>(null);
+  radarViewRef.current = radarView;
+  const [radarScan, setRadarScan] = useState(0); // > 0 while the hidden D2L view is reading
+  const radarAfter = useRef<((ok: boolean) => void) | null>(null);
+  const [clock, setClock] = useState(() => Date.now());
+  const radarBusy = useRef(false); // is now a bad moment to interrupt? (kept fresh every render, below)
+  const ingest = (items: ScanItem[]) => setRadar(mergeScan(radarRef.current, items, Date.now()));
+  const scanRadar = (after?: (ok: boolean) => void) => {
+    if (!portal) return after?.(false);
+    radarAfter.current = after ?? null;
+    setRadarScan(Date.now());
+  };
+  const onRadarScan = (st: BriefState) => {
+    setRadarScan(0);
+    const ok = st.phase === "ready";
+    if (ok) ingest(st.items);
+    bb("radar_scan", { ok, phase: st.phase, items: ok ? st.items.length : 0, known: radarRef.current.items.length });
+    const after = radarAfter.current;
+    radarAfter.current = null;
+    if (after) after(ok);
+    else if (ok) checkAlerts();
+  };
+  const badges = (x: RadarItem, now: number): Warn[] => {
+    const w: Warn[] = [];
+    if (radarRef.current.scans > 1 && now - x.firstSeen < 3 * 86400e3) w.push("new");
+    if (x.movedAt && now - x.movedAt < 3 * 86400e3) w.push("moved");
+    return w;
+  };
+  /** Warn about what's due, if there's anything to say and it's a calm moment. */
+  const checkAlerts = (force = false) => {
+    const now = Date.now();
+    setClock(now);
+    const h = new Date(now).getHours();
+    if (!force && (h < 8 || h >= 23 || radarBusy.current)) return;
+    const pa = pendingAlerts(radarRef.current, now);
+    if (!pa.length) return;
+    setRadar(markWarned(radarRef.current, pa, now));
+    setBrief((b) => (b?.phase === "ready" ? null : b)); // the warning takes the morning card's place
+    setRadarView({ mode: "alert", rows: pa.slice(0, 5).map((a) => ({ item: a.item, why: a.why })), title: pa.length === 1 ? "Heads up" : `${pa.length} things coming up` });
+    bb("radar_alert", { items: pa.map((a) => ({ title: a.item.title, why: a.why })) });
+    sfx.chime();
+    setMood("happy");
+    say(alertLine(pa, now)).then(() => setBubble(null));
+  };
+  const showRadarList = (days: number, speak = true) => {
+    const now = Date.now();
+    setClock(now);
+    const rows = upcoming(radarRef.current, now, days)
+      .slice(0, 8)
+      .map((item) => ({ item, why: badges(item, now) }));
+    const range = days === 0 ? "today" : days === 1 ? "by tomorrow" : days <= 7 ? "this week" : days <= 14 ? "in the next two weeks" : "coming up";
+    setRadarView({ mode: "list", rows, title: days === 0 ? "Due today" : days === 1 ? "Due by tomorrow" : days <= 7 ? "Due this week" : "Coming up" });
+    if (!speak) return;
+    const x = rows[0]?.item;
+    say(
+      !x
+        ? `Nothing due ${range}. You're all caught up.`
+        : `${rows.length === 1 ? "One thing" : `${rows.length} things`} ${range}. First up: ${x.title}${x.course ? ` for ${x.course}` : ""}, due ${whenText(x.dueAt, now, x.due)}.`
+    ).then(() => setBubble(null));
+  };
+  /** "what's due this week": answer instantly from the radar; re-check D2L first only if it's stale. */
+  const askRadar = (days: number) => {
+    if (!portal) return startBrief(true); // walks them through adding D2L
+    if (radarRef.current.scans > 0 && Date.now() - radarRef.current.lastScan < 3 * 3600e3) return showRadarList(days);
+    setMood("looking");
+    setBubble("Checking D2L…");
+    scanRadar((ok) => {
+      setBubble(null);
+      if (!ok && radarRef.current.scans === 0) return startBrief(true); // probably needs to sign in
+      showRadarList(days);
+    });
+  };
+  const startFromRadar = (x?: RadarItem) => {
+    const item = x ?? radarViewRef.current?.rows[0]?.item ?? upcoming(radarRef.current, Date.now())[0];
+    setRadarView(null);
+    if (!item) return askRadar(Infinity);
+    bb("radar_start", { title: item.title, course: item.course });
+    void startHomework(`start my ${item.course} homework`, false, { target: item.course, here: false }, { title: item.title, course: item.course, due: item.due });
+  };
+  // Background scans: shortly after startup if the last one is old, then every 3 hours. Warnings checked every minute.
+  useEffect(() => {
+    if (!portal) return;
+    const stale = () => Date.now() - radarRef.current.lastScan > 3 * 3600e3;
+    const first = window.setTimeout(() => stale() && !radarScan && scanRadar(), 90e3);
+    const every = window.setInterval(() => stale() && scanRadar(), 10 * 60e3);
+    const alerts = window.setInterval(() => checkAlerts(), 60e3);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(every);
+      window.clearInterval(alerts);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [portal]);
 
   /** "Open chrome, find a worksheet, and complete it": the computer part first, then the screen job on what's open. */
   const runChain = async (steps: Intent[], spoken: boolean) => {
@@ -1123,6 +1242,8 @@ export default function App() {
       } catch {
         /* ignore */
       }
+      const r = mergeScan(radarRef.current, st.items, Date.now());
+      setRadar(markWarned(r, pendingAlerts(r, Date.now()).filter((a) => !a.why.includes("moved")), Date.now()));
     }
     setBriefRun(0);
     if (st.phase === "ready") {
@@ -1331,6 +1452,23 @@ export default function App() {
         const p = parseLockIn(lt);
         bb("route_instant", { text, kind: "lockin", minutes: p.minutes, topic: p.topic });
         lockRef.current?.start(p.minutes ?? 25, p.topic);
+        return;
+      }
+    }
+    // Deadline radar: "what's due this week", "check D2L", "start the next one"; on its card: "start it", "later".
+    {
+      const rv = parseRadar(text, !!radarViewRef.current);
+      if (rv) {
+        bb("route_instant", { text, kind: "radar", ...rv });
+        if (rv.do === "list") askRadar(rv.days);
+        else if (rv.do === "scan") {
+          setBubble("Checking D2L…");
+          scanRadar((ok) => (ok ? showRadarList(Infinity) : startBrief(true)));
+        } else if (rv.do === "start_first") startFromRadar();
+        else {
+          setRadarView(null);
+          say("Okay. I'll remind you.").then(() => setBubble(null));
+        }
         return;
       }
     }
@@ -1958,7 +2096,7 @@ export default function App() {
       const cleaned = stripGo(text);
       const sure = fastDecide(cleaned, { kitOpen: null, researchOpen: false, toolOpen: false, lessonOpen: false, hasLastAnswer: false });
       const planWords = !!gpRef.current && !!parsePlanVoice(cleaned, !!lessonRef.current);
-      if ((sure && ["kit_menu", "open_kit", "hold", "flag"].includes(sure.do)) || parseHomework(cleaned) || planWords) {
+      if ((sure && ["kit_menu", "open_kit", "hold", "flag"].includes(sure.do)) || parseHomework(cleaned) || planWords || parseRadar(cleaned, !!radarViewRef.current)) {
         bb("card_skipped", { text: cleaned, do: sure?.do ?? (planWords ? "plan_voice" : "homework") });
         return runPending(cleaned);
       }
@@ -2166,7 +2304,7 @@ export default function App() {
   // ---- self-test hooks (dev only) -------------------------------------------------
   // `npm run test:milo` drives Milo through these: the same path your voice takes after it becomes text.
   const testSnap = useRef<Record<string, unknown>>({});
-  testSnap.current = { plan: gp ? { title: gp.plan.title, steps: gp.plan.steps.length, done: gp.done.length } : null, speaking, bubble, heard, pending: pending?.text ?? null, chatOpen, ringOpen, kitApp, lockOn, research: !!researchQ, tool: !!tool, quiz: !!quiz, notebook: !!box, mood, pos, name };
+  testSnap.current = { radar: radarView ? { mode: radarView.mode, rows: radarView.rows.length } : null, plan: gp ? { title: gp.plan.title, steps: gp.plan.steps.length, done: gp.done.length } : null, speaking, bubble, heard, pending: pending?.text ?? null, chatOpen, ringOpen, kitApp, lockOn, research: !!researchQ, tool: !!tool, quiz: !!quiz, notebook: !!box, mood, pos, name };
   useEffect(() => {
     if (!location.protocol.startsWith("http")) return; // dev server only, never in the packaged app
     (window as unknown as { __milo: unknown }).__milo = {
@@ -2177,6 +2315,17 @@ export default function App() {
       move: (x: number, y: number) => setPos({ x, y }),
       chat: (on: boolean) => setChatOpen(on),
       plan: (p: GamePlan) => showPlan({ key: planKey(p), plan: p, done: [], at: Date.now() }),
+      radarSet: (items: ScanItem[]) => setRadar(mergeScan(mergeScan(emptyRadar(), [], Date.now()), items, Date.now())),
+      radarCheck: () => checkAlerts(true),
+      radarLoad: (json: string | null) => {
+        setRadarView(null);
+        try {
+          const r = json ? JSON.parse(json) : null;
+          setRadar(r && Array.isArray(r.items) ? r : emptyRadar());
+        } catch {
+          setRadar(emptyRadar());
+        }
+      },
       quietEars: () => {
         testDeaf.current = true;
         ears.current?.setMode("off");
@@ -2252,7 +2401,16 @@ export default function App() {
   }
 
   // Game plan card: beside Milo; shrinks to a pill at the top while another panel or his notebook is up.
-  const gpMini = !!box || !!lesson || !!kitApp || !!researchQ || !!tool || !!quiz || chatOpen;
+  const gpMini = !!box || !!lesson || !!kitApp || !!researchQ || !!tool || !!quiz || chatOpen || !!radarView;
+  radarBusy.current = speaking || lockOn || working || !!lesson || !!box || !!pending || !!quiz || !!radarView || !!tool || !!researchQ;
+  const rdStyle: React.CSSProperties = (() => {
+    const w = 384;
+    const h = Math.min(H - 32, 150 + Math.max(1, radarView?.rows.length ?? 1) * 64);
+    const top = clamp(pos.y + MILO_H - h, 16, H - h - 16);
+    return pos.x > W / 2
+      ? { left: clamp(pos.x - w - 14, 16, W - w - 16), top, width: w, maxHeight: H - 32 }
+      : { left: clamp(pos.x + MILO_W + 14, 16, W - w - 16), top, width: w, maxHeight: H - 32 };
+  })();
   const gpStyle: React.CSSProperties = (() => {
     if (gpMini) return { left: W / 2, top: 12, translate: "-50% 0" };
     const w = 372;
@@ -2539,6 +2697,20 @@ export default function App() {
       {!bubble && !pending && !heard && earState === "thinking" && <Bubble text="…" style={bStyle} heard />}
       {!bubble && !pending && !heard && live && earState !== "thinking" && <Bubble text={live} style={bStyle} heard />}
       {confetti && <Confetti key={confetti.seed} {...confetti} />}
+      {radarScan > 0 && portal && <BriefLoader key={`radar-${radarScan}`} url={portal} onResult={onRadarScan} />}
+      {radarView && !working && (
+        <RadarCard
+          view={radarView}
+          now={clock}
+          lastScan={radar.lastScan}
+          scanning={radarScan > 0}
+          style={rdStyle}
+          hover={hover}
+          onStart={(x) => startFromRadar(x)}
+          onClose={() => setRadarView(null)}
+          onRefresh={() => scanRadar((ok) => ok && showRadarList(Infinity, false))}
+        />
+      )}
       {gp && !working && (
         <GamePlanCard
           sp={gp}
