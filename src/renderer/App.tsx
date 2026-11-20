@@ -22,6 +22,7 @@ import GamePlanCard, { findPlan, loadPlans, nextStep, planKey, savePlan, type Sa
 import AccountChip from "./Account";
 import LockIn, { type LockInHandle } from "./LockIn";
 import { parseLockIn } from "../main/focusRules";
+import { plan as quickPlan } from "../main/quick";
 import { stripMath } from "./MathText";
 
 type Msg = { role: "user" | "assistant"; content: string };
@@ -1576,6 +1577,23 @@ export default function App() {
     }
 
     // The few instant decisions (all unit-tested in tests/decide.test.ts). Anything else: the brain decides.
+    // "Close the calculator app", "quit the whole Chrome", "open Spotify", "switch to Dictionary": unmistakable,
+    // so straight to the native action. (The AI router once read "close the X app" as "close Milo's panel".)
+    {
+      const qp = quickPlan(text);
+      const own = /^(sketch|sheet|planner|study|pocket|notebook|research|chat|milo|lock ?in|plan|radar)$/i;
+      const mine = fastDecide(text, dstate); // "open notes" / "open excel" are Milo's own Notes and Sheet: those win
+      if (
+        (!mine || mine.do === "shortcut") &&
+        qp.steps.length &&
+        !qp.rest &&
+        qp.steps.every((st) => (st.kind === "quit" || st.kind === "app") && !own.test(st.app))
+      ) {
+        bb("route_instant", { text, kind: "quick_app", steps: qp.steps.map((st) => `${st.kind}:${"app" in st ? st.app : ""}`) });
+        void runTask(text, spoken);
+        return;
+      }
+    }
     const f = fastDecide(text, dstate);
     if (f) bb("route_instant", { text, ...f });
     switch (f?.do) {
@@ -2113,6 +2131,14 @@ export default function App() {
           confirmPending();
           return;
         }
+        // "No, I meant open the Dictionary app": a correction. Replace the command instead of cancelling it.
+        const corr = text.trim().match(/^(?:no+|nope|not that|wait|actually)[,.!]?\s+(?:milo[,.]?\s+)?(?:i (?:meant|mean|said|want(?:ed)?(?: you)? to)|make (?:it|that))?[,.]?\s*(.+)$/i);
+        if (corr && corr[1].replace(/[^a-z0-9 ]+/gi, " ").trim().split(/\s+/).length >= 2) {
+          bb("card_corrected", { was: P.text, now: corr[1] });
+          lastTry.current = { text: P.text, at: Date.now() }; // so the rephrase counts as a retry
+          setPendingCmd(stripGo(corr[1]), stripGo(corr[1]) !== corr[1].trim());
+          return;
+        }
         if (/^(cancel|no|nope|never ?mind|forget it|scratch that|stop)\b/i.test(text.trim())) {
           cancelPending();
           return;
@@ -2404,6 +2430,7 @@ export default function App() {
       key: (k: string) => window.dispatchEvent(new KeyboardEvent("keydown", { key: k })),
       move: (x: number, y: number) => setPos({ x, y }),
       chat: (on: boolean) => setChatOpen(on),
+      setup: (on: boolean) => setSetup(on),
       plan: (p: GamePlan) => showPlan({ key: planKey(p), plan: p, done: [], at: Date.now() }),
       radarSet: (items: ScanItem[]) => setRadar(mergeScan(mergeScan(emptyRadar(), [], Date.now()), items, Date.now())),
       radarCheck: () => checkAlerts(true),

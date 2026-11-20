@@ -125,6 +125,9 @@ export async function runSelfTest(win: BrowserWindow) {
   }
   await sleep(2500); // let him finish waking up (greeting, brief)
   await js("window.__milo.quietEars()"); // the real mic stays off so room noise can't join the test
+  // First-run setup stays out of the way during the test (and comes back afterward if it wasn't finished).
+  const setupWas = await js<string | null>("localStorage.getItem('milo.onboarded')").catch(() => null);
+  await js("localStorage.setItem('milo.onboarded', '1'); window.__milo.setup(false)").catch(() => {});
   await reset();
   const { W, H } = await js<{ W: number; H: number }>("({ W: innerWidth, H: innerHeight })");
   const startPos = (await S()).pos as { x: number; y: number };
@@ -525,6 +528,7 @@ export async function runSelfTest(win: BrowserWindow) {
     /* ignore */
   }
   await js(`window.__milo.move(${startPos.x}, ${startPos.y})`).catch(() => {});
+  if (setupWas !== "1") await js("localStorage.removeItem('milo.onboarded')").catch(() => {});
   // game plans the test made don't stay in "pick up my homework"
   await js(`(() => { const k = "milo.gameplans"; try { const xs = JSON.parse(localStorage.getItem(k) || "[]"); localStorage.setItem(k, JSON.stringify(xs.filter((x) => x.at < ${libStart}))); } catch {} })()`).catch(() => {});
   off();
