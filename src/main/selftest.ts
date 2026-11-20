@@ -440,7 +440,7 @@ export async function runSelfTest(win: BrowserWindow) {
     const left = await waitFor("s.bubble && /left|minute/i.test(s.bubble)", 10000);
     await hear("stop lock in");
     const recap = await waitFor("document.querySelector('.lk-recap') || !s.lockOn", 10000);
-    await js("document.querySelector('.lk-recap button')?.click()");
+    await js("document.querySelector('.lk-recap .lk-btn--ghost')?.click()"); // "Done" (the first button is "Go again")
     await sleep(3000);
     const stuck = !(await S()).lockOn; // a "stop" must stick: nothing may quietly restart it
     const score = (right ? 0.4 : 0) + (left < 0 ? 0 : 0.2) + (recap < 0 ? 0 : 0.2) + (stuck ? 0.2 : 0);
