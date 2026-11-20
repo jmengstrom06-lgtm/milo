@@ -102,6 +102,12 @@ contextBridge.exposeInMainWorld("milo", {
   stopTask: () => ipcRenderer.send("milo:task-stop"),
   handsAccess: () => ipcRenderer.invoke("milo:hands-access"),
   perms: () => ipcRenderer.invoke("milo:perms"),
+  syncExchange: (kind: string, rows: unknown[]) => ipcRenderer.invoke("milo:sync-exchange", kind, rows),
+  onSyncNow: (cb: (changed: string[]) => void) => {
+    const l = (_e: unknown, changed: string[]) => cb(Array.isArray(changed) ? changed : []);
+    ipcRenderer.on("milo:sync-now", l);
+    return () => ipcRenderer.removeListener("milo:sync-now", l);
+  },
   permAsk: (kind: string) => ipcRenderer.invoke("milo:perm-ask", kind),
   relaunch: () => ipcRenderer.invoke("milo:relaunch"),
   onTaskStep: (cb: (step: unknown) => void) => {

@@ -32,7 +32,13 @@ const short = (s, n = 140) => {
 };
 
 for (const { f } of files) {
-  const lines = fs.readFileSync(path.join(LOGS, f), "utf8").split("\n").filter(Boolean);
+  const content = fs.readFileSync(path.join(LOGS, f), "utf8");
+  // self-test runs fire commands fast on purpose: they'd look like you rephrasing. Skip them.
+  if (content.includes('"src":"selftest"') || /"pushToTalk":true,"forced":false[^\n]*\n[^\n]*"card_skipped"/.test(content.slice(0, 4000)) && content.includes('"src":"lockin"')) {
+    stats.selfTests++;
+    continue;
+  }
+  const lines = content.split("\n").filter(Boolean);
   let lastHeard = "";
   const boots = new Set(); // dev mode starts everything twice on purpose: count distinct starts, not log lines
   let isTest = false;

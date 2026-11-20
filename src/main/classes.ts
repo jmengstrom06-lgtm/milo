@@ -8,7 +8,10 @@ import { callTool, persona, type ApiErr, type ApiOk } from "./brain";
 
 export type Subject = "math" | "stats" | "science" | "english" | "history" | "language" | "cs" | "business" | "arts" | "other";
 export type Klass = { id: string; name: string; code: string; subject: Subject; color: string };
-type Store = { classes: Klass[]; active: string | null };
+type Store = { classes: Klass[]; active: string | null; updated?: number };
+// sync: told when the class list changes (not when you just switch classes)
+const listeners: (() => void)[] = [];
+export const onClassesChange = (fn: () => void) => listeners.push(fn);
 
 export const SUBJECTS: Subject[] = ["math", "stats", "science", "english", "history", "language", "cs", "business", "arts", "other"];
 const COLORS = ["#a78bfa", "#38bdf8", "#34d399", "#f472b6", "#fbbf24", "#fb923c", "#60a5fa"];
@@ -17,12 +20,13 @@ const file = () => path.join(app.getPath("userData"), "classes.json");
 export function loadClasses(): Store {
   try {
     const s = JSON.parse(fs.readFileSync(file(), "utf8")) as Store;
-    return { classes: Array.isArray(s.classes) ? s.classes : [], active: s.active ?? null };
+    return { classes: Array.isArray(s.classes) ? s.classes : [], active: s.active ?? null, updated: Number(s.updated) || 0 };
   } catch {
     return { classes: [], active: null };
   }
 }
-export function saveClasses(s: Store) {
+export function saveClasses(s: Store, fromSync?: number) {
+  const before = loadClasses();
   const clean: Store = {
     classes: s.classes.slice(0, 8).map((c, i) => ({
       id: String(c.id || `c${Date.now().toString(36)}${i}`),
@@ -34,12 +38,16 @@ export function saveClasses(s: Store) {
     active: s.active,
   };
   if (clean.active && !clean.classes.some((c) => c.id === clean.active)) clean.active = null;
+  // the list itself changed (not just which class is on): stamp it, so the newest list wins across your Macs
+  const changed = JSON.stringify(before.classes) !== JSON.stringify(clean.classes);
+  clean.updated = fromSync ?? (changed ? Date.now() : before.updated ?? 0);
   try {
     fs.mkdirSync(path.dirname(file()), { recursive: true });
     fs.writeFileSync(file(), JSON.stringify(clean, null, 1));
   } catch {
     /* ignore */
   }
+  if (changed && fromSync === undefined) for (const fn of listeners) fn();
   return clean;
 }
 

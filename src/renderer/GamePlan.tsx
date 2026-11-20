@@ -30,6 +30,32 @@ export function dropPlan(key: string) {
     /* ignore */
   }
 }
+/** Sync: send game plans edited here, take ones edited on your other Macs (newest edit wins). Returns how many came down. */
+export async function syncPlans(): Promise<number> {
+  const local = loadPlans();
+  const got = await window.milo.syncExchange("gameplan", local.map((p) => ({ id: p.key, updated: p.at, data: p }))).catch(() => null);
+  if (!got || !got.length) return 0;
+  let xs = loadPlans();
+  let n = 0;
+  for (const r of got) {
+    const d = r.data as SavedPlan | null;
+    if (r.deleted) {
+      xs = xs.filter((x) => x.key !== r.id);
+      n++;
+    } else if (d && d.plan && Array.isArray(d.plan.steps) && Array.isArray(d.done)) {
+      xs = [{ ...d, key: r.id, at: r.updated }, ...xs.filter((x) => x.key !== r.id)];
+      n++;
+    }
+  }
+  xs.sort((a, b) => b.at - a.at);
+  try {
+    localStorage.setItem(STORE, JSON.stringify(xs.slice(0, 12)));
+  } catch {
+    /* ignore */
+  }
+  return n;
+}
+
 /** "pick up my stats homework": the newest unfinished plan that matches the words (or just the newest). */
 export function findPlan(words: string): SavedPlan | null {
   const open = loadPlans().filter((p) => p.done.length < p.plan.steps.length);

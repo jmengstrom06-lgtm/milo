@@ -6,7 +6,7 @@
 import { app, type BrowserWindow } from "electron";
 import fs from "node:fs";
 import path from "node:path";
-import { onLog } from "./blackbox";
+import { log as bbLog, onLog } from "./blackbox";
 import { loadClasses, saveClasses } from "./classes";
 import { deleteItem, listItems } from "./library";
 import { frontApp, isRunning, openApp, quitApp } from "./hands";
@@ -36,6 +36,7 @@ export async function runSelfTest(win: BrowserWindow) {
   fs.mkdirSync(path.join(dir, "shots"), { recursive: true });
   const t0 = Date.now();
   const log = (m: string) => console.log(`[milo-test] ${m}`);
+  bbLog("selftest", "start", {}); // marks this session as a test, so the log doctor skips it
 
   // Everything Milo's black box records during a test (what he heard, said, decided).
   let events: { t: number; line: string }[] = [];

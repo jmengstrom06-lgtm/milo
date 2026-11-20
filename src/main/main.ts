@@ -25,6 +25,7 @@ import { registerKit } from "./kitipc";
 import { registerLibrary } from "./library";
 import { quitAfterTest, runSelfTest, selfTestOn } from "./selftest";
 import { makeGamePlan } from "./homework";
+import { startSync } from "./sync";
 import { transcribe } from "./ears";
 import { stopNative } from "./native";
 import { account, onAccountChange, sendCode, signOut, startCallbackServer, userId, verifyCode } from "./account";
@@ -929,6 +930,7 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === "media"));
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === "media");
   createOverlay();
+  if (overlay) startSync(overlay); // class folders, classes and game plans follow you to any Mac you sign in on
   // `npm run test:milo`: drive Milo through his self-test, write the report, quit. (Sound muted so it runs quietly.)
   if (selfTestOn() && overlay) {
     const win = overlay;

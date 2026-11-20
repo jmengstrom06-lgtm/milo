@@ -22,7 +22,24 @@ const MAX_ITEMS = 600;
 const MAX_BYTES = 400_000; // per item (big SVG drawings fit; runaway data doesn't)
 
 const file = () => path.join(app.getPath("userData"), "library.json");
+const goneFile = () => path.join(app.getPath("userData"), "library-deleted.json");
 let cache: LibItem[] | null = null;
+// Deletes are remembered (for 60 days) so sync can tell your other Macs, and a deleted thing never comes back.
+let gone: { id: string; at: number }[] | null = null;
+function tombstones() {
+  if (gone) return gone;
+  try {
+    const raw = JSON.parse(fs.readFileSync(goneFile(), "utf8"));
+    gone = Array.isArray(raw) ? raw : [];
+  } catch {
+    gone = [];
+  }
+  return gone;
+}
+// "Something changed": sync uses this to follow up a few seconds after you edit.
+const listeners: (() => void)[] = [];
+export const onLibraryChange = (fn: () => void) => listeners.push(fn);
+let quiet = false; // while applying changes that came FROM sync, don't announce them back
 
 function all(): LibItem[] {
   if (cache) return cache;
@@ -40,9 +57,13 @@ function persist() {
     const tmp = file() + ".tmp";
     fs.writeFileSync(tmp, JSON.stringify(cache ?? []));
     fs.renameSync(tmp, file()); // never leave a half-written library
+    const cutoff = Date.now() - 60 * 86400e3;
+    gone = tombstones().filter((t) => t.at > cutoff).slice(-2000);
+    fs.writeFileSync(goneFile(), JSON.stringify(gone));
   } catch (e) {
     bb("library", "save_failed", { error: (e as Error).message });
   }
+  if (!quiet) for (const fn of listeners) fn();
 }
 
 /** Add a new item, or update it if `id` is given and exists. */
@@ -105,8 +126,45 @@ export function deleteItem(id: string): boolean {
   const i = items.findIndex((x) => x.id === id);
   if (i < 0) return false;
   items.splice(i, 1);
+  tombstones().push({ id, at: Date.now() });
   persist();
   return true;
+}
+
+// ---- sync ----
+export type SyncRow = { id: string; updated: number; deleted?: boolean; data?: unknown };
+/** Everything here, plus remembered deletes, in sync's shape. */
+export function librarySyncRows(): SyncRow[] {
+  return [...all().map((x) => ({ id: x.id, updated: x.updated, data: x })), ...tombstones().map((t) => ({ id: t.id, updated: t.at, deleted: true }))];
+}
+/** Bring in newer versions from your other Macs (newest edit wins). */
+export function applyLibraryRows(rows: SyncRow[]): number {
+  const items = all();
+  let n = 0;
+  for (const r of rows) {
+    const i = items.findIndex((x) => x.id === r.id);
+    if (i >= 0 && items[i].updated >= r.updated) continue;
+    if (r.deleted) {
+      if (i >= 0) items.splice(i, 1);
+      if (!tombstones().some((t) => t.id === r.id)) tombstones().push({ id: r.id, at: r.updated });
+      n++;
+      continue;
+    }
+    const d = r.data as Partial<LibItem> | null;
+    if (!d || !APPS.includes(d.app as LibApp)) continue;
+    if (tombstones().some((t) => t.id === r.id && t.at >= r.updated)) continue; // deleted here after that edit
+    const item: LibItem = { id: r.id, classId: d.classId ?? null, app: d.app as LibApp, title: String(d.title ?? "Untitled"), created: Number(d.created) || r.updated, updated: r.updated, data: d.data };
+    if (i >= 0) items[i] = item;
+    else items.push(item);
+    n++;
+  }
+  if (n) {
+    items.sort((a, b) => b.updated - a.updated);
+    quiet = true;
+    persist();
+    quiet = false;
+  }
+  return n;
 }
 
 /** How many things each class has, per app ("null" = not filed). */

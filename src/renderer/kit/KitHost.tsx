@@ -97,6 +97,10 @@ const KitHost = forwardRef<KitHandle, {
   const [editClasses, setEditClasses] = useState<{ seed?: string } | null>(null);
   useEffect(() => {
     window.milo.kit.classes().then(setClasses).catch(() => {});
+    // classes changed on another Mac: show the new list
+    return window.milo.onSyncNow((changed) => {
+      if (changed.includes("classes")) window.milo.kit.classes().then(setClasses).catch(() => {});
+    });
   }, []);
   const activeClass = classes.classes.find((c) => c.id === classes.active) ?? null;
   const subject: Subject | undefined = activeClass?.subject;

@@ -18,7 +18,7 @@ import { fastDecide, parseHomework, parsePlanVoice, parseRadar, stripFiller, typ
 import { alertLine, emptyRadar, markWarned, mergeScan, pendingAlerts, upcoming, whenText, type Radar, type RadarItem, type ScanItem, type Warn } from "./radar";
 import RadarCard, { type RadarView } from "./RadarCard";
 import Onboarding, { setupDone } from "./Onboarding";
-import GamePlanCard, { findPlan, loadPlans, nextStep, planKey, savePlan, type SavedPlan } from "./GamePlan";
+import GamePlanCard, { findPlan, loadPlans, nextStep, planKey, savePlan, syncPlans, type SavedPlan } from "./GamePlan";
 import AccountChip from "./Account";
 import LockIn, { type LockInHandle } from "./LockIn";
 import { parseLockIn } from "../main/focusRules";
@@ -669,8 +669,12 @@ export default function App() {
   const gpRef = useRef<SavedPlan | null>(null);
   gpRef.current = gp;
   const hwRun = useRef(0);
+  const planSync = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showPlan = (sp: SavedPlan) => {
     savePlan(sp);
+    // follow you to your other Macs a few seconds after each change
+    if (planSync.current) clearTimeout(planSync.current);
+    planSync.current = setTimeout(() => void syncPlans(), 4000);
     gpRef.current = sp;
     setGp(sp);
   };
@@ -838,6 +842,22 @@ export default function App() {
     }
     return true;
   };
+
+  // Sync came through (sign-in, startup, every 5 min, or a change): game plans too, and refresh the open one.
+  useEffect(
+    () =>
+      window.milo.onSyncNow(async () => {
+        const n = await syncPlans();
+        if (!n || !gpRef.current) return;
+        const fresh = loadPlans().find((x) => x.key === gpRef.current?.key);
+        if (fresh && fresh.at > gpRef.current.at) {
+          gpRef.current = fresh;
+          setGp(fresh);
+        }
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
 
   // ---- Deadline radar ---------------------------------------------------------------------------
   // Scans D2L in the background (startup + every 3 h), remembers every assignment, catches NEW and MOVED ones,
