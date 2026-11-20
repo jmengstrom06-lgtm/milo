@@ -2036,7 +2036,16 @@ export default function App() {
         const tt = text.trim().toLowerCase().replace(/[.!?]+$/, "");
         const isStop = /^(stop|cancel|never ?mind|forget it|wait|hold on|pause)\b/.test(tt) && tt.split(/\s+/).length <= 4;
         const connects = /^(and|then|also|plus|after that|so|but|with|to|in|on|about|that|which|where|make|write|type|put|have it|and then)\b/.test(tt);
-        if (!isStop && !isBareGo(tt) && (connects || soundsUnfinished(LR.text) || Date.now() - LR.at < 5000)) {
+        // A complete command on its own ("later", "close the plan", "save this to English", "what's next") is never glued onto the last one.
+        const standalone =
+          !connects &&
+          (!!fastDecide(tt, { kitOpen: null, researchOpen: false, toolOpen: false, lessonOpen: !!lessonRef.current, hasLastAnswer: false }) ||
+            !!parseHomework(tt) ||
+            !!parseRadar(tt, !!radarViewRef.current) ||
+            (!!gpRef.current && !!parsePlanVoice(tt, !!lessonRef.current)) ||
+            /^(save|put|move|file|keep) (this|it|that)\b.*\b(to|in|into|under)\b/.test(tt) ||
+            /^(close|hide|later|not now|show me|open|switch to|go to|what'?s|how|why|who|when|where|can you|could you)\b/.test(tt));
+        if (!isStop && !standalone && !isBareGo(tt) && (connects || soundsUnfinished(LR.text) || Date.now() - LR.at < 5000)) {
           lastRun.current = null;
           bb("merged_into_last_command", { was: LR.text, added: text, msSinceStart: Date.now() - LR.at, stoppedTask: workingRef.current });
           if (workingRef.current) {

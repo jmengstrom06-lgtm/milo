@@ -376,6 +376,16 @@ const KitHost = forwardRef<KitHandle, {
     else show(a);
   };
 
+  /** "save this to bio" / "move it to my stats class": file what's on screen under that class. */
+  const fileTo = (t: string): boolean => {
+    const mv = t.match(/^(?:save|put|move|file|add|keep|stick) (?:this|it|that)(?: (?:drawing|sketch|diagram|graph|sheet|table|chart|set|plan|one))?\s+(?:to|in|into|under|for|with) (.+)$/);
+    if (!mv) return false;
+    const c = matchClass(mv[1], classes.classes);
+    if (!item) p.say("There's nothing to file yet. Make something first.");
+    else if (!c) p.say(`Which class? I have ${classes.classes.map((k) => classLabel(k)).join(", ") || "none yet"}.`);
+    else void moveItem(c.id).then(() => p.say(`Saved to ${classLabel(c)}.`));
+    return true;
+  };
   useImperativeHandle(ref, () => ({
     open,
     close: () => {
@@ -393,14 +403,7 @@ const KitHost = forwardRef<KitHandle, {
         return true;
       }
       // "save this to bio" / "move it to my stats class"
-      const mv = t.match(/^(?:save|put|move|file|add|keep|stick) (?:this|it|that)(?: (?:drawing|sketch|diagram|graph|sheet|table|chart|set|plan|one))?\s+(?:to|in|into|under|for|with) (.+)$/);
-      if (mv) {
-        const c = matchClass(mv[1], classes.classes);
-        if (!item) p.say("There's nothing to file yet. Make something first.");
-        else if (!c) p.say(`Which class? I have ${classes.classes.map((k) => classLabel(k)).join(", ") || "none yet"}.`);
-        else void moveItem(c.id).then(() => p.say(`Saved to ${classLabel(c)}.`));
-        return true;
-      }
+      if (fileTo(t)) return true;
       // "show my math sketches" / "open my bio folder" / "open my last drawing"
       const br = parseBrowse(t);
       if (br) {
@@ -455,6 +458,7 @@ const KitHost = forwardRef<KitHandle, {
     direct: (text) => {
       if (!app) return false;
       const t = clean(text);
+      if (fileTo(t)) return true; // "save this to English" moves what's open; it never makes something new
       if (app === "study") {
         const s = studyRef.current;
         if (study && s) {
