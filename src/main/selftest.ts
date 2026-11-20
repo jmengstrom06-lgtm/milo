@@ -37,6 +37,7 @@ export async function runSelfTest(win: BrowserWindow) {
 
   // Everything Milo's black box records during a test (what he heard, said, decided).
   let events: { t: number; line: string }[] = [];
+  let reloads = 0;
   let listening = true;
   onLog((src, ev, data) => {
     if (!listening) return;
@@ -77,12 +78,24 @@ export async function runSelfTest(win: BrowserWindow) {
 
   async function test(id: string, cat: Cat, name: string, fn: () => Promise<{ score: number; detail: string; ms?: number }>) {
     log(`${id} ${name}…`);
-    events = [];
-    let r: { score: number; detail: string; ms?: number };
-    try {
-      r = await fn();
-    } catch (e) {
-      r = { score: 0, detail: `crashed: ${(e as Error).message}` };
+    let r: { score: number; detail: string; ms?: number } = { score: 0, detail: "" };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      events = [];
+      const boot = await js<number>("window.__milo.boot").catch(() => 0);
+      try {
+        r = await fn();
+      } catch (e) {
+        r = { score: 0, detail: `crashed: ${(e as Error).message}` };
+      }
+      const after = await js<number>("window.__milo && window.__milo.boot").catch(() => 0);
+      if (after === boot) break;
+      // Milo's screen restarted mid-test (the dev server's live reload): his mic came back on and his state reset.
+      log(`${id}: Milo's screen restarted during the test; retrying once`);
+      reloads++;
+      await js("window.__milo.quietEars()").catch(() => {});
+      await sleep(1500);
+      await reset();
+      if (attempt === 1) r.detail += " (Milo's screen restarted during this test twice)";
     }
     const pass = r.score >= 0.6;
     const res: Result = { id, cat, name, ...r, pass };
@@ -310,12 +323,16 @@ export async function runSelfTest(win: BrowserWindow) {
     });
 
     await test("O3", "Organization", `'Save this to ${A.name}' moves it`, async () => {
-      if (!(await js<boolean>(`!!${sketchShown}`))) {
-        await hear("open sketch");
-        await waitFor("s.kitApp === 'sketch'", 8000);
+      await hear("open sketch");
+      await waitFor("s.kitApp === 'sketch'", 8000);
+      await sleep(800);
+      if (!(await js<boolean>(`!!${sketchShown} && !!${pillText}`))) {
         await hear("draw a triangle");
         await waitFor(`${sketchShown} && ${pillText}`, 45000);
       }
+      // a real student waits for him to finish, so "save this" isn't heard as more of the last command
+      await waitFor("!s.pending && !s.speaking", 15000);
+      await sleep(2000);
       await hear(`save this to ${A.name}`);
       const ms = await waitFor(`${pillText}.includes(${JSON.stringify(label(A))})`, 10000);
       return { ms, score: ms < 0 ? 0 : 1, detail: ms < 0 ? `pill still says "${await js(pillText)}"` : `moved in ${ms}ms` };
@@ -456,7 +473,7 @@ export async function runSelfTest(win: BrowserWindow) {
   const passed = results.filter((r) => r.pass).length;
   const mins = ((Date.now() - t0) / 60000).toFixed(1);
 
-  let md = `# Milo self-test: ${total.toFixed(1)} / 10\n\n${passed}/${results.length} checks passed · ${mins} min · ${new Date().toLocaleString()}\n\n`;
+  let md = `# Milo self-test: ${total.toFixed(1)} / 10\n\n${passed}/${results.length} checks passed · ${mins} min · ${new Date().toLocaleString()}${reloads ? ` · Milo's screen restarted ${reloads}x (dev server), those tests were retried` : ""}\n\n`;
   md += `## By area\n\n| Area | Score | Weight | What it means |\n|---|---|---|---|\n`;
   for (const c of cats) md += `| ${c} | ${(catScore(c) * 10).toFixed(1)} | ${WEIGHT[c]}% | ${WHY[c]} |\n`;
   md += `\n## Every check\n\n| | ID | Check | Result |\n|---|---|---|---|\n`;

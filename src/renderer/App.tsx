@@ -915,8 +915,12 @@ export default function App() {
   };
   /** "what's due this week": answer instantly from the radar; re-check D2L first only if it's stale. */
   const askRadar = (days: number) => {
-    if (!portal) return startBrief(true); // walks them through adding D2L
+    // Fresh enough: answer instantly from what the radar already knows.
     if (radarRef.current.scans > 0 && Date.now() - radarRef.current.lastScan < 3 * 3600e3) return showRadarList(days);
+    if (!portal) {
+      if (radarRef.current.items.length) return showRadarList(days); // a bit old, but better than nothing
+      return startBrief(true); // walks them through adding D2L
+    }
     setMood("looking");
     setBubble("Checking D2L…");
     scanRadar((ok) => {
@@ -2097,7 +2101,7 @@ export default function App() {
       const sure = fastDecide(cleaned, { kitOpen: null, researchOpen: false, toolOpen: false, lessonOpen: false, hasLastAnswer: false });
       const planWords = !!gpRef.current && !!parsePlanVoice(cleaned, !!lessonRef.current);
       if ((sure && ["kit_menu", "open_kit", "hold", "flag"].includes(sure.do)) || parseHomework(cleaned) || planWords || parseRadar(cleaned, !!radarViewRef.current)) {
-        bb("card_skipped", { text: cleaned, do: sure?.do ?? (planWords ? "plan_voice" : "homework") });
+        bb("card_skipped", { text: cleaned, do: sure?.do ?? (planWords ? "plan_voice" : parseRadar(cleaned, !!radarViewRef.current) ? "radar" : "homework") });
         return runPending(cleaned);
       }
       setPendingCmd(cleaned, cleaned !== text.trim());
@@ -2304,11 +2308,16 @@ export default function App() {
   // ---- self-test hooks (dev only) -------------------------------------------------
   // `npm run test:milo` drives Milo through these: the same path your voice takes after it becomes text.
   const testSnap = useRef<Record<string, unknown>>({});
+  const bootId = useRef(Date.now());
+  useEffect(() => {
+    bb("app_boot", { boot: bootId.current }); // every time Milo's screen starts fresh (helps catch surprise reloads)
+  }, []);
   testSnap.current = { radar: radarView ? { mode: radarView.mode, rows: radarView.rows.length } : null, plan: gp ? { title: gp.plan.title, steps: gp.plan.steps.length, done: gp.done.length } : null, speaking, bubble, heard, pending: pending?.text ?? null, chatOpen, ringOpen, kitApp, lockOn, research: !!researchQ, tool: !!tool, quiz: !!quiz, notebook: !!box, mood, pos, name };
   useEffect(() => {
     if (!location.protocol.startsWith("http")) return; // dev server only, never in the packaged app
     (window as unknown as { __milo: unknown }).__milo = {
       ready: true,
+      boot: bootId.current,
       state: () => testSnap.current,
       hear: (t: string, ptt = true) => heardRef.current?.(t, ptt),
       key: (k: string) => window.dispatchEvent(new KeyboardEvent("keydown", { key: k })),
