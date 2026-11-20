@@ -20,3 +20,33 @@ describe("quick plan", () => {
     expect(String(first("could you please open youtube for me")?.url)).toContain("youtube.com");
   });
 });
+
+// Real failures from Nov 20: long, natural ways of saying "quit Chrome" must quit it natively.
+describe("quit the whole app, however it's said", () => {
+  const quit = (t: string) => plan(t).steps[0];
+  it.each([
+    "I meant, like, my... like, I want you to close the entire Chrome application open.",
+    "No. Milo, I want you to close the entire Chrome with the... both the tabs open. Get it off my screen.",
+    "close chrome completely",
+    "quit the whole chrome app",
+    "get chrome off my screen",
+    "close both tabs and the entire chrome",
+  ])("%s", (t) => expect(quit(t)).toMatchObject({ kind: "quit", app: "Google Chrome" }));
+  it("still leaves tab-only requests to the tab logic", () => {
+    expect(quit("close this tab")).toMatchObject({ kind: "keys", keys: "cmd+w" });
+  });
+});
+
+describe("quit any app, not just the known ones", () => {
+  const quit = (t: string) => plan(t).steps[0];
+  it.each([
+    ["close the entire calculator application", "Calculator"],
+    ["I meant, like, I want you to close the whole calculator app", "Calculator"],
+    ["No. Milo, close the entire calculator. Get it off my screen.", "Calculator"],
+    ["get dictionary off my screen", "Dictionary"],
+  ])("%s", (t, app) => expect(quit(t)).toMatchObject({ kind: "quit", app }));
+  it("never quits 'the whole thing' or a tab", () => {
+    expect(quit("close the whole thing")?.kind).not.toBe("quit");
+    expect(quit("close all the tabs")?.kind).not.toBe("quit");
+  });
+});

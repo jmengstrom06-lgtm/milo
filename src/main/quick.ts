@@ -54,6 +54,23 @@ function isNewDocWanted(t: string) {
 }
 
 /** Exported for tests. */
+/** "close the entire Chrome application", "close both tabs and the whole Chrome", "get Spotify off my screen" -> that app. */
+function wholeQuit(t: string): string | null {
+  if (!/\b(close|quit|exit|shut( it)? down|kill|get rid of|turn off|get .{0,20}off (of )?my screen)\b/.test(t)) return null;
+  if (!/\b(entire|whole|all of|completely|application|app|all (the |my |both )?tabs|both (the )?tabs|everything|off (of )?my screen|altogether)\b/.test(t)) return null;
+  const names = Object.keys(APPS).sort((a, b) => b.length - a.length);
+  const hit = names.find((n) => new RegExp(`\\b${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(t));
+  if (hit) return APPS[hit];
+  // Any other app: "close the entire Calculator application", "close the whole spotify app. get it off my screen"
+  const u = t.replace(/[.,!?]+/g, " ").replace(/\s+/g, " ").trim();
+  const m =
+    u.match(/\b(?:close|quit|exit|kill|get rid of|shut down)\s+(?:the |my |of )?(?:entire |whole )?([a-z][a-z0-9 ]{1,24}?)(?:\s+(?:app|application|completely|entirely|altogether|(?:with|and|get|please|now|for me)\b.*))?$/) ||
+    u.match(/\bget (?:the |my )?([a-z][a-z0-9 ]{1,24}?) off (?:of )?my screen\b/);
+  const name = m?.[1]?.trim();
+  if (!name || /\b(tab|tabs|window|windows|it|this|that|thing|things|everything|research|box|panel|plan|card|sketch|notebook|message)\b/.test(name) || name.split(" ").length > 3) return null;
+  return name.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export function plan(raw: string): { steps: QuickStep[]; rest: string | null } {
   // Spoken filler doesn't change the command: "could you please open a new tab for me" = "open a new tab".
   const text = raw
@@ -78,6 +95,9 @@ export function plan(raw: string): { steps: QuickStep[]; rest: string | null } {
     };
   }
   const t = text.toLowerCase();
+  // Quitting a whole app wins over everything else in the sentence (always native: instant and checked).
+  const whole = wholeQuit(t);
+  if (whole) return { steps: [{ kind: "quit", app: whole, say: `Closing ${whole.replace(/^Microsoft |^Google |\.us$/, "")}` }], rest: null };
 
   // Split "do X and then do Y" into the first clause and the rest.
   const m = t.match(/^(.+?)\s*(?:,?\s+and then\s+|,?\s+then\s+|,?\s+and\s+)(.+)$/);
@@ -123,7 +143,7 @@ function one(t: string): QuickStep | null {
   if (/^(zoom out|make (it|the text) smaller)$/.test(t)) return { kind: "keys", keys: "cmd+-", say: "Zooming out" };
   // ---- quit an app: "close chatgpt", "quit spotify"
   const qa = t.match(/^(?:quit|close|exit|shut down)\s+(?:the |my )?(.+?)(?: app| application)?$/);
-  if (qa && !/\b(tab|window|it|this|that|research|box|panel|tool|page|doc|document|note)\b/.test(qa[1])) {
+  if (qa && !/\b(tabs?|windows?|it|this|that|research|box|panel|tool|page|doc|document|note|thing|things|everything|whole|all|plan|card|message)\b/.test(qa[1])) {
     const name = clean(qa[1]);
     const app = APPS[name] ?? (/^[a-z0-9 ]{2,24}$/.test(name) && name.split(" ").length <= 2 ? name.replace(/\b\w/g, (c) => c.toUpperCase()) : null);
     if (app) return { kind: "quit", app, say: `Closing ${app.replace(/^Microsoft |\.us$/, "")}` };

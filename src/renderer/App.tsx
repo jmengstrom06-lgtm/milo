@@ -594,7 +594,12 @@ export default function App() {
       lastStepPoint.current = null;
       setMood("looking");
       setBubble("On it!");
-      const r = await window.milo.task(task);
+      // You just rephrased: tell the planner the last try failed, so it picks a different, more direct way.
+      const hint = retryHint.current && Date.now() - retryHint.current.at < 60000 ? retryHint.current : null;
+      retryHint.current = null;
+      const r = await window.milo.task(
+        hint ? `${task}\n(The student is repeating themselves: the last try at "${hint.was}" didn't do what they wanted. Do it a different, more direct way this time. For a whole app, quit or open the app itself instead of pressing keys inside a page.)` : task
+      );
       setWorking(false);
       // Done working: hop back to his spot first (bottom right by default), THEN say what he did.
       await moveTo(home(), "jump");
@@ -1528,6 +1533,11 @@ export default function App() {
         return;
       }
     }
+    // "Go to my math tab": a class tab in Milo's own apps, never a Mac app called "Math Tab".
+    if (kitRef.current?.gotoClass(text)) {
+      bb("route_instant", { text, kind: "class_tab" });
+      return;
+    }
     // Unmistakable commands for the open Milo app ("next", "the answer is 5", "box plot").
     if (kitApp && kitRef.current?.voice(text)) return;
 
@@ -2161,7 +2171,30 @@ export default function App() {
 
   // ---- "Got it" card --------------------------------------------------------------
   const AUTO_GO_MS = 4000;
+  // ---- Frustration detector: you rephrased because the last try didn't work. Try a different way, and flag it.
+  const lastTry = useRef<{ text: string; at: number } | null>(null);
+  const retryHint = useRef<{ was: string; at: number } | null>(null);
+  const STOP = new Set(["the", "a", "an", "my", "i", "you", "to", "it", "that", "this", "milo", "please", "can", "could", "would", "want", "like", "um", "uh", "and", "of", "on", "in", "is", "me", "just"]);
+  const words = (t: string) => new Set(t.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter((w) => w.length > 1 && !STOP.has(w)));
+  const isFrustrated = (text: string): boolean => {
+    const L = lastTry.current;
+    if (!L || Date.now() - L.at > 45000) return false;
+    const t = text.toLowerCase();
+    if (/^(no+|nope|not that|that'?s not|wrong|what i meant)\b|\bi (meant|said|asked)\b|\b(didn'?t|did not|doesn'?t) (work|do (it|anything)|close|open)\b|\bstill (open|there|on my screen|not)\b|\b(try|do (it|that)) again\b|\bthe (whole|entire) (thing|app|application)\b/.test(t)) return true;
+    const a = words(L.text);
+    const b = words(text);
+    if (a.size < 2 || b.size < 2) return false;
+    let both = 0;
+    a.forEach((w) => b.has(w) && both++);
+    return both / Math.min(a.size, b.size) >= 0.6; // mostly the same words again
+  };
   const runPending = (text: string) => {
+    if (isFrustrated(text)) {
+      bb("frustration", { was: lastTry.current?.text, now: text, secondsLater: Math.round((Date.now() - (lastTry.current?.at ?? Date.now())) / 1000) });
+      retryHint.current = { was: lastTry.current!.text, at: Date.now() };
+      setBubble("My bad, trying another way…");
+    }
+    lastTry.current = { text, at: Date.now() };
     bb("card_run", { text, waitedMs: pendingRef.current ? Date.now() - (pendingRef.current.first ?? pendingRef.current.started) : 0 });
     pendingRef.current = null;
     setPending(null);
@@ -2208,7 +2241,9 @@ export default function App() {
       if (!P) return;
       P.first = P.first ?? Date.now();
       const stillTalking = !testDeaf.current && (earStateRef.current === "hearing" || earStateRef.current === "thinking" || levelRef.current > 0.3);
-      if (stillTalking && Date.now() - P.first < 30000) {
+      // Hold while you're still talking, but not forever: a TV or people nearby must never stall your command.
+      // (Smart ears already decided you finished; this only covers a real pause.)
+      if (stillTalking && Date.now() - P.first < (P.smart ? 4000 : 8000)) {
         P.started = Date.now(); // you're still talking: hold
         setPending((p) => (p ? { ...p, progress: 0 } : p));
         return;
@@ -2404,6 +2439,7 @@ export default function App() {
         followUntil.current = 0;
         lastRun.current = null;
         researchStart.current = null;
+        lastTry.current = null; // each test starts fresh (not a "rephrase" of the last one)
       },
     };
   });

@@ -9,9 +9,10 @@ import path from "node:path";
 import { onLog } from "./blackbox";
 import { loadClasses, saveClasses } from "./classes";
 import { deleteItem, listItems } from "./library";
+import { frontApp, isRunning, openApp, quitApp } from "./hands";
 
-type Cat = "Speed" | "Control" | "Polish" | "Organization" | "Study power" | "Personal" | "Focus" | "Research";
-const WEIGHT: Record<Cat, number> = { Speed: 20, Control: 20, Polish: 20, Organization: 15, "Study power": 10, Personal: 5, Focus: 5, Research: 5 };
+type Cat = "Speed" | "Control" | "Polish" | "Organization" | "Study power" | "Personal" | "Focus" | "Research" | "Computer";
+const WEIGHT: Record<Cat, number> = { Speed: 20, Control: 20, Polish: 20, Organization: 15, "Study power": 10, Personal: 5, Focus: 5, Research: 5, Computer: 20 };
 const WHY: Record<Cat, string> = {
   Speed: "Feels instant. Slow = 'just another chatbot'.",
   Control: "Does exactly what you say, the moment you say it (stop, close, cancel).",
@@ -21,6 +22,7 @@ const WHY: Record<Cat, string> = {
   Personal: "Knows you.",
   Focus: "Lock-in works first try.",
   Research: "Real answers with sources, fast.",
+  Computer: "Opens, quits and switches apps however you say it (only in npm run test:computer).",
 };
 
 type Result = { id: string; cat: Cat; name: string; score: number; pass: boolean; detail: string; ms?: number; shot?: string; events?: string[] };
@@ -450,6 +452,70 @@ export async function runSelfTest(win: BrowserWindow) {
     return { ms, score: speed(ms, 8000, 20000), detail: ms < 0 ? "no answer" : `panel in ${open}ms, answer in ${(ms / 1000).toFixed(1)}s` };
   });
 
+  // ======================= COMPUTER CONTROL (npm run test:computer) =======================
+  // Real clicks and keys on your Mac, with safe built-in apps that never ask "save changes?".
+  if (process.env.MILO_TEST_COMPUTER === "1") {
+    const waitMain = async (fn: () => Promise<boolean>, timeout: number) => {
+      const st = Date.now();
+      while (Date.now() - st < timeout) {
+        if (await fn().catch(() => false)) return Date.now() - st;
+        await sleep(250);
+      }
+      return -1;
+    };
+    const front = () => frontApp().catch(() => "");
+    await test("K1", "Computer", "'Open Calculator' opens it, in front", async () => {
+      await quitApp("Calculator");
+      await sleep(600);
+      await hear("open calculator");
+      const ms = await waitMain(async () => (await isRunning("Calculator")) && /calculator/i.test(await front()), 12000);
+      return { ms, score: ms < 0 ? 0 : speed(ms, 3000, 7000), detail: ms < 0 ? `not open in front (front: ${await front()})` : `open in ${(ms / 1000).toFixed(1)}s` };
+    });
+    const QUITS = [
+      "close calculator",
+      "quit calculator",
+      "close the calculator app",
+      "close the entire calculator application",
+      "get calculator off my screen",
+      "quit the whole calculator app",
+      "I meant, like, my... like, I want you to close the entire calculator application",
+      "No. Milo, close the entire calculator. Get it off my screen.",
+    ];
+    await test("K2", "Computer", `Quit an app, said ${QUITS.length} different ways`, async () => {
+      const missed: string[] = [];
+      for (const ph of QUITS) {
+        await openApp("Calculator");
+        await sleep(900);
+        await hear(ph);
+        const ms = await waitMain(async () => !(await isRunning("Calculator")), 10000);
+        if (ms < 0) missed.push(ph);
+        await reset();
+        await sleep(600);
+      }
+      const ok = QUITS.length - missed.length;
+      return { score: ok / QUITS.length, detail: missed.length ? `${ok}/${QUITS.length}. Didn't quit for: ${missed.map((m) => `"${m}"`).join("; ")}` : `all ${QUITS.length} worked` };
+    });
+    await test("K3", "Computer", "'Switch to Dictionary' brings the right app forward", async () => {
+      await openApp("Dictionary");
+      await openApp("Calculator");
+      await sleep(800);
+      await hear("switch to dictionary");
+      const ms = await waitMain(async () => /dictionary/i.test(await front()), 10000);
+      return { ms, score: ms < 0 ? 0 : 1, detail: ms < 0 ? `front is still ${await front()}` : `Dictionary in front in ${(ms / 1000).toFixed(1)}s` };
+    });
+    await test("K4", "Computer", "Rephrasing ('no, I meant…') is noticed as a retry", async () => {
+      await hear("open dictionary");
+      await waitMain(async () => /dictionary/i.test(await front()), 10000);
+      await sleep(1500);
+      await hear("no I meant open the dictionary app");
+      await sleep(2500);
+      const caught = events.some((e) => /app\/frustration/.test(e.line));
+      return { score: caught ? 1 : 0, detail: caught ? "noticed, and told the planner to try another way" : "didn't notice the rephrase" };
+    });
+    await quitApp("Calculator").catch(() => "");
+    await quitApp("Dictionary").catch(() => "");
+  }
+
   // ---------- clean up: the test's drawings/sheets don't stay in your folders ----------
   try {
     for (const it of listItems({ classId: "all" })) if (it.created >= libStart) deleteItem(it.id);
@@ -469,13 +535,14 @@ export async function runSelfTest(win: BrowserWindow) {
     const xs = results.filter((r) => r.cat === c);
     return xs.length ? xs.reduce((a, r) => a + r.score, 0) / xs.length : 0;
   };
-  const total = cats.reduce((a, c) => a + catScore(c) * WEIGHT[c], 0) / 10;
+  const ran = cats.filter((c) => results.some((r) => r.cat === c));
+  const total = (ran.reduce((a, c) => a + catScore(c) * WEIGHT[c], 0) / ran.reduce((a, c) => a + WEIGHT[c], 0)) * 10;
   const passed = results.filter((r) => r.pass).length;
   const mins = ((Date.now() - t0) / 60000).toFixed(1);
 
   let md = `# Milo self-test: ${total.toFixed(1)} / 10\n\n${passed}/${results.length} checks passed · ${mins} min · ${new Date().toLocaleString()}${reloads ? ` · Milo's screen restarted ${reloads}x (dev server), those tests were retried` : ""}\n\n`;
   md += `## By area\n\n| Area | Score | Weight | What it means |\n|---|---|---|---|\n`;
-  for (const c of cats) md += `| ${c} | ${(catScore(c) * 10).toFixed(1)} | ${WEIGHT[c]}% | ${WHY[c]} |\n`;
+  for (const c of ran) md += `| ${c} | ${(catScore(c) * 10).toFixed(1)} | ${WEIGHT[c]}% | ${WHY[c]} |\n`;
   md += `\n## Every check\n\n| | ID | Check | Result |\n|---|---|---|---|\n`;
   for (const r of results) md += `| ${r.pass ? "✅" : "❌"} | ${r.id} | ${r.name} | ${r.detail.replace(/\|/g, "/")} |\n`;
   const fails = results.filter((r) => !r.pass);

@@ -246,10 +246,26 @@ async function openChrome(url?: string) {
 
 /** Quit an app the normal way (it can still ask to save). */
 export async function quitApp(name: string) {
-  const real = resolveApp(name);
-  await run("osascript", ["-e", `tell application "${real.replace(/"/g, "")}" to quit`]).catch(() => {});
-  await sleep(400);
+  const real = resolveApp(name).replace(/"/g, "");
+  for (let i = 0; i < 2; i++) {
+    await run("osascript", ["-e", `tell application "${real}" to quit`]).catch(() => {});
+    await sleep(600);
+    if (!(await isRunning(real))) break; // checked: it's really gone
+  }
   return real;
+}
+/** Is this app still open? */
+export async function isRunning(name: string): Promise<boolean> {
+  try {
+    return (await run("osascript", ["-e", `application "${name.replace(/"/g, "")}" is running`])).trim() === "true";
+  } catch {
+    return false;
+  }
+}
+/** Make this app the one in front, so keystrokes go to it (not to whatever was in front before). */
+export async function activateApp(name: string) {
+  await run("osascript", ["-e", `tell application "${resolveApp(name).replace(/"/g, "")}" to activate`]).catch(() => {});
+  await sleep(250);
 }
 
 export async function openApp(name: string) {

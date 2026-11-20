@@ -18,7 +18,9 @@
     "check": "npm run typecheck && npm test",
     "build:hands": "node scripts/build-hands.js",
     "dist": "cross-env MILO_UNIVERSAL=1 npm run build && electron-builder --mac --universal",
-    "dist:unsigned": "cross-env MILO_UNIVERSAL=1 CSC_IDENTITY_AUTO_DISCOVERY=false npm run build && electron-builder --mac --universal -c.mac.identity=null"
+    "dist:unsigned": "cross-env MILO_UNIVERSAL=1 CSC_IDENTITY_AUTO_DISCOVERY=false npm run build && electron-builder --mac --universal -c.mac.identity=null",
+    "doctor": "node scripts/log-doctor.js",
+    "test:computer": "npm run build:hands && npm run build:main && concurrently -k -s command-electron -n vite,electron \"vite\" \"wait-on tcp:127.0.0.1:5173 && cross-env MILO_DEV=1 MILO_TEST=1 MILO_TEST_COMPUTER=1 electron .\""
   },
   "dependencies": {
     "@fontsource/caveat": "^5.3.0",

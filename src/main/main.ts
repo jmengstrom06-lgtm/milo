@@ -33,7 +33,7 @@ import { captureError, identify, startTelemetry, track } from "./telemetry";
 import { allowForSession, backToWork, startFocus, stopFocus } from "./focus";
 import { planBlocks } from "./focusRules";
 import { rest } from "./account";
-import { click, ensureBrowser, frontApp, openApp, openFolder, openLatestDownload, openUrl, pressKeys, quitApp, typeText } from "./hands";
+import { activateApp, click, ensureBrowser, frontApp, isRunning, openApp, openFolder, openLatestDownload, openUrl, pressKeys, quitApp, typeText } from "./hands";
 import { plan } from "./quick";
 import { research } from "./research";
 import { buildTool } from "./builder";
@@ -324,7 +324,15 @@ ipcMain.handle("milo:task", async (_e, task: string) => {
         history.push(`Opened the newest download: ${name}`);
         newTabJustOpened = false;
       } else if (q.kind === "app") {
-        await openApp(q.app);
+        const real = await openApp(q.app);
+        // Check it actually came to the front; if not, bring it forward once more.
+        const same = (f: string) => f.toLowerCase().includes(real.toLowerCase().replace(/^(microsoft|google) /, "").split(" ")[0]);
+        let front = await frontApp().catch(() => "");
+        if (!same(front)) {
+          await activateApp(real);
+          front = await frontApp().catch(() => "");
+        }
+        bb("task", "verify", { kind: "open", app: real, ok: same(front), front });
         history.push(`Opened the ${q.app} app`);
         newTabJustOpened = false;
       } else if (q.kind === "url") {
@@ -345,11 +353,18 @@ ipcMain.handle("milo:task", async (_e, task: string) => {
         history.push(`Typed "${q.text.slice(0, 80)}"`);
         newTabJustOpened = false;
       } else if (q.kind === "quit") {
-        await quitApp(q.app);
+        const real = await quitApp(q.app);
+        const still = await isRunning(real);
+        bb("task", "verify", { kind: "quit", app: real, ok: !still });
+        // Never claim it closed when it didn't (usually a "save changes?" box is holding it open).
+        if (still) throw new Error(`${real.replace(/^Google |^Microsoft /, "")} is still open. It might be asking you to save something.`);
         history.push(`Closed the ${q.app} app`);
         newTabJustOpened = false;
       } else {
         if (q.browser) await ensureBrowser();
+        // Keys go to the app you mean: make the browser the active app first (not just its window).
+        const fr = await frontApp().catch(() => "");
+        if (q.browser && fr) await activateApp(fr);
         await pressKeys(q.keys);
         history.push(`Pressed ${q.keys} (${q.say})`);
         newTabJustOpened = q.keys === "cmd+t";

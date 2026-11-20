@@ -23,6 +23,8 @@ export type KitHandle = {
   voice: (text: string) => boolean;
   /** The router said this is for the open app. */
   direct: (text: string) => boolean;
+  /** "go to my math tab" / "open my bio class": open Milo's apps on that class's tab. */
+  gotoClass: (text: string) => boolean;
   /** What's open, for the router. */
   describe: () => string;
   /** "hold this" */
@@ -229,7 +231,9 @@ const KitHost = forwardRef<KitHandle, {
   const sheetRef = useRef<SheetHandle>(null);
   const req = useRef(0);
 
+  const lastApp = useRef<KitApp>("sketch");
   const show = (a: KitApp | null) => {
+    if (a && a !== "pocket") lastApp.current = a;
     if (a !== app) {
       const id = a && a !== "notes" && a !== "pocket" ? tabs.current[tabKey(activeRef.current)]?.[a as LibApp] : undefined;
       setItem(id ? { id, app: a as LibApp, classId: activeRef.current, fresh: false } : null);
@@ -455,6 +459,15 @@ const KitHost = forwardRef<KitHandle, {
       return false;
     },
     /** The router decided this is for the open app. */
+    gotoClass: (text) => {
+      const m = clean(text).match(/^(?:go to|go into|open(?: up)?|switch to|pull up|bring up|show me|take me to)\s+(?:my |the )?(.+?)\s+(?:tab|class|folder)$/);
+      const c = m ? matchClass(m[1], classes.classes) : null;
+      if (!c) return false;
+      if (!app) show(lastApp.current);
+      switchClass(c.id);
+      p.say(`Here's ${classLabel(c)}.`);
+      return true;
+    },
     direct: (text) => {
       if (!app) return false;
       const t = clean(text);

@@ -124,8 +124,10 @@ function parseSingle(raw: string, ctx: Ctx): Intent {
   if (BUILD.test(t) && !/\b(google (doc|sheet|slide)s?|new (tab|window|doc|sheet)|folder|spreadsheet in|document)\b/.test(t)) return { kind: "build", request: text };
 
   if (ctx.pendingAsk) {
-    if (/^(yes|yeah|yep|yup|sure|go ahead|do it|ok|okay|send it|please do|go for it|confirm)\b/.test(t)) return { kind: "yes" };
-    if (/^(no|nope|nah|don'?t|cancel|stop|never ?mind|wait)\b/.test(t)) return { kind: "no" };
+    // A bare yes/no answers his question. "No, close the whole thing" is a NEW command, not a "no".
+    const short = t.replace(/[^a-z' ]+/g, " ").trim().split(/\s+/).length <= 4;
+    if (short && /^(yes|yeah|yep|yup|sure|go ahead|do it|ok|okay|send it|please do|go for it|confirm)\b/.test(t)) return { kind: "yes" };
+    if (short && /^(no|nope|nah|don'?t|cancel|stop|never ?mind|wait)\b/.test(t)) return { kind: "no" };
   }
 
   if (/^(stop|shh+|quiet|be quiet|pause|hold on|wait)\b/.test(t) && t.split(/\s+/).length <= 3) return { kind: "hush" };

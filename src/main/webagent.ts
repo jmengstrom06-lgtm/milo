@@ -4,6 +4,7 @@
 import { call, bridgeConnected } from "./bridge";
 import { webActions, WebAction } from "./brain";
 import { log as bb } from "./blackbox";
+import { activateApp, quitApp } from "./hands";
 
 type El = {
   id: string; tag: string; role?: string; type?: string; label: string; inView: boolean;
@@ -121,8 +122,17 @@ export async function runWebTask(
             break;
           }
           case "key":
-            // Real keystrokes so sites react (Enter to search/send, shortcuts). Chrome must be in front.
+            // Quitting the browser isn't something a page can do: quit it natively (instant, and checked).
+            if (/^cmd\+q$/i.test((a.keys ?? "").trim())) {
+              await quitApp("Google Chrome");
+              history.push("Quit Chrome");
+              bb("web", "quit_native", {});
+              return { status: "done" as const, text: "Closed Chrome." };
+            }
+            // Real keystrokes so sites react (Enter to search/send, shortcuts). Chrome must be the ACTIVE app,
+            // not just the front window, or the keys land in whatever app was in front.
             await call("focus_window", { tabId: snap.tabId }, 4000).catch(() => {});
+            await activateApp("Google Chrome");
             if (snap.focused == null && el) await call("focus", { tabId: snap.tabId, id: el.id }, 4000).catch(() => {});
             await pressKeys(a.keys ?? "enter");
             history.push(`Pressed ${a.keys}`);
