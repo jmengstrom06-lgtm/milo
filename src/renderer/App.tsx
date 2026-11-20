@@ -17,6 +17,7 @@ import { BriefCard, BriefLoader, BriefState, SignInPanel } from "./Brief";
 import { fastDecide, parseHomework, parsePlanVoice, parseRadar, stripFiller, type DecideState } from "./decide";
 import { alertLine, emptyRadar, markWarned, mergeScan, pendingAlerts, upcoming, whenText, type Radar, type RadarItem, type ScanItem, type Warn } from "./radar";
 import RadarCard, { type RadarView } from "./RadarCard";
+import Onboarding, { setupDone } from "./Onboarding";
 import GamePlanCard, { findPlan, loadPlans, nextStep, planKey, savePlan, type SavedPlan } from "./GamePlan";
 import AccountChip from "./Account";
 import LockIn, { type LockInHandle } from "./LockIn";
@@ -168,6 +169,8 @@ export default function App() {
   const [brief, setBrief] = useState<BriefState | null>(null);
   const [briefRun, setBriefRun] = useState(0); // bump to (re)load the portal
   const [signIn, setSignIn] = useState(false);
+  // First run: Milo sets himself up with the student (name, account, classes, permissions, D2L).
+  const [setup, setSetup] = useState(() => !setupDone());
   const [portal, setPortal] = useState(() => {
     try {
       return localStorage.getItem("milo.portal") || "";
@@ -951,6 +954,29 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [portal]);
 
+  // During setup Milo stands to the left of the card, so he can talk you through it.
+  useEffect(() => {
+    if (!setup) return;
+    const x = signIn ? 24 : Math.max(16, window.innerWidth / 2 - 260 - 150); // D2L window open on the right: step out of the way
+    const t = window.setTimeout(() => moveTo({ x, y: window.innerHeight / 2 - 30 }, "jump"), 400);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setup, signIn]);
+  const finishSetup = () => {
+    try {
+      localStorage.setItem("milo.onboarded", "1");
+      localStorage.removeItem("milo.setupStep");
+      localStorage.setItem("milo.lastBrief", new Date().toDateString());
+    } catch {
+      /* ignore */
+    }
+    bb("setup_done", { portal: !!portal, name: !!name });
+    setSetup(false);
+    hover(false);
+    moveTo(home(), "jump");
+    if (portal) window.setTimeout(() => startBrief(true), 900); // the first thing he does: tell you what's due
+  };
+
   /** "Open chrome, find a worksheet, and complete it": the computer part first, then the screen job on what's open. */
   const runChain = async (steps: Intent[], spoken: boolean) => {
     const last = steps[steps.length - 1];
@@ -1280,6 +1306,7 @@ export default function App() {
       /* ignore */
     }
     if (last === today) return;
+    if (!setupDone()) return; // first run: setup comes first, the brief after
     const t = window.setTimeout(() => startBrief(false), 1500);
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1458,6 +1485,16 @@ export default function App() {
         lockRef.current?.start(p.minutes ?? 25, p.topic);
         return;
       }
+    }
+    // "Run setup again"
+    if (/^(run|redo|restart|open|start|do)( the| my)? (setup|onboarding)( again)?$|^set me up( again)?$/.test(text.toLowerCase().replace(/[.!?]+$/, "").trim())) {
+      try {
+        localStorage.setItem("milo.setupStep", "hi");
+      } catch {
+        /* ignore */
+      }
+      setSetup(true);
+      return;
     }
     // Deadline radar: "what's due this week", "check D2L", "start the next one"; on its card: "start it", "later".
     {
@@ -2420,7 +2457,7 @@ export default function App() {
 
   // Game plan card: beside Milo; shrinks to a pill at the top while another panel or his notebook is up.
   const gpMini = !!box || !!lesson || !!kitApp || !!researchQ || !!tool || !!quiz || chatOpen || !!radarView;
-  radarBusy.current = speaking || lockOn || working || !!lesson || !!box || !!pending || !!quiz || !!radarView || !!tool || !!researchQ;
+  radarBusy.current = setup || speaking || lockOn || working || !!lesson || !!box || !!pending || !!quiz || !!radarView || !!tool || !!researchQ;
   const rdStyle: React.CSSProperties = (() => {
     const w = 384;
     const h = Math.min(H - 32, 150 + Math.max(1, radarView?.rows.length ?? 1) * 64);
@@ -2520,7 +2557,8 @@ export default function App() {
           hover={hover}
           onDone={() => {
             setSignIn(false);
-            startBrief(true);
+            if (setup) scanRadar(); // during setup: quietly fill the radar; the brief comes when setup ends
+            else startBrief(true);
           }}
         />
       )}
@@ -2715,6 +2753,21 @@ export default function App() {
       {!bubble && !pending && !heard && earState === "thinking" && <Bubble text="…" style={bStyle} heard />}
       {!bubble && !pending && !heard && live && earState !== "thinking" && <Bubble text={live} style={bStyle} heard />}
       {confetti && <Confetti key={confetti.seed} {...confetti} />}
+      {setup && (
+        <Onboarding
+          name={name}
+          setName={setNameState}
+          portal={portal}
+          onPortal={(u) => {
+            setPortalUrl(u);
+            setSignIn(true);
+          }}
+          onDone={finishSetup}
+          say={(t) => void say(t).then(() => setBubble(null))}
+          hover={hover}
+          shifted={signIn}
+        />
+      )}
       {radarScan > 0 && portal && <BriefLoader key={`radar-${radarScan}`} url={portal} onResult={onRadarScan} />}
       {radarView && !working && (
         <RadarCard

@@ -13,7 +13,7 @@ if (process.platform !== "darwin") {
   console.log("[hands] not on a Mac, skipping native helper");
   process.exit(0);
 }
-if (fs.existsSync(out) && fs.statSync(out).mtimeMs >= fs.statSync(src).mtimeMs) {
+if (process.env.MILO_UNIVERSAL !== "1" && fs.existsSync(out) && fs.statSync(out).mtimeMs >= fs.statSync(src).mtimeMs) {
   console.log("[hands] native helper up to date");
   process.exit(0);
 }
@@ -25,6 +25,18 @@ try {
 }
 fs.mkdirSync(path.dirname(out), { recursive: true });
 try {
+  if (process.env.MILO_UNIVERSAL === "1") {
+    // The installable app runs on Apple-chip AND Intel Macs: build both and glue them into one binary.
+    const arm = out + "-arm64";
+    const x86 = out + "-x86_64";
+    execFileSync("xcrun", ["swiftc", "-O", "-target", "arm64-apple-macos12", src, "-o", arm], { stdio: "inherit" });
+    execFileSync("xcrun", ["swiftc", "-O", "-target", "x86_64-apple-macos12", src, "-o", x86], { stdio: "inherit" });
+    execFileSync("lipo", ["-create", arm, x86, "-output", out], { stdio: "inherit" });
+    fs.rmSync(arm);
+    fs.rmSync(x86);
+    console.log("[hands] built dist/milo-hands (universal)");
+    process.exit(0);
+  }
   execFileSync("xcrun", ["swiftc", "-O", src, "-o", out], { stdio: "inherit" });
   console.log("[hands] built dist/milo-hands");
 } catch {

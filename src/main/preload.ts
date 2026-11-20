@@ -101,6 +101,9 @@ contextBridge.exposeInMainWorld("milo", {
   task: (task: string) => ipcRenderer.invoke("milo:task", task),
   stopTask: () => ipcRenderer.send("milo:task-stop"),
   handsAccess: () => ipcRenderer.invoke("milo:hands-access"),
+  perms: () => ipcRenderer.invoke("milo:perms"),
+  permAsk: (kind: string) => ipcRenderer.invoke("milo:perm-ask", kind),
+  relaunch: () => ipcRenderer.invoke("milo:relaunch"),
   onTaskStep: (cb: (step: unknown) => void) => {
     const l = (_e: unknown, step: unknown) => cb(step);
     ipcRenderer.on("milo:task-step", l);

@@ -147,6 +147,9 @@ declare global {
       tts: (text: string, urgent?: boolean, around?: { previous?: string; next?: string }) => Promise<{ ok: true; audio: string } | Err>;
       account: () => Promise<{ signedIn: boolean; email: string }>;
       accountSend: (email: string) => Promise<{ ok: boolean; text: string }>;
+      perms: () => Promise<{ mic: boolean; screen: boolean; hands: boolean }>;
+      permAsk: (kind: "mic" | "screen" | "hands" | "automation") => Promise<boolean>;
+      relaunch: () => Promise<void>;
       accountVerify: (email: string, code: string) => Promise<{ ok: boolean; text: string }>;
       accountSignOut: () => Promise<{ signedIn: boolean; email: string }>;
       memories: () => Promise<string[]>;

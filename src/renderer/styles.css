@@ -1701,3 +1701,50 @@ body,
 .rd-moved { margin-top: 3px; font: 600 11.5px -apple-system, sans-serif; color: #fdba74; }
 .rd-moved s { color: rgba(253,186,116,0.6); }
 .rd-moved b { color: #fed7aa; }
+
+/* ---------- first-run setup ---------- */
+.ob-wrap { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; pointer-events: none; background: radial-gradient(ellipse at center, rgba(10,8,20,0.35), rgba(10,8,20,0.55)); animation: obFade .4s ease-out both; }
+.ob-wrap--left { place-items: center start; padding-left: 170px; background: none; }
+@keyframes obFade { from { opacity: 0; } to { opacity: 1; } }
+.ob { pointer-events: auto; width: 480px; max-height: calc(100vh - 60px); overflow-y: auto; box-sizing: border-box; padding: 26px 28px 20px; border-radius: 28px; color: #f4f2fb;
+  background: linear-gradient(165deg, rgba(36,31,58,0.98), rgba(18,16,30,0.98)); border: 1px solid rgba(196,181,253,0.25);
+  box-shadow: 0 40px 100px rgba(0,0,0,0.55), 0 0 0 6px rgba(124,77,255,0.06); font-family: -apple-system, "Inter", sans-serif; animation: gpIn .5s cubic-bezier(.2,1.2,.3,1) both; }
+.ob-dots { display: flex; gap: 6px; margin-bottom: 18px; }
+.ob-dot { height: 5px; flex: 1; border-radius: 99px; background: rgba(255,255,255,0.1); transition: background .3s; }
+.ob-dot--done { background: #34d399; }
+.ob-dot--on { background: linear-gradient(90deg, #7c4dff, #a78bfa); }
+.ob-big { font: 850 26px/1.15 -apple-system, sans-serif; color: #fff; letter-spacing: -0.01em; }
+.ob-sub { margin: 8px 0 18px; font: 500 14px/1.5 -apple-system, sans-serif; color: rgba(255,255,255,0.7); }
+.ob-label { display: block; font: 700 12px -apple-system, sans-serif; color: rgba(255,255,255,0.6); margin-bottom: 6px; }
+.ob-input { width: 100%; box-sizing: border-box; padding: 13px 15px; border-radius: 14px; border: 1px solid rgba(196,181,253,0.3); background: rgba(255,255,255,0.05);
+  color: #fff; font: 600 16px -apple-system, sans-serif; outline: none; transition: border-color .2s, box-shadow .2s; }
+.ob-input:focus { border-color: #a78bfa; box-shadow: 0 0 0 4px rgba(124,77,255,0.18); }
+.ob-msg { margin-top: 8px; font: 500 12.5px -apple-system, sans-serif; color: #fda4af; }
+.ob-actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 20px; }
+.ob-actions .ob-skip:first-child { margin-right: auto; }
+.ob-next { padding: 11px 18px !important; font-size: 14px !important; }
+.ob-next--wide { flex: 1; justify-content: center; }
+.ob-skip { border: none; background: none; color: rgba(255,255,255,0.55); font: 600 13px -apple-system, sans-serif; cursor: pointer; padding: 8px 6px; }
+.ob-skip:hover { color: #fff; }
+.ob-link { border: none; background: none; color: #c4b5fd; font: 600 12.5px -apple-system, sans-serif; cursor: pointer; padding: 0; margin-left: 4px; text-decoration: underline; }
+.ob-ok { padding: 13px 15px; border-radius: 14px; background: rgba(52,211,153,0.12); border: 1px solid rgba(52,211,153,0.45); color: #d1fae5; font: 650 14px -apple-system, sans-serif; }
+.ob-wait { display: flex; gap: 12px; align-items: flex-start; padding: 14px 15px; border-radius: 14px; background: rgba(124,77,255,0.1); border: 1px solid rgba(167,139,250,0.35); font: 500 13.5px/1.5 -apple-system, sans-serif; color: rgba(255,255,255,0.85); }
+.ob-wait b { color: #fff; }
+.ob-wait .ob-link { display: block; margin: 6px 0 0; }
+.ob-spin { flex: none; width: 18px; height: 18px; margin-top: 2px; border-radius: 50%; border: 2.5px solid rgba(167,139,250,0.3); border-top-color: #c4b5fd; animation: obSpin .8s linear infinite; }
+@keyframes obSpin { to { transform: rotate(360deg); } }
+.ob-classes .rp-body, .ob-classes > * { max-height: 340px; }
+.ob-perms { display: flex; flex-direction: column; gap: 8px; }
+.ob-perm { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 15px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); transition: all .3s; }
+.ob-perm--on { background: rgba(52,211,153,0.1); border-color: rgba(52,211,153,0.45); }
+.ob-perm__check { flex: none; width: 24px; height: 24px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.25); display: grid; place-items: center; font: 900 13px -apple-system, sans-serif; color: #052e1f; transition: all .3s; }
+.ob-perm--on .ob-perm__check { background: #34d399; border-color: #34d399; animation: gpPop .6s cubic-bezier(.2,1.6,.3,1); }
+.ob-perm__body { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.ob-perm__body b { font: 700 14px -apple-system, sans-serif; color: #fff; }
+.ob-perm__body span { font: 500 12px/1.4 -apple-system, sans-serif; color: rgba(255,255,255,0.6); }
+.ob-note { margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.35); font: 500 12.5px/1.45 -apple-system, sans-serif; color: #fde68a; }
+.ob-tries { display: flex; flex-direction: column; gap: 8px; }
+.ob-try { display: flex; gap: 12px; align-items: center; padding: 12px 14px; border-radius: 15px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); }
+.ob-try > span { font-size: 22px; }
+.ob-try b { display: block; font: 700 14px -apple-system, sans-serif; color: #fff; }
+.ob-try em { font: 500 12.5px -apple-system, sans-serif; font-style: normal; color: rgba(255,255,255,0.6); }

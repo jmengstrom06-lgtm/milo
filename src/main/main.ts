@@ -12,6 +12,8 @@ import {
   shell,
 } from "electron";
 import path from "node:path";
+import fs from "node:fs";
+import { execFile } from "node:child_process";
 import dotenv from "dotenv";
 import { speak } from "./voice";
 import { log as bb, saveClip, timer, LOG_DIR, LOG_FILE } from "./blackbox";
@@ -38,7 +40,7 @@ import { buildTool } from "./builder";
 import { askScreen } from "./brain";
 import { Action, askMilo, classify, RouteCtx, makeQuiz, readBrief, setUserName, sweepPlan, watchCheck, ChatMessage, checkAnswer, locateInCrop, nextActions, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
-dotenv.config({ path: path.join(app.getAppPath(), ".env") });
+if (!app.isPackaged) dotenv.config({ path: path.join(app.getAppPath(), ".env") }); // dev keys only; installed Milo uses the student's account
 startTelemetry();
 
 // ---------- black-box log: every request Milo handles, how long it took, what came back ----------
@@ -744,6 +746,49 @@ ipcMain.handle("milo:mac-say", (_e, text: string) => macSpeak(String(text ?? "")
 ipcMain.handle("milo:hands-access", () =>
   process.platform === "darwin" ? systemPreferences.isTrustedAccessibilityClient(true) : true
 );
+// ---------- first-run setup: permissions ----------
+const PANE: Record<string, string> = {
+  mic: "Privacy_Microphone",
+  screen: "Privacy_ScreenCapture",
+  hands: "Privacy_Accessibility",
+  automation: "Privacy_Automation",
+};
+const openPane = (kind: string) => shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?${PANE[kind] ?? "Privacy"}`);
+/** Which of the permissions Milo needs are on. */
+ipcMain.handle("milo:perms", () => {
+  if (process.platform !== "darwin") return { mic: true, screen: true, hands: true };
+  return {
+    mic: systemPreferences.getMediaAccessStatus("microphone") === "granted",
+    screen: systemPreferences.getMediaAccessStatus("screen") === "granted",
+    hands: systemPreferences.isTrustedAccessibilityClient(false),
+  };
+});
+/** Turn one on: the system prompt if macOS still allows asking, otherwise the exact Settings page. */
+ipcMain.handle("milo:perm-ask", async (_e, kind: string) => {
+  if (process.platform !== "darwin") return true;
+  bb("setup", "perm_ask", { kind });
+  if (kind === "mic") {
+    if (systemPreferences.getMediaAccessStatus("microphone") === "not-determined") return systemPreferences.askForMediaAccess("microphone");
+    await openPane("mic");
+  } else if (kind === "screen") {
+    // asking for one tiny capture puts Milo in the Screen Recording list, so the student just flips the switch
+    await desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width: 16, height: 16 } }).catch(() => []);
+    await openPane("screen");
+  } else if (kind === "hands") {
+    if (!systemPreferences.isTrustedAccessibilityClient(true)) await openPane("hands");
+  } else if (kind === "automation") {
+    // a harmless question to System Events triggers the "Milo wants to control…" prompt once
+    await new Promise((r) => execFile("osascript", ["-e", 'tell application "System Events" to get name of first process'], () => r(null)));
+  }
+  return true;
+});
+/** Screen Recording only takes effect after a restart. */
+ipcMain.handle("milo:relaunch", () => {
+  bb("setup", "relaunch", {});
+  app.relaunch();
+  app.exit(0);
+});
+
 ipcMain.handle("milo:mic-access", async () => {
   if (process.platform !== "darwin") return true;
   if (systemPreferences.getMediaAccessStatus("microphone") === "granted") return true;
@@ -831,6 +876,21 @@ ipcMain.on("milo:quit", () => app.quit());
 
 // ---------- app lifecycle -----------------------------------------------------
 
+/** Where the Chrome extension lives. Installed app: a writable copy in Milo's own folder (the app bundle is read-only). */
+function extensionFolder() {
+  if (!app.isPackaged) return path.join(app.getAppPath(), "extension");
+  const src = path.join(process.resourcesPath, "extension");
+  const dst = path.join(app.getPath("userData"), "Chrome Extension");
+  try {
+    fs.mkdirSync(dst, { recursive: true });
+    for (const f of fs.readdirSync(src)) if (f !== "config.json") fs.copyFileSync(path.join(src, f), path.join(dst, f));
+  } catch (e) {
+    bb("bridge", "extension_copy_failed", { error: (e as Error).message });
+  }
+  return dst;
+}
+ipcMain.handle("milo:extension-folder", () => extensionFolder());
+
 // Web pages shown in the research panel get no access to Milo's internals; links open in Chrome.
 app.on("web-contents-created", (_e, contents) => {
   contents.on("will-attach-webview", (_ev, prefs) => {
@@ -848,7 +908,7 @@ app.on("web-contents-created", (_e, contents) => {
 });
 
 app.whenReady().then(() => {
-  startBridge(path.join(app.getAppPath(), "extension"));
+  startBridge(extensionFolder());
   if (process.platform === "darwin") app.dock?.hide();
   // Let Milo's window use the microphone.
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === "media"));

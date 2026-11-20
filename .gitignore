@@ -7,3 +7,4 @@ extension/config.json
 evals/results/
 .signing/
 test-results/
+release/
