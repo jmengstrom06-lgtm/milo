@@ -441,9 +441,10 @@ export async function runSelfTest(win: BrowserWindow) {
     await hear("stop lock in");
     const recap = await waitFor("document.querySelector('.lk-recap') || !s.lockOn", 10000);
     await js("document.querySelector('.lk-recap button')?.click()");
-    await sleep(800);
-    const score = (right ? 0.5 : 0) + (left < 0 ? 0 : 0.2) + (recap < 0 ? 0 : 0.3);
-    return { score, detail: [right ? "timer 10:00" : `timer showed ${time}`, left < 0 ? "no time-left answer" : "told time left", recap < 0 ? "didn't stop" : "stopped with recap"].join("; ") };
+    await sleep(3000);
+    const stuck = !(await S()).lockOn; // a "stop" must stick: nothing may quietly restart it
+    const score = (right ? 0.4 : 0) + (left < 0 ? 0 : 0.2) + (recap < 0 ? 0 : 0.2) + (stuck ? 0.2 : 0);
+    return { score, detail: [right ? "timer 10:00" : `timer showed ${time}`, left < 0 ? "no time-left answer" : "told time left", recap < 0 ? "didn't stop" : "stopped with recap", stuck ? "stayed stopped" : "RESTARTED on its own after stopping"].join("; ") };
   });
 
   // ======================= RESEARCH =======================

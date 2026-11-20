@@ -128,8 +128,16 @@ const LockIn = forwardRef<LockInHandle, { api: LockInApi; miloPos: Pos; onActive
   }, []);
 
   // ---- start / stop --------------------------------------------------------------------------
+  const stoppedAt = useRef(0);
   const start = useCallback(async (minutes = 25, topic?: string) => {
+    // who asked (so a surprise restart names its culprit in the log)
+    window.milo.log("lockin", "start_call", { minutes, from: (new Error().stack ?? "").split("\n").slice(2, 6).map((l) => l.trim().slice(0, 90)) });
     if (S.current) return;
+    // Right after you stop, nothing may quietly start it again (a "stop" must stick).
+    if (Date.now() - stoppedAt.current < 4000) {
+      window.milo.log("lockin", "restart_blocked", { msSinceStop: Date.now() - stoppedAt.current });
+      return;
+    }
     const blocks = await window.milo.focusStart(minutes);
     const now = Date.now();
     S.current = {
@@ -168,6 +176,7 @@ const LockIn = forwardRef<LockInHandle, { api: LockInApi; miloPos: Pos; onActive
       const s = S.current;
       if (!s) return;
       S.current = null;
+      stoppedAt.current = Date.now();
       window.milo.focusStop();
       onActive(false);
       setCard(null);
