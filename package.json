@@ -102,7 +102,7 @@
       "x64ArchFiles": "Contents/Resources/milo-hands"
     },
     "dmg": {
-      "title": "Milo",
+      "title": "Milo Installer",
       "contents": [
         {
           "x": 150,
