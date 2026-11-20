@@ -19,15 +19,16 @@ import { speak } from "./voice";
 import { log as bb, saveClip, timer, LOG_DIR, LOG_FILE } from "./blackbox";
 import { closeFlux, fluxAvailable, forceEndTurn, onFlux, openFlux, sendAudio } from "./flux";
 import { macSpeak } from "./macvoice";
-import { bridgeConnected, call as ext, startBridge } from "./bridge";
+import { bridgeConnected, call as ext, registerNativeHost, startBridge } from "./bridge";
 import { runWebTask } from "./webagent";
 import { registerKit } from "./kitipc";
 import { registerLibrary } from "./library";
 import { quitAfterTest, runSelfTest, selfTestOn } from "./selftest";
 import { makeGamePlan } from "./homework";
 import { startSync } from "./sync";
+import { startUpdates } from "./updater";
 import { transcribe } from "./ears";
-import { stopNative } from "./native";
+import { binaryPath, stopNative } from "./native";
 import { account, onAccountChange, sendCode, signOut, startCallbackServer, userId, verifyCode } from "./account";
 import { forgetAll, memories, syncMemories } from "./memory";
 import { captureError, identify, startTelemetry, track } from "./telemetry";
@@ -925,12 +926,14 @@ app.on("web-contents-created", (_e, contents) => {
 
 app.whenReady().then(() => {
   startBridge(extensionFolder());
+  registerNativeHost(binaryPath()); // so the Chrome Web Store version of the extension can find Milo
   if (process.platform === "darwin") app.dock?.hide();
   // Let Milo's window use the microphone.
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === "media"));
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === "media");
   createOverlay();
   if (overlay) startSync(overlay); // class folders, classes and game plans follow you to any Mac you sign in on
+  if (overlay) startUpdates(overlay); // every fix reaches students on its own (installed app only)
   // `npm run test:milo`: drive Milo through his self-test, write the report, quit. (Sound muted so it runs quietly.)
   if (selfTestOn() && overlay) {
     const win = overlay;

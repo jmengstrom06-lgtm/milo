@@ -859,6 +859,19 @@ export default function App() {
     []
   );
 
+  // A new version of Milo downloaded: tell them once, show a small pill. It also installs on its own next quit.
+  const [updateReady, setUpdateReady] = useState<string | null>(null);
+  useEffect(
+    () =>
+      window.milo.onUpdateReady((v) => {
+        setUpdateReady(v || "new");
+        bb("update_ready_shown", { version: v });
+        if (!radarBusy.current) say("There's a new version of me. Restart me whenever you're ready, or I'll update next time you quit.").then(() => setBubble(null));
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+
   // ---- Deadline radar ---------------------------------------------------------------------------
   // Scans D2L in the background (startup + every 3 h), remembers every assignment, catches NEW and MOVED ones,
   // and warns 3 days out, the day before and the morning of: at a calm moment, with a Start button.
@@ -1511,6 +1524,12 @@ export default function App() {
         lockRef.current?.start(p.minutes ?? 25, p.topic);
         return;
       }
+    }
+    // "Update Milo" / "restart to update"
+    if (updateReady && /^(update( yourself| milo)?|restart( to update| and update)?|install( the)? update|get the update)$/.test(text.toLowerCase().replace(/[.!?]+$/, "").trim())) {
+      bb("route_instant", { text, kind: "update_install" });
+      say("Updating. Back in a few seconds.").then(() => window.milo.updateInstall());
+      return;
     }
     // "Run setup again"
     if (/^(run|redo|restart|open|start|do)( the| my)? (setup|onboarding)( again)?$|^set me up( again)?$/.test(text.toLowerCase().replace(/[.!?]+$/, "").trim())) {
@@ -2836,6 +2855,12 @@ export default function App() {
       {!bubble && !pending && !heard && earState === "thinking" && <Bubble text="…" style={bStyle} heard />}
       {!bubble && !pending && !heard && live && earState !== "thinking" && <Bubble text={live} style={bStyle} heard />}
       {confetti && <Confetti key={confetti.seed} {...confetti} />}
+      {updateReady && !setup && (
+        <button className="upd-pill" onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)} onClick={() => window.milo.updateInstall()} title="Restart Milo to finish updating">
+          <span className="upd-dot" />
+          New Milo ready{updateReady !== "new" ? ` (v${updateReady})` : ""} · <b>Restart</b>
+        </button>
+      )}
       {setup && (
         <Onboarding
           name={name}

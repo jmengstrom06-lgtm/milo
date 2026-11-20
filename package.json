@@ -20,11 +20,14 @@
     "dist": "cross-env MILO_UNIVERSAL=1 npm run build && electron-builder --mac --universal",
     "dist:unsigned": "cross-env MILO_UNIVERSAL=1 CSC_IDENTITY_AUTO_DISCOVERY=false npm run build && electron-builder --mac --universal -c.mac.identity=null",
     "doctor": "node scripts/log-doctor.js",
-    "test:computer": "npm run build:hands && npm run build:main && concurrently -k -s command-electron -n vite,electron \"vite\" \"wait-on tcp:127.0.0.1:5173 && cross-env MILO_DEV=1 MILO_TEST=1 MILO_TEST_COMPUTER=1 electron .\""
+    "test:computer": "npm run build:hands && npm run build:main && concurrently -k -s command-electron -n vite,electron \"vite\" \"wait-on tcp:127.0.0.1:5173 && cross-env MILO_DEV=1 MILO_TEST=1 MILO_TEST_COMPUTER=1 electron .\"",
+    "release": "npm run dist && node scripts/publish-update.js",
+    "ext:zip": "node scripts/zip-extension.js"
   },
   "dependencies": {
     "@fontsource/caveat": "^5.3.0",
     "dotenv": "^16.4.5",
+    "electron-updater": "^6.3.9",
     "katex": "^0.19.1",
     "ws": "^8.23.0"
   },
@@ -95,7 +98,8 @@
         "NSMicrophoneUsageDescription": "Milo listens when you talk to him.",
         "NSAppleEventsUsageDescription": "Milo opens apps, tabs and files for you when you ask.",
         "LSUIElement": true
-      }
+      },
+      "x64ArchFiles": "Contents/Resources/milo-hands"
     },
     "dmg": {
       "title": "Milo",
@@ -111,6 +115,12 @@
           "path": "/Applications"
         }
       ]
-    }
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://ptfvptkhzxnpvdhgnfcp.supabase.co/storage/v1/object/public/milo-updates"
+      }
+    ]
   }
 }

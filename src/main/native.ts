@@ -16,7 +16,7 @@ let crashes = 0;
 let nextId = 1;
 const pending = new Map<number, { resolve: (r: Reply | null) => void; timer: NodeJS.Timeout }>();
 
-function binaryPath(): string | null {
+export function binaryPath(): string | null {
   const candidates = [
     process.env.MILO_HANDS_BIN,
     app.isPackaged ? path.join(process.resourcesPath, "milo-hands") : "",

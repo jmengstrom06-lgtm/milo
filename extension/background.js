@@ -5,12 +5,26 @@
 let ws = null;
 let connecting = false;
 
+function askMilo() {
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.runtime.sendNativeMessage("app.milo.bridge", { hello: 1 }, (res) => {
+        if (chrome.runtime.lastError || !res?.port || !res?.token) reject(new Error(chrome.runtime.lastError?.message || "Milo isn't running"));
+        else resolve(res);
+      });
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
 async function connect() {
   if (connecting || (ws && ws.readyState <= 1)) return;
   connecting = true;
   try {
-    // Milo writes a fresh port + secret here every time he starts.
-    const cfg = await fetch(chrome.runtime.getURL("config.json"), { cache: "no-store" }).then((r) => r.json());
+    // Where's Milo? Ask the Milo app through Chrome's native messaging (the Chrome Web Store version),
+    // or read the file Milo writes into this folder (the copy you load by hand while building).
+    const cfg = await askMilo().catch(() => fetch(chrome.runtime.getURL("config.json"), { cache: "no-store" }).then((r) => r.json()));
     if (!cfg?.port || !cfg?.token) throw new Error("no config yet");
     const sock = new WebSocket(`ws://127.0.0.1:${cfg.port}/?token=${encodeURIComponent(cfg.token)}`);
     sock.onopen = () => {

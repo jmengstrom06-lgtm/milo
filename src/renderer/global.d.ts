@@ -148,6 +148,8 @@ declare global {
       account: () => Promise<{ signedIn: boolean; email: string }>;
       accountSend: (email: string) => Promise<{ ok: boolean; text: string }>;
       perms: () => Promise<{ mic: boolean; screen: boolean; hands: boolean }>;
+      updateInstall: () => Promise<void>;
+      onUpdateReady: (cb: (version: string) => void) => () => void;
       syncExchange: (kind: "gameplan", rows: { id: string; updated: number; deleted?: boolean; data?: unknown }[]) => Promise<{ id: string; updated: number; deleted?: boolean; data?: unknown }[] | null>;
       onSyncNow: (cb: (changed: string[]) => void) => () => void;
       permAsk: (kind: "mic" | "screen" | "hands" | "automation") => Promise<boolean>;

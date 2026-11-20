@@ -220,6 +220,25 @@ func handle(_ m: [String: Any]) {
     }
 }
 
+// ---- Chrome native messaging ------------------------------------------------------------
+// Chrome starts this binary (with the extension's origin as an argument) when Milo's extension asks
+// "where's Milo?". We answer with the port + secret Milo saved at launch, in Chrome's format:
+// a 4-byte little-endian length, then JSON. Only extensions listed in Milo's host manifest can ask.
+if CommandLine.arguments.dropFirst().contains(where: { $0.hasPrefix("chrome-extension://") }) || CommandLine.arguments.contains("--native-host") {
+    let input = FileHandle.standardInput
+    let head = input.readData(ofLength: 4)
+    if head.count == 4 {
+        let n = head.withUnsafeBytes { $0.load(as: UInt32.self) }
+        _ = input.readData(ofLength: Int(min(n, 1_000_000)))
+    }
+    let file = (NSHomeDirectory() as NSString).appendingPathComponent("Library/Application Support/Milo/bridge.json")
+    let body = (try? Data(contentsOf: URL(fileURLWithPath: file))) ?? Data("{\"error\":\"milo_not_running\"}".utf8)
+    var len = UInt32(body.count).littleEndian
+    FileHandle.standardOutput.write(Data(bytes: &len, count: 4))
+    FileHandle.standardOutput.write(body)
+    exit(0)
+}
+
 // Read requests on a background thread; do the work on the main thread, whose run loop keeps
 // NSWorkspace (front app) up to date.
 DispatchQueue.global(qos: .userInitiated).async {
