@@ -877,7 +877,7 @@ const WEB_STEP = {
         "click/type use an element id from the list. key = keyboard shortcut or Enter (e.g. 'enter', 'cmd+a', 'cmd+c', 'cmd+v', 'cmd+w'). navigate = open a URL in this tab. new_tab = open a URL in a new tab. switch_tab = go to another open tab (tab = its id). use_screen = this page can't be read as elements (canvas editor like Google Docs/Sheets, a game, a PDF): hand over to screen mode.",
     },
     id: { type: "string", description: "Element id from the list (for click / type)." },
-    text: { type: "string", description: "For type: exact text. For ask: a short question. For done: what you did in 8 words or fewer, e.g. 'Done. TCU plays Thursday at 7.'" },
+    text: { type: "string", description: "For type: exact text. For ask: a short question. For done: what you did in 8 words or fewer, e.g. 'Done. TCU plays Thursday at 7.' If the request was to read, find or note information, put the facts you found instead (up to 60 words, e.g. 'Volt 13 $849 9h; Kestrel 14 $799 7h')." },
     clear: { type: "boolean", description: "For type: replace what's in the box instead of adding to it." },
     keys: { type: "string", description: "For key." },
     url: { type: "string", description: "For navigate / new_tab: full https URL." },
@@ -914,6 +914,7 @@ You are using the student's Chrome browser to finish their request, fast. Instea
 How to work:
 - Click and type using element ids from the list. Prefer elements marked on-screen.
 - To search a site, type into its search box, then press enter (key "enter") or click its search button.
+- Dropdowns (select): use type with the exact option text (e.g. "Junior"). Never press Enter in a form's fields: it submits the form.
 - To go to a website directly, use navigate with the URL (faster than searching). To answer a question from the web, a Google search URL is fine: https://www.google.com/search?q=...
 - To write in ChatGPT, Claude, Gemini etc: type into the message box. Asking ChatGPT something or "have ChatGPT write X" means send it: press enter after typing.
 - Copying text: you already have the page text, so you can type it where it needs to go instead of copy/paste.
@@ -923,7 +924,7 @@ How to work:
 - NEVER buy, pay, post publicly, delete, send email/messages to people, or change account settings without asking first: use "ask".
 - Never type passwords or payment details. If a login is needed, use "ask".
 ${profileText()}
-- Finish with "done" and 8 words or fewer. If they asked a question, the done text IS the answer (short).`;
+- Finish with "done" and 8 words or fewer. If they asked a question, the done text IS the answer (short). If the request was to read, find or note information, the done text holds the facts found (up to 60 words).`;
   const log = history.length ? history.map((h, i) => `${i + 1}. ${h}`).join("\n") : "(nothing yet)";
   const body = {
     max_tokens: 1500,

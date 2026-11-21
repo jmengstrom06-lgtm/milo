@@ -242,10 +242,12 @@ const BENCH: Bench[] = [
     id: "J5",
     name: "Survey: stopped halfway, picks up where he left off",
     run: async (api) => {
-      const p = api.start(`Go to ${U}/survey and fill out all 4 pages: 11-20 hours, Library, Evening, Fruit. Press Next on each page and Finish at the end.`);
-      // wait until page 2 is answered, then stop him mid-job
+      let settled = false;
+      const p = api.start(`Go to ${U}/survey and fill out all 4 pages: 11-20 hours, Library, Evening, Fruit. Press Next on each page and Finish at the end. (It's a test survey: I approve finishing it.)`, { approved: true });
+      void p.finally(() => (settled = true));
+      // wait until page 2 is answered, then stop him mid-job (or stop waiting if he finished or gave up first)
       const t0 = Date.now();
-      while (Date.now() - t0 < CAP && recsOf("survey").filter((r) => Number(r.data.page) >= 2).length === 0) await sleep(500);
+      while (!settled && Date.now() - t0 < CAP && recsOf("survey").filter((r) => Number(r.data.page) >= 2).length === 0) await sleep(500);
       const reachedMid = recsOf("survey").length > 0;
       api.stop();
       const stopped = await capped(p, api);

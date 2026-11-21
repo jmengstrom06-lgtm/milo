@@ -101,8 +101,10 @@ export function stopMeter(id: string): Tally {
 export const readMeter = (id: string): Tally => ({ ...(meters.get(id) ?? blank()) });
 
 // ---------- guardrails ----------
-const SOFT = () => Number(process.env.MILO_SOFT_BUDGET || 0.6);
-const HARD = () => Number(process.env.MILO_HARD_BUDGET || 1.5);
+// While developing and testing (npm run dev / test:*), limits are high so testing doesn't hit them.
+const DEV = () => process.env.MILO_DEV === "1";
+const SOFT = () => Number(process.env.MILO_SOFT_BUDGET || (DEV() ? 15 : 0.6));
+const HARD = () => Number(process.env.MILO_HARD_BUDGET || (DEV() ? 30 : 1.5));
 export function spentToday() {
   load();
   return day.date === today() ? day.t.cost : 0;

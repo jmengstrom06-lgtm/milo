@@ -337,11 +337,26 @@ const jobDeps: JobDeps = {
   },
   emit: (job) => overlay?.webContents.send("milo:job", job),
   aborted: () => jobAbort || taskAbort,
-  resetAbort: () => (jobAbort = false),
+  // starting or resuming a job clears BOTH stop flags (a leftover "stop" froze the next job)
+  resetAbort: () => {
+    jobAbort = false;
+    taskAbort = false;
+  },
 };
+/** Wait for a stopped action to really finish (its last click can still be landing) before starting again. */
+async function waitIdle(ms = 15000) {
+  const t0 = Date.now();
+  while (taskRunning && Date.now() - t0 < ms) await sleep(100);
+}
 export const jobs = {
-  start: (goal: string, opts: { approved?: boolean } = {}) => startJob(goal, jobDeps, opts),
-  resume: (approve = false) => resumeJob(null, jobDeps, { approve }),
+  start: async (goal: string, opts: { approved?: boolean } = {}) => {
+    await waitIdle();
+    return startJob(goal, jobDeps, opts);
+  },
+  resume: async (approve = false) => {
+    await waitIdle();
+    return resumeJob(null, jobDeps, { approve });
+  },
   stop: () => {
     jobAbort = true;
     taskAbort = true;

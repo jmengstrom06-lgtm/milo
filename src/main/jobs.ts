@@ -16,7 +16,7 @@ import { profileText } from "./profile";
 export type StepStatus = "todo" | "doing" | "retrying" | "done" | "failed" | "skipped";
 /** A check the page itself can answer, no AI needed: "the URL has /done", "the page says Thanks", "the Name box says Test Student". */
 export type Proof = { kind: "url_has" | "page_has" | "field_is"; value: string; field?: string };
-export type JobStep = { do: string; done_when: string; proof?: Proof; status: StepStatus; tries: number; note?: string };
+export type JobStep = { do: string; done_when: string; proof?: Proof; status: StepStatus; tries: number; note?: string; found?: string; interrupted?: boolean };
 export type JobStatus = "planning" | "running" | "checking" | "done" | "needs_you" | "stuck" | "paused" | "stopped" | "failed";
 export type Job = {
   id: string;
@@ -115,7 +115,7 @@ const PLAN_TOOL = {
           type: "object",
           properties: {
             do: { type: "string", description: "One sub-task Milo's computer hands can do in one go, written as a complete instruction with every detail it needs (URLs, exact text to type, which option to pick). E.g. 'Go to http://site/form and type Test Student into the Name field'." },
-            done_when: { type: "string", description: "What will be visible on the screen or page when this step really worked. E.g. 'The Name field shows Test Student'." },
+            done_when: { type: "string", description: "What will be visible on the page right after THIS step's own action worked, on the page where it happens. Only what this step changes, never things from other pages or earlier steps. E.g. 'The Name field shows Test Student'." },
             proof: {
               type: "object",
               description: "Optional: a check the page itself can answer with no looking. url_has = the address contains value. page_has = the page's text contains value (short, exact words that will appear). field_is = the box labeled `field` holds value (or 'checked'/'unchecked'). Leave out if unsure.",
@@ -166,7 +166,10 @@ async function plan(goal: string, done: JobStep[], problem?: string) {
   const r = await callTool<{ steps: { do: string; done_when: string; proof?: Proof }[] }>(
     {
       max_tokens: 2500,
-      system: `${persona()}\n${RULES}\n${profileText()}\nBreak the student's goal into the steps still needed, in order. Each step must be small enough to do in one go (usually 1 to 4 actions) and include every detail (URLs, exact text, choices) so it can be done without the original goal. Group typing into one form into one or two steps. Any submit / send / buy / place-order / post / delete action must be its OWN step (never combined with filling things in), so the student can approve it. The final step should leave the result visible (e.g. the confirmation page). If the goal asks a question, add a last step that opens what's needed to answer it.`,
+      system: `${persona()}\n${RULES}\n${profileText()}\nBreak the student's goal into the steps still needed, in order. Each step must be small enough to do in one go (usually 1 to 4 actions) and include every detail (URLs, exact text, choices) so it can be done without the original goal. Group typing into one form into one or two steps. Any submit / send / buy / place-order / post / delete action must be its OWN step (never combined with filling things in), so the student can approve it.
+Milo checks every step on screen automatically, so NEVER add separate "review", "confirm", "verify" or "make sure" steps, and never write "only if the previous step...". Each step stands alone: it must make sense with no memory of earlier steps.
+Don't add a "report" or "tell the student" step: the answer is given at the end automatically. For reading/research, a step can say what to read (e.g. "read every laptop's name, price and battery on page 1"); what Milo reads is remembered for the final answer.
+Don't write "do not click X yet" in a step; just leave the next action for the next step. The final step should leave the result visible (e.g. the confirmation page). If the goal asks a question, add a last step that opens what's needed to answer it.`,
       tools: [PLAN_TOOL],
       tool_choice: { type: "auto" },
       messages: [{ role: "user", content: `Goal: ${goal}${sofar}${why}` }],
@@ -177,11 +180,14 @@ async function plan(goal: string, done: JobStep[], problem?: string) {
   return { ok: true as const, steps: (r.data.steps ?? []).filter((s) => s?.do).slice(0, 12).map((s) => ({ do: s.do, done_when: s.done_when || "", proof: s.proof?.kind && s.proof.value ? s.proof : undefined, status: "todo" as StepStatus, tries: 0 })) };
 }
 
-function screenContent(v: { jpeg?: string; pageText?: string; url?: string; title?: string }, text: string) {
+function screenContent(v: Look, text: string) {
   const content: unknown[] = [];
   if (v.jpeg) content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: v.jpeg } });
   const page = v.pageText ? `\n\nThe web page now (${v.title ?? ""} ${v.url ?? ""}):\n${v.pageText.slice(0, 12000)}` : "";
-  content.push({ type: "text", text: text + page });
+  // Page text never includes what's typed in a box or which option is picked: list the form's live state.
+  const fields = (v.fields ?? []).slice(0, 60).map((f) => `- "${f.label}": ${f.checked !== undefined ? (f.checked ? "CHECKED/SELECTED" : "not selected") : `"${f.value ?? ""}"`}`);
+  const form = fields.length ? `\n\nForm fields right now (live values; this IS proof of what's typed/selected):\n${fields.join("\n")}` : "";
+  content.push({ type: "text", text: text + page + form });
   return content;
 }
 
@@ -191,7 +197,7 @@ async function check(step: JobStep, v: Look, said: string) {
     {
       model: v.pageText && !v.jpeg ? models.fast() : models.smart(),
       max_tokens: 600,
-      system: `${persona()}\n${RULES}\nCheck one step. Be strict: only say done if the screen or page clearly shows it. Milo's hands sometimes claim success when nothing happened.`,
+      system: `${persona()}\n${RULES}\nCheck one step. Be strict about the step's OWN action: only say done if the screen or page clearly shows that action happened. Milo's hands sometimes claim success when nothing happened. But if "done when" asks for something this page can't show (an order summary that isn't on it, something from another page), judge by the action itself, don't fail it for that.`,
       tools: [CHECK_TOOL],
       tool_choice: { type: "auto" },
       messages: [{ role: "user", content: screenContent(v, `Step: ${step.do}\nDone when: ${step.done_when}\nMilo's hands said afterwards: "${said.slice(0, 300)}"`) }],
@@ -205,10 +211,10 @@ async function finalCheck(goal: string, steps: JobStep[], v: Look) {
     {
       model: v.pageText && !v.jpeg ? models.fast() : models.smart(),
       max_tokens: 900,
-      system: `${persona()}\n${RULES}\nThe steps are finished. Check the WHOLE goal against what's on screen. If the goal asked a question, the summary must answer it.`,
+      system: `${persona()}\n${RULES}\nThe steps are finished. Check the WHOLE goal against what's on screen and the steps. Every step marked done was already checked on screen when it happened: trust it, never re-verify it. If the page shows the finished result (a confirmation, "thanks", the saved change), the goal is complete. Only list something as missing if the goal asked for it and NO step did it. If the goal asked a question, the summary must answer it.`,
       tools: [GOAL_TOOL],
       tool_choice: { type: "auto" },
-      messages: [{ role: "user", content: screenContent(v, `Goal: ${goal}\nSteps done:\n${steps.map((s, i) => `${i + 1}. [${s.status}] ${s.do}${s.note ? ` (${s.note})` : ""}`).join("\n")}`) }],
+      messages: [{ role: "user", content: screenContent(v, `Goal: ${goal}\nSteps done (with what Milo saw at each one; use these findings to answer questions about earlier pages):\n${steps.map((s, i) => `${i + 1}. [${s.status}] ${s.do}${s.found ? `\n   found: ${s.found}` : ""}${s.note ? `\n   check: ${s.note}` : ""}`).join("\n")}`) }],
     },
     GOAL_TOOL.name
   );
@@ -287,7 +293,10 @@ async function runJob(j: Job, deps: JobDeps): Promise<Job> {
   const stopNow = () => {
     j.status = "stopped";
     const cur = j.steps.find((s) => s.status === "doing" || s.status === "retrying");
-    if (cur) cur.status = "todo";
+    if (cur) {
+      cur.status = "todo";
+      cur.interrupted = true; // it may have finished as it was stopped: look before doing it again
+    }
     save(j, deps);
     bb("job", "stopped", { id: j.id, done: j.steps.filter((s) => s.status === "done").length });
     return j;
@@ -299,7 +308,9 @@ async function runJob(j: Job, deps: JobDeps): Promise<Job> {
       for (let i = 0; i < j.steps.length; i++) {
         const step = j.steps[i];
         if (step.status === "done" || step.status === "skipped") continue;
-        if (!j.approved && FINAL.test(step.do)) {
+        // judge the step's real action: its first sentence, minus side notes in parentheses ("Save (or the submit button)")
+        const action = step.do.split(/(?<=[.!?])\s|\n/)[0].replace(/\([^)]*\)/g, " ");
+        if (!j.approved && FINAL.test(action)) {
           j.status = "needs_you";
           j.question = `Everything's ready. Next I'd ${step.do.split("\n")[0].replace(/^./, (c) => c.toLowerCase())}. Want me to go ahead?`;
           save(j, deps);
@@ -308,14 +319,36 @@ async function runJob(j: Job, deps: JobDeps): Promise<Job> {
         }
         let ok = false;
         let fix = "";
+        if (step.interrupted) {
+          // stopped mid-step: if it actually happened, don't do it twice (that skipped a survey page)
+          step.interrupted = false;
+          let v0: Look = await deps.look({ shot: false }).catch(() => ({}));
+          let done0 = cheapCheck(step.proof, v0) === true;
+          if (!done0) {
+            if (!v0.pageText) v0 = await deps.look({ shot: true }).catch(() => ({}));
+            const c0 = await check(step, v0, "(I was stopped partway through this step.)");
+            done0 = c0.ok && !!c0.data.done;
+          }
+          if (done0) {
+            step.status = "done";
+            step.note = "It had already finished when I was stopped.";
+            save(j, deps);
+            bb("job", "step_done", { step: i + 1, afterStop: true });
+            continue;
+          }
+        }
         for (let attempt = step.tries; attempt < 3; attempt++) {
           if (deps.aborted()) return stopNow();
           step.status = attempt === 0 ? "doing" : "retrying";
           step.tries = attempt + 1;
           save(j, deps);
-          const context = `(Part of a bigger job: "${j.goal}". This step only.)`;
+          // The whole goal is NOT shown here: seeing it, his hands ran ahead and did the next steps too.
+          const context = `(This is ONE step of a bigger job. Do only this step, exactly as written, then finish with done. Don't do anything the step doesn't say, even if it looks like the obvious next thing.)`;
           const permission = j.approved ? "\n(The student already approved submitting / sending / buying for this job: go ahead without asking.)" : "";
-          const retry = attempt > 0 ? `\n(The last try didn't work: ${fix || step.note || "it didn't happen"}. Do it a different way this time.)` : "";
+          const retry =
+            attempt > 0
+              ? `\n(The last try didn't seem to work: ${fix || step.note || "it didn't happen"}. FIRST look at the page: if part of this step already happened (an item already in the cart, a box already filled), don't do that part again. Only fix what's missing or wrong, a different way this time.)`
+              : "";
           let r = await deps.doTask(`${step.do}\n${context}${permission}${retry}`);
           j.actions++;
           if (deps.aborted()) return stopNow();
@@ -333,6 +366,13 @@ async function runJob(j: Job, deps: JobDeps): Promise<Job> {
             save(j, deps);
             bb("job", "blocked", { step: i + 1, question: j.question });
             return j;
+          }
+          if (r.status === "ask" && !RISKY.test(`${r.text ?? ""} ${step.do}`)) {
+            // his hands asked something that isn't about submitting / sending / buying: don't bother the student
+            r = await deps.doTask(`${step.do}\n${context}\n(Don't ask the student anything: just do this one step exactly as written and nothing more. If there's nothing to click, read what the step asks for and finish with done, putting what you found in the done text.)`);
+            j.actions++;
+            if (r.status === "stopped" || deps.aborted()) return stopNow();
+            if (r.status === "ask") r = { ...r, status: "done" }; // still unsure: let the on-screen check decide
           }
           if (r.status === "ask" && j.approved && RISKY.test(r.text ?? "")) {
             // already approved: his hands asked anyway, so give them the yes and let them do it
@@ -352,6 +392,7 @@ async function runJob(j: Job, deps: JobDeps): Promise<Job> {
               return j;
             }
           }
+          if (r.text && r.text.length > 3) step.found = r.text.slice(0, 400); // what he read or did, kept for the final answer
           // CHECK it really happened: first from the page itself (free), then the AI.
           let v: Look = await deps.look({ shot: false }).catch(() => ({}));
           const cheap = cheapCheck(step.proof, v);
@@ -365,18 +406,23 @@ async function runJob(j: Job, deps: JobDeps): Promise<Job> {
             break;
           }
           if (!v.pageText) v = await deps.look({ shot: true }).catch(() => ({})); // no page to read (an app, a canvas page): look at the screen
-          const c = await check(step, v, r.text ?? "");
+          let c = await check(step, v, r.text ?? "");
+          if (c.ok && !c.data.done && !v.jpeg) {
+            // the quick text check couldn't confirm it: one real look before calling it a miss
+            v = await deps.look({ shot: true }).catch(() => v);
+            if (v.jpeg) c = await check(step, v, r.text ?? "");
+          }
           if (c.ok && c.data.done) {
             step.status = "done";
-            step.note = c.data.evidence.slice(0, 200);
+            step.note = String(c.data.evidence ?? "").slice(0, 200);
             ok = true;
             verifyRecipe(step.do);
             bb("job", "step_done", { step: i + 1, tries: attempt + 1, evidence: step.note });
             break;
           }
           if ((r as { replayed?: boolean }).replayed) failRecipe(step.do); // memory replay didn't hold up
-          fix = c.ok ? c.data.fix || c.data.evidence : r.text ?? "";
-          step.note = (c.ok ? c.data.evidence : r.text ?? "").slice(0, 200);
+          fix = String((c.ok ? c.data.fix || c.data.evidence : r.text) ?? "");
+          step.note = String((c.ok ? c.data.evidence : r.text) ?? "").slice(0, 200);
           bb("job", "step_retry", { step: i + 1, attempt: attempt + 1, why: step.note, fix: fix.slice(0, 200) });
         }
         save(j, deps);
@@ -408,14 +454,22 @@ async function runJob(j: Job, deps: JobDeps): Promise<Job> {
       const g = await finalCheck(j.goal, j.steps, v);
       if (!g.ok || g.data.complete || !g.data.missing.length) {
         j.status = "done";
-        j.summary = g.ok ? g.data.summary : "Done.";
+        j.summary = g.ok ? String(g.data.summary ?? "Done.") : "Done.";
         save(j, deps);
         bb("job", "done", { id: j.id, steps: j.steps.length, actions: j.actions, replans: j.replans });
         return j;
       }
-      // something's missing: add steps for it and go again
+      // something's missing: add steps for it and go again (never "re-check" steps that already passed: that redid a whole survey)
       bb("job", "gaps", { missing: g.data.missing });
-      j.steps.push(...g.data.missing.slice(0, 4).map((m) => ({ do: m, done_when: m, status: "todo" as StepStatus, tries: 0 })));
+      const real = (Array.isArray(g.data.missing) ? g.data.missing : []).filter((m) => typeof m === "string" && m && !/\b(confirm|verify|re-?check|double[- ]check|make sure|ensure|check that|were actually|was actually)\b/i.test(m));
+      if (!real.length) {
+        j.status = "done";
+        j.summary = String(g.data.summary || "Done.");
+        save(j, deps);
+        bb("job", "done", { id: j.id, steps: j.steps.length, actions: j.actions, replans: j.replans, gapsIgnored: true });
+        return j;
+      }
+      j.steps.push(...real.slice(0, 4).map((m) => ({ do: m, done_when: m, status: "todo" as StepStatus, tries: 0 })));
       j.status = "running";
       save(j, deps);
     }

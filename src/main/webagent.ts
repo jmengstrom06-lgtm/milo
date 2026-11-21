@@ -150,6 +150,17 @@ export async function runWebTask(
             break;
           }
           case "key":
+            // Enter inside a form submits it. Never do that by accident (it sent J1's form half-filled, without asking).
+            if (/^(enter|return)$/i.test((a.keys ?? "enter").trim()) && !APPROVED.test(task)) {
+              const foc = snap.elements.find((e) => e.id === (snap.focused ?? a.id));
+              const isSearch = !!foc && (foc.type === "search" || /search|find|ask|message|chat|prompt|query/i.test(`${foc.label} ${foc.placeholder ?? ""}`));
+              const formy = snap.elements.some((e) => /^(submit|sign ?up|register|join|send|save|place order|apply|enroll|finish)$/i.test((e.label ?? "").trim()));
+              if (foc && !isSearch && formy) {
+                history.push(`(Did NOT press Enter in "${foc.label}": on this form Enter would submit it. Pick options and click buttons instead; submitting needs the student's yes.)`);
+                bb("web", "enter_blocked", { field: foc.label });
+                break;
+              }
+            }
             // Quitting the browser isn't something a page can do: quit it natively (instant, and checked).
             if (/^cmd\+q$/i.test((a.keys ?? "").trim())) {
               await quitApp("Google Chrome");
