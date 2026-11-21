@@ -8,6 +8,8 @@ import { log as bb } from "./blackbox";
 import { callTool, persona } from "./brain";
 import { forecast, forecastLine, targetFor, type GradeSheet } from "./gradeMath";
 import { LMS, detectLms } from "./school";
+import { bookSheet, setWeight } from "./gradebook";
+import { courses as d2lCourses, gradeSheet as d2lSheet, matchCourse, SignInNeeded } from "./d2l";
 
 const file = () => path.join(app.getPath("userData"), "grades.json");
 const FRESH = 6 * 3600e3;
@@ -99,7 +101,36 @@ export type ForecastDeps = {
 /** "What do I need on the final for a B in stats?" -> one spoken answer. */
 export async function askForecast(q: { course: string; letter: string; exam?: string; portal?: string; fresh?: boolean }, deps: ForecastDeps): Promise<{ ok: boolean; text: string }> {
   const exam = q.exam || "final";
+  // 0) D2L's own grade data (instant, exact), for classes that post grades there
+  if (q.portal) {
+    try {
+      const c = matchCourse(q.course, await d2lCourses(q.portal));
+      const d = c ? await d2lSheet(q.portal, c, exam) : null;
+      if (d && d.sheet.categories.some((x) => x.percent != null)) {
+        if (!d.sheet.final) return { ok: false, text: `D2L has your ${d.sheet.course} grades, but I don't see a ${exam} in them. Which one do you mean, like "exam 4"?` };
+        const { target, note } = targetFor(q.letter, d.sheet.scheme);
+        const f = forecast(d.sheet, target);
+        bb("forecast", "answer", { course: q.course, letter: q.letter, ok: !!f, source: "d2l", needed: f?.needed });
+        if (f) return { ok: true, text: `${forecastLine(f, q.letter.toUpperCase(), d.sheet.final.name)} ${note} ${f.notes.join(" ")}`.trim() };
+      }
+    } catch (e) {
+      if (e instanceof SignInNeeded) bb("forecast", "d2l_signin", {});
+      else bb("forecast", "d2l_error", { error: (e as Error).message });
+    }
+  }
+  // 1) Milo's own gradebook: syllabus weights + the scores the student told him (works when D2L posts nothing)
+  const book = bookSheet(q.course, exam);
+  if (book) {
+    const { target, note } = targetFor(q.letter, book.scheme);
+    if (!book.final) return { ok: false, text: `Your ${book.course} syllabus doesn't list a ${exam}. Which part is it, or what's it worth? Say like "the final is worth 25 percent".` };
+    const f = forecast(book, target);
+    bb("forecast", "answer", { course: q.course, letter: q.letter, ok: !!f, source: "gradebook", needed: f?.needed });
+    if (!f) return { ok: false, text: `I know how ${book.course} is graded, but I need your scores so far. Tell me like "I got an 85 on the midterm in ${q.course}".` };
+    return { ok: true, text: `${forecastLine(f, q.letter.toUpperCase(), book.final.name)} ${note} ${f.notes.join(" ")}`.trim() };
+  }
+  // 2) No syllabus yet: D2L only if the class posts grades there (many don't)
   let sheet = q.fresh ? null : cached(q.course);
+  if (!sheet && !q.portal) return { ok: false, text: `I don't know how ${q.course} is graded yet. Open your syllabus and say "read my syllabus for ${q.course}", then tell me your scores.` };
   if (!sheet) {
     if (!q.portal) return { ok: false, text: "Set up your school site first, then I can read your grades." };
     const where = LMS[detectLms(q.portal)].grades;
@@ -107,9 +138,10 @@ export async function askForecast(q: { course: string; letter: string; exam?: st
     if (!r.ok || r.status === "stopped") return { ok: false, text: r.text || "I couldn't open your grades." };
     if (r.status === "blocked" || r.status === "ask") return { ok: false, text: r.text || "I need your help getting to that page." };
     const text = await deps.pageText();
-    if (!text) return { ok: false, text: "I opened it but couldn't read the grades page." };
+    const noGrades = `Your ${q.course} grades aren't posted in D2L. Open your syllabus and say "read my syllabus for ${q.course}", then tell me your scores and I'll do the math.`;
+    if (!text) return { ok: false, text: noGrades };
     const g = await readGrades(text, q.course, exam);
-    if (!g.ok) return g;
+    if (!g.ok) return { ok: false, text: noGrades };
     sheet = g.data;
   }
   const { target, note } = targetFor(q.letter, sheet.scheme);
@@ -120,7 +152,8 @@ export async function askForecast(q: { course: string; letter: string; exam?: st
 }
 
 /** "The final is worth 25 percent": fill in what the grades page didn't show. */
-export function setFinalWeight(course: string, weight: number) {
+export function setFinalWeight(course: string, weight: number, part = "final") {
+  if (setWeight(course, part, weight)) return true; // Milo's gradebook first
   const s = cached(course);
   if (!s) return false;
   s.final = { name: s.final?.name ?? "final", weight, possible: s.final?.possible ?? null };

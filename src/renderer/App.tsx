@@ -14,7 +14,7 @@ import { setSounds, sfx, soundsOn } from "./sfx";
 import ToolPanel, { SavedTool, loadTools, saveTools } from "./ToolPanel";
 import QuizPanel, { QuizHandle } from "./QuizPanel";
 import { BriefCard, BriefLoader, BriefState, SignInPanel } from "./Brief";
-import { fastDecide, parseExam, parseFinalWeight, parseForecast, parseHomework, parsePlanVoice, parseRadar, stripFiller, type DecideState } from "./decide";
+import { fastDecide, parseExam, parseFinalWeight, parseForecast, parseGradeNow, parseScore, parseSyllabus, parseHomework, parsePlanVoice, parseRadar, stripFiller, type DecideState } from "./decide";
 import { alertLine, emptyRadar, markWarned, mergeScan, pendingAlerts, upcoming, whenText, type Radar, type RadarItem, type ScanItem, type Warn } from "./radar";
 import RadarCard, { type RadarView } from "./RadarCard";
 import Onboarding, { setupDone } from "./Onboarding";
@@ -1016,6 +1016,21 @@ export default function App() {
   };
   const scanRadar = (after?: (ok: boolean) => void) => {
     const fed = scanFeed();
+    if (portal) {
+      // D2L's own calendar data first: every class, about a second, no AI. Only if that fails, the page-reading scan.
+      void window.milo.d2lDue(portal).then((r) => {
+        bb("radar_d2l", r.ok ? { ok: true, items: r.items.length } : { ok: false, signin: r.signin });
+        if (r.ok) {
+          ingest(r.items);
+          if (after) after(true);
+          else checkAlerts();
+          return;
+        }
+        radarAfter.current = after ?? null;
+        setRadarScan(Date.now());
+      });
+      return;
+    }
     if (!portal) {
       void fed.then((ok) => (after ? after(ok) : ok && checkAlerts()));
       return;
@@ -1713,6 +1728,40 @@ export default function App() {
         setMood(r.ok ? "happy" : "thinking");
         say(r.text).then(() => setBubble(null));
       });
+      return;
+    }
+    // Milo's gradebook: syllabus weights + scores you tell him
+    const sc = parseScore(text);
+    if (sc) {
+      const course = sc.course || lastForecastCourse.current;
+      if (!course) {
+        say(`Which class was that? Say it like: I got an 85 on the midterm in stats.`).then(() => setBubble(null));
+        return;
+      }
+      lastForecastCourse.current = course;
+      void window.milo.gradeScore({ course, name: sc.name, earned: sc.earned, possible: sc.possible }).then((r) => {
+        setMood("happy");
+        say(r.text).then(() => setBubble(null));
+      });
+      return;
+    }
+    const syl = parseSyllabus(text);
+    if (syl) {
+      const course = syl.course || lastForecastCourse.current;
+      if (course) lastForecastCourse.current = course;
+      hush();
+      setMood("looking");
+      setBubble("Reading your syllabus…");
+      void window.milo.syllabus(course).then((r) => {
+        setMood(r.ok ? "happy" : "thinking");
+        say(r.text).then(() => setBubble(null));
+      });
+      return;
+    }
+    const gn = parseGradeNow(text);
+    if (gn) {
+      lastForecastCourse.current = gn.course;
+      void window.milo.gradeNow(gn.course, portal).then((r) => say(r.text).then(() => setBubble(null)));
       return;
     }
     const fw = parseFinalWeight(text);

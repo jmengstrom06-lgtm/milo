@@ -190,3 +190,31 @@ export function parseExam(text: string): { kind: string; course: string } | null
   if (!m) return null;
   return { kind: m[1].toLowerCase(), course: (m[2] || "").trim() };
 }
+
+// ---------- Milo's gradebook (when D2L doesn't post grades) ----------
+const LETTER_PCT: Record<string, number> = { "A+": 98, A: 95, "A-": 91, "B+": 88, B: 85, "B-": 81, "C+": 78, C: 75, "C-": 71, "D+": 68, D: 65, "D-": 61, F: 50 };
+/** "I got an 85 on the midterm in stats", "I got 18 out of 20 on quiz 3 in econ", "I got a B plus on my essay in English" */
+export function parseScore(text: string): { name: string; earned: number; possible: number; course: string } | null {
+  const t = letterize(text.trim().replace(/[.!]+$/, "").replace(/^(hey )?milo,?\s*/i, ""));
+  const m = t.match(/^(?:i\s+)?(?:just\s+)?(?:got|scored|made|earned|received)\s+(?:an?\s+)?(\d+(?:\.\d+)?|[abcdf][+-]?)(?:\s*(?:%|percent))?(?:\s*(?:\/|out of)\s*(\d+(?:\.\d+)?))?\s+on\s+(?:the\s+|my\s+|a\s+|an\s+)?(.+?)(?:\s+(?:in|for)\s+(?:my\s+)?(.+?))?(?:\s+class)?$/i);
+  if (!m) return null;
+  const raw = m[1].toUpperCase();
+  const letter = /^[ABCDF][+-]?$/.test(raw);
+  const earned = letter ? LETTER_PCT[raw] : +m[1];
+  const possible = letter ? 100 : m[2] ? +m[2] : 100;
+  if (!isFinite(earned) || !possible || earned > possible * 1.5) return null;
+  return { name: m[3].trim(), earned, possible, course: (m[4] || "").trim() };
+}
+/** "read my syllabus", "read my stats syllabus", "this is my syllabus for econ" */
+export function parseSyllabus(text: string): { course: string } | null {
+  const t = text.trim().replace(/[.!?]+$/, "").replace(/^(hey )?milo,?\s*/i, "");
+  const m = t.match(/^(?:(?:read|scan|check|look at|save|learn|grab)\s+(?:my\s+|the\s+|this\s+)?|this is (?:my\s+|the\s+))(?:(.+?)\s+)?syllabus(?:\s+(?:for|in)\s+(?:my\s+)?(.+?))?(?:\s+class)?$/i);
+  if (!m) return null;
+  return { course: (m[2] || m[1] || "").trim() };
+}
+/** "what's my grade in stats" */
+export function parseGradeNow(text: string): { course: string } | null {
+  const t = text.trim().replace(/[.!?]+$/, "").replace(/^(hey )?milo,?\s*/i, "");
+  const m = t.match(/^(?:what(?:'s| is)|how(?:'s| is))\s+my\s+(?:current\s+|overall\s+)?grade\s+(?:in|for)\s+(?:my\s+)?(.+?)(?:\s+class)?(?:\s+right now)?$/i);
+  return m ? { course: m[1].trim() } : null;
+}

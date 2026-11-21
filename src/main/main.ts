@@ -34,6 +34,8 @@ import { usageToday } from "./usage";
 import { feedUrl } from "./school";
 import { checkMath, isQuantitative, type MathVerdict } from "./mathcheck";
 import { askForecast, setFinalWeight } from "./grades";
+import { addScore, gradeNow, readSyllabus } from "./gradebook";
+import { courses as d2lCourses, dueSoon as d2lDue, gradeSheet as d2lSheet, matchCourse as d2lMatch, SignInNeeded } from "./d2l";
 import { makeExam } from "./exam";
 import { transcribe } from "./ears";
 import { binaryPath, stopNative } from "./native";
@@ -391,6 +393,36 @@ ipcMain.handle("milo:forecast", (_e, q: { course: string; letter: string; exam?:
   })
 );
 ipcMain.handle("milo:final-weight", (_e, course: string, weight: number) => setFinalWeight(String(course), Number(weight)));
+// Milo's own gradebook (for classes where D2L doesn't post grades)
+ipcMain.handle("milo:grade-score", (_e, q: { course: string; name: string; earned: number; possible?: number }) => addScore(String(q.course), String(q.name), Number(q.earned), Number(q.possible) || 100));
+ipcMain.handle("milo:grade-now", async (_e, course: string, portal?: string) => {
+  // D2L's own number first (exact), then Milo's gradebook
+  if (portal) {
+    try {
+      const c = d2lMatch(String(course), await d2lCourses(portal));
+      const d = c ? await d2lSheet(portal, c) : null;
+      if (d?.sheet.current_percent != null) return { ok: true, text: `You've got a ${d.sheet.current_percent}% in ${d.sheet.course} right now.` };
+    } catch {
+      /* fall back to Milo's gradebook */
+    }
+  }
+  return gradeNow(String(course));
+});
+// D2L's calendar, read directly: everything due, every class, in about a second (no AI)
+ipcMain.handle("milo:d2l-due", async (_e, portal: string) => {
+  try {
+    return { ok: true as const, items: await d2lDue(String(portal)) };
+  } catch (e) {
+    return { ok: false as const, signin: e instanceof SignInNeeded, text: (e as Error).message };
+  }
+});
+ipcMain.handle("milo:syllabus", async (_e, course: string) => {
+  // whatever's on screen: a syllabus page in Chrome (text) and/or a PDF (screenshot)
+  const front = await frontApp().catch(() => "");
+  const page = bridgeConnected() && /Google Chrome/i.test(front) ? ((await ext("snapshot", {}, 8000).catch(() => null)) as { text?: string } | null) : null;
+  const cap = await captureScreen();
+  return readSyllabus(String(course ?? ""), { pageText: page?.text && page.text.length > 200 ? page.text : undefined, jpeg: cap.ok ? toJpeg(cap.shot.full, 1568).b64 : undefined });
+});
 // Exam-proof mode: a practice test like the real one, from what this class covered.
 ipcMain.handle("milo:exam", async (_e, q: { course: string; kind?: string; extra?: string }) => {
   const r = await makeExam(String(q?.course ?? ""), String(q?.kind ?? "exam"), String(q?.extra ?? ""));
