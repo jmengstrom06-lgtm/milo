@@ -506,6 +506,30 @@ export async function runSelfTest(win: BrowserWindow) {
         const ms = await saidMatch(/need about \d+%|already locked in|out of reach|which one do you mean|don't see a final/i, 15000);
         return { ms, score: ms < 0 ? 0 : speed(Date.now() - t0, 5000, 10000), detail: ms < 0 ? "no forecast answer" : `answered in ${((Date.now() - t0) / 1000).toFixed(1)}s` };
       });
+      await test("G4", "School", "Uses the class's real grade scale (from its syllabus in D2L)", async () => {
+        if (!graded) return { score: 0, detail: "no graded class to ask about" };
+        await reset();
+        events = [];
+        await hear(`What do I need on the final for an A in ${word}?`);
+        const ms = await saidMatch(/counts A as \d+|Counting a?n? ?A as \d+/i, 15000);
+        const own = events.some((e) => e.line.startsWith("app/say") && /Your class counts/i.test(e.line));
+        const read = events.find((e) => e.line.startsWith("syllabus/"))?.line ?? "";
+        return { ms, score: ms < 0 ? 0 : own ? 1 : 0.5, detail: ms < 0 ? "no answer" : own ? "used the syllabus's own cutoff" : `fell back to the usual 90 (${read.slice(0, 120) || "no syllabus found in D2L"})` };
+      });
+      await test("E1", "Study power", `"Make me a practice midterm for ${word || "<class>"}" (exam-proof mode)`, async () => {
+        await reset();
+        const t0 = Date.now();
+        await hear(`Make me a practice midterm for ${word || "stats"}`);
+        const ack = await saidMatch(/practice midterm|Writing your practice/i, 3000);
+        const ms = await waitFor("s.quiz", 60000);
+        const n = ms >= 0 ? await js<number>("document.querySelectorAll('.qz-choice, .quiz button, [data-quiz-choice]').length").catch(() => 0) : 0;
+        await js("window.__milo.reset()").catch(() => {});
+        return {
+          ms,
+          score: ms < 0 ? 0 : speed(Date.now() - t0, 25000, 45000),
+          detail: ms < 0 ? "no practice test appeared" : `test ready in ${((Date.now() - t0) / 1000).toFixed(1)}s${ack < 0 ? " (no quick 'on it' first)" : ""}${n ? `, ${n} answer buttons` : ""}`,
+        };
+      });
       await test("G3", "School", `"What's due this week" (instant, from D2L)`, async () => {
         await reset();
         events = [];

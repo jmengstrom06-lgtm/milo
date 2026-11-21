@@ -99,10 +99,11 @@ const WEIGHTS_TOOL = {
   },
 };
 /** Read the grading section of a syllabus (page text and/or a screenshot of it). */
-export async function readSyllabus(course: string, src: { pageText?: string; jpeg?: string }): Promise<{ ok: boolean; text: string }> {
+export async function readSyllabus(course: string, src: { pageText?: string; jpeg?: string; pdf?: string }): Promise<{ ok: boolean; text: string }> {
   const content: unknown[] = [];
+  if (src.pdf) content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: src.pdf } });
   if (src.jpeg) content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: src.jpeg } });
-  content.push({ type: "text", text: `Class: ${course || "(say which)"}\n${src.pageText ? `Syllabus text:\n${src.pageText.slice(0, 30000)}` : "The syllabus is on screen."}` });
+  content.push({ type: "text", text: `Class: ${course || "(say which)"}\n${src.pageText ? `Syllabus text:\n${src.pageText.slice(0, 30000)}` : src.pdf ? "The syllabus is the attached PDF." : "The syllabus is on screen."}` });
   const r = await callTool<{ found: boolean; course?: string; categories: { name: string; weight: number }[]; scheme?: { letter: string; min: number }[] }>(
     {
       max_tokens: 1200,
@@ -164,4 +165,11 @@ export function setWeight(course: string, part: string, weight: number): boolean
   b.scores = b.scores.map((x) => (x.cat === "Other" ? { ...x, cat: catFor(x.name, b.cats) ?? "Other" } : x)); // file earlier scores
   saveBook(b);
   return true;
+}
+
+/** The class's letter-grade cutoffs (from its syllabus). Creates the class's book if needed. */
+export function setScheme(course: string, scheme: { letter: string; min: number }[]) {
+  const b = findBook(course) ?? { course, cats: [], scores: [], updated: Date.now() };
+  b.scheme = scheme;
+  saveBook(b);
 }

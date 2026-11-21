@@ -271,3 +271,36 @@ export function keepSignedIn() {
   setInterval(() => void ses.cookies.flushStore().catch(() => {}), 60e3);
   app.on("before-quit", () => void ses.cookies.flushStore().catch(() => {}));
 }
+
+// ---------- course files (syllabus) ----------
+type Topic = { Title: string; Url: string; TypeIdentifier: string };
+type Mod = { Title: string; Topics?: Topic[]; Modules?: Mod[] };
+/** Every file/page in a course's Content, with where it sits ("Administrative > Syllabus"). */
+export async function contentTopics(portal: string, c: Course): Promise<(Topic & { path: string })[]> {
+  const toc = await api<{ Modules: Mod[] }>(portal, `/d2l/api/le/${LE}/${c.id}/content/toc`);
+  const out: (Topic & { path: string })[] = [];
+  const walk = (mods: Mod[] = [], p = "") => {
+    for (const m of mods) {
+      for (const t of m.Topics ?? []) out.push({ ...t, path: p + m.Title });
+      walk(m.Modules, `${p}${m.Title} > `);
+    }
+  };
+  walk(toc.Modules);
+  return out;
+}
+/** Download a course file through the signed-in D2L page. Base64, or null if too big / not there. */
+export async function fileBase64(portal: string, url: string, maxBytes = 12e6): Promise<string | null> {
+  const w = await d2lPage(portal);
+  const b64 = (await w.webContents.executeJavaScript(
+    `fetch(${JSON.stringify(url)}, { credentials: "include" }).then(async (r) => {
+      if (!r.ok) return null;
+      const u = new Uint8Array(await r.arrayBuffer());
+      if (u.length > ${maxBytes}) return null;
+      let s = "";
+      for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+      return btoa(s);
+    }).catch(() => null)`,
+    true
+  )) as string | null;
+  return b64;
+}

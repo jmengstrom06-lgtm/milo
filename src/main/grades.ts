@@ -10,6 +10,8 @@ import { forecast, forecastLine, targetFor, type GradeSheet } from "./gradeMath"
 import { LMS, detectLms } from "./school";
 import { bookSheet, setWeight } from "./gradebook";
 import { courses as d2lCourses, gradeSheet as d2lSheet, matchCourse, SignInNeeded } from "./d2l";
+import { learnSyllabus } from "./syllabus";
+import { findBook } from "./gradebook";
 
 const file = () => path.join(app.getPath("userData"), "grades.json");
 const FRESH = 6 * 3600e3;
@@ -108,7 +110,9 @@ export async function askForecast(q: { course: string; letter: string; exam?: st
       const d = c ? await d2lSheet(q.portal, c, exam) : null;
       if (d && d.sheet.categories.some((x) => x.percent != null)) {
         if (!d.sheet.final) return { ok: false, text: `D2L has your ${d.sheet.course} grades, but I don't see a ${exam} in them. Which one do you mean, like "exam 4"?` };
-        const { target, note } = targetFor(q.letter, d.sheet.scheme);
+        // the professor's real cutoffs, from the syllabus in D2L (read once, then remembered)
+        const scale = findBook(c!.short)?.scheme ?? (await learnSyllabus(q.portal, c!, false).catch(() => ({ scale: null }))).scale;
+        const { target, note } = targetFor(q.letter, scale ?? d.sheet.scheme);
         const f = forecast(d.sheet, target);
         bb("forecast", "answer", { course: q.course, letter: q.letter, ok: !!f, source: "d2l", needed: f?.needed });
         if (f) return { ok: true, text: `${forecastLine(f, q.letter.toUpperCase(), d.sheet.final.name)} ${note} ${f.notes.join(" ")}`.trim() };
@@ -118,7 +122,16 @@ export async function askForecast(q: { course: string; letter: string; exam?: st
       else bb("forecast", "d2l_error", { error: (e as Error).message });
     }
   }
-  // 1) Milo's own gradebook: syllabus weights + the scores the student told him (works when D2L posts nothing)
+  // 1) Milo's own gradebook: syllabus weights + the scores the student told him (works when D2L posts nothing).
+  //    No weights yet? Try reading the syllabus straight from D2L first.
+  if (q.portal && !bookSheet(q.course, exam)) {
+    try {
+      const c = matchCourse(q.course, await d2lCourses(q.portal));
+      if (c) await learnSyllabus(q.portal, c, true);
+    } catch {
+      /* fine: we'll ask */
+    }
+  }
   const book = bookSheet(q.course, exam);
   if (book) {
     const { target, note } = targetFor(q.letter, book.scheme);
