@@ -77,9 +77,11 @@ export function forecast(sheet: GradeSheet, target: number): Forecast | null {
   return null;
 }
 
-/** One spoken answer. */
+/** One spoken answer. ("an A", "on Exam 4" but "on the final") */
 export function forecastLine(f: Forecast, letter: string, finalName = "final"): string {
-  if (f.already) return `You've already locked in a ${letter}, even with a zero on the ${finalName}. Still, show up!`;
-  if (f.impossible) return `A ${letter} would take ${Math.ceil(f.needed)}% on the ${finalName}, so it's out of reach. Want me to check the next grade down?`;
-  return `You need about ${Math.ceil(f.needed)}% on the ${finalName} to get a ${letter}.`;
+  const an = /^[AEF]/i.test(letter) ? "an" : "a";
+  const on = /\d/.test(finalName) || /^[A-Z]{2,}/.test(finalName) ? finalName : `the ${finalName}`;
+  if (f.already) return `You've already locked in ${an} ${letter}, even with a zero on ${on}. Still, show up!`;
+  if (f.impossible) return `${an === "an" ? "An" : "A"} ${letter} would take ${Math.ceil(f.needed)}% on ${on}, so it's out of reach. Want me to check the next grade down?`;
+  return `You need about ${Math.ceil(f.needed)}% on ${on} to get ${an} ${letter}.`;
 }

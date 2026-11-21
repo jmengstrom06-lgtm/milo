@@ -40,7 +40,8 @@ describe("Jake's stats class, from D2L", () => {
     const sheet = { course: "Statistical Analysis", categories: [{ name: "Exam1_adj", weight: 25, percent: 95.5 }, { name: "Exam 2", weight: 25, percent: 100 }, { name: "Exam 3", weight: 25, percent: 90 }, { name: "Exam 4", weight: 25, percent: null }], final: { name: "Exam 4", weight: 25, possible: null } };
     const f = forecast(sheet, targetFor("B").target)!;
     expect(f.needed).toBe(34.5);
-    expect(forecastLine(f, "B", "Exam 4")).toBe("You need about 35% on the Exam 4 to get a B.");
+    expect(forecastLine(f, "B", "Exam 4")).toBe("You need about 35% on Exam 4 to get a B.");
+    expect(forecastLine(forecast(sheet, targetFor("A", [{ letter: "A", min: 94 }]).target)!, "A", "Exam 4")).toBe("You need about 91% on Exam 4 to get an A.");
     expect(forecast(sheet, targetFor("A").target)!.needed).toBe(74.5);
   });
 });

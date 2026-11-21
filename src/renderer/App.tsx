@@ -1543,6 +1543,7 @@ export default function App() {
     setQuiz(null);
     hover(false);
     setMood("thinking");
+    void say(`On it. Writing your practice ${kind} now, give me a few seconds.`); // it takes ~15s: say so right away
     setBubble(`Writing your practice ${kind}…`);
     const soon = upcoming(radarRef.current, now, 30)
       .filter((x) => !course || x.course.toLowerCase().includes(course.toLowerCase()) || course.toLowerCase().includes(x.course.toLowerCase()))

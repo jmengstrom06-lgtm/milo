@@ -478,14 +478,17 @@ export async function runSelfTest(win: BrowserWindow) {
       const chk = await d2lCheck(portal);
       await test("G0", "School", "Signed in to D2L (data feed answers)", async () => ({ score: chk.ok ? 1 : 0, detail: chk.ok ? "signed in" : chk.signin ? "NOT signed in inside Milo: ask him 'what's due', sign in once" : chk.text }));
       // a class that posts grades, to ask about by its everyday name
+      // a class that posts grades, to ask about by its everyday name; best: one with a clear last exam left
       let graded: { short: string } | null = null;
       if (chk.ok)
         for (const c of await d2lCourses(portal).catch(() => [])) {
           const g = await d2lSheet(portal, c).catch(() => null);
-          if (g?.sheet.current_percent != null) {
+          if (g?.sheet.current_percent == null) continue;
+          if (g.examItem) {
             graded = c;
             break;
           }
+          graded ??= c;
         }
       const word = graded ? graded.short.split(" ").find((w) => w.length > 3 && !/^(introduction|intro|understanding|survey)$/i.test(w)) ?? graded.short : "";
       await test("G1", "School", `"What's my grade in ${word || "<class>"}" (from D2L)`, async () => {
