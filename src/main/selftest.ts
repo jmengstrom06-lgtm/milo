@@ -473,10 +473,10 @@ export async function runSelfTest(win: BrowserWindow) {
       return -1;
     };
     if (!portal) {
-      results.push({ id: "D0", cat: "School", name: "D2L connected", score: 0, pass: false, detail: "no school site set up (run setup)" });
+      results.push({ id: "G0", cat: "School", name: "D2L connected", score: 0, pass: false, detail: "no school site set up (run setup)" });
     } else {
       const chk = await d2lCheck(portal);
-      await test("D0", "School", "Signed in to D2L (data feed answers)", async () => ({ score: chk.ok ? 1 : 0, detail: chk.ok ? "signed in" : chk.signin ? "NOT signed in inside Milo: ask him 'what's due', sign in once" : chk.text }));
+      await test("G0", "School", "Signed in to D2L (data feed answers)", async () => ({ score: chk.ok ? 1 : 0, detail: chk.ok ? "signed in" : chk.signin ? "NOT signed in inside Milo: ask him 'what's due', sign in once" : chk.text }));
       // a class that posts grades, to ask about by its everyday name
       let graded: { short: string } | null = null;
       if (chk.ok)
@@ -488,7 +488,7 @@ export async function runSelfTest(win: BrowserWindow) {
           }
         }
       const word = graded ? graded.short.split(" ").find((w) => w.length > 3 && !/^(introduction|intro|understanding|survey)$/i.test(w)) ?? graded.short : "";
-      await test("D1", "School", `"What's my grade in ${word || "<class>"}" (from D2L)`, async () => {
+      await test("G1", "School", `"What's my grade in ${word || "<class>"}" (from D2L)`, async () => {
         if (!graded) return { score: 0, detail: chk.ok ? "no class posts grades in D2L" : "not signed in" };
         await reset();
         events = [];
@@ -497,7 +497,7 @@ export async function runSelfTest(win: BrowserWindow) {
         const ms = await saidMatch(/\d+(\.\d+)?%/, 12000);
         return { ms, score: ms < 0 ? 0 : speed(Date.now() - t0, 4000, 9000), detail: ms < 0 ? "never said a percent" : `answered in ${((Date.now() - t0) / 1000).toFixed(1)}s` };
       });
-      await test("D2", "School", `"What do I need on the final for a B in ${word || "<class>"}"`, async () => {
+      await test("G2", "School", `"What do I need on the final for a B in ${word || "<class>"}"`, async () => {
         if (!graded) return { score: 0, detail: "no graded class to ask about" };
         await reset();
         events = [];
@@ -506,7 +506,7 @@ export async function runSelfTest(win: BrowserWindow) {
         const ms = await saidMatch(/need about \d+%|already locked in|out of reach|which one do you mean|don't see a final/i, 15000);
         return { ms, score: ms < 0 ? 0 : speed(Date.now() - t0, 5000, 10000), detail: ms < 0 ? "no forecast answer" : `answered in ${((Date.now() - t0) / 1000).toFixed(1)}s` };
       });
-      await test("D3", "School", `"What's due this week" (instant, from D2L)`, async () => {
+      await test("G3", "School", `"What's due this week" (instant, from D2L)`, async () => {
         await reset();
         events = [];
         const t0 = Date.now();

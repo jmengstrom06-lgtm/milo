@@ -687,8 +687,10 @@ export default function App() {
   const startupChecked = useRef(false);
   useEffect(() => {
     if (setup || startupChecked.current) return;
-    startupChecked.current = true;
+    // (marked done only once it really runs: dev mode starts effects twice and cancels the first)
     const t = window.setTimeout(async () => {
+      if (startupChecked.current) return;
+      startupChecked.current = true;
       const r = await window.milo.startupCheck(portal || undefined).catch(() => ({ problems: [] as { kind: string; text: string }[] }));
       if (!r.problems.length) return;
       setMood("thinking");

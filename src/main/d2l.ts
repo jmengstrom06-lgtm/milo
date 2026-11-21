@@ -5,7 +5,7 @@
 // Mapped from TCU's D2L (tcu.brightspace.com), but these are standard Brightspace addresses, so it works
 // at any D2L school.
 
-import { BrowserWindow } from "electron";
+import { app, BrowserWindow, session } from "electron";
 import { log as bb } from "./blackbox";
 import type { GradeSheet } from "./gradeMath";
 import type { Assignment } from "./school";
@@ -242,4 +242,32 @@ export async function d2lCheck(portal: string): Promise<{ ok: boolean; signin: b
   } catch (e) {
     return { ok: false, signin: e instanceof SignInNeeded, text: (e as Error).message };
   }
+}
+
+/** Stay signed in: D2L and the school's login (Okta, Microsoft) use "session" cookies that vanish when Milo
+ *  quits, so students had to sign in after every restart. Keep them for 14 days, like "keep me signed in",
+ *  only in Milo's own storage on this Mac. */
+export function keepSignedIn() {
+  const ses = session.fromPartition(PARTITION);
+  const SCHOOL = /brightspace|d2l|desire2learn|okta|microsoftonline|login\.live|duosecurity/i;
+  ses.cookies.on("changed", (_e, c, _cause, removed) => {
+    if (removed || !c.session || !SCHOOL.test(c.domain ?? "")) return;
+    const host = (c.domain ?? "").replace(/^\./, "");
+    ses.cookies
+      .set({
+        url: `${c.secure ? "https" : "http"}://${host}${c.path ?? "/"}`,
+        name: c.name,
+        value: c.value,
+        ...(c.hostOnly ? {} : { domain: c.domain }),
+        path: c.path,
+        secure: c.secure,
+        httpOnly: c.httpOnly,
+        sameSite: c.sameSite,
+        expirationDate: Math.floor(Date.now() / 1000) + 14 * 86400,
+      })
+      .catch(() => {});
+  });
+  // write them to disk now and then (and the moment Milo quits)
+  setInterval(() => void ses.cookies.flushStore().catch(() => {}), 60e3);
+  app.on("before-quit", () => void ses.cookies.flushStore().catch(() => {}));
 }

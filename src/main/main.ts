@@ -35,7 +35,7 @@ import { feedUrl } from "./school";
 import { checkMath, isQuantitative, type MathVerdict } from "./mathcheck";
 import { askForecast, setFinalWeight } from "./grades";
 import { addScore, gradeNow, readSyllabus } from "./gradebook";
-import { d2lCheck, courses as d2lCourses, dueSoon as d2lDue, gradeSheet as d2lSheet, matchCourse as d2lMatch, SignInNeeded } from "./d2l";
+import { d2lCheck, keepSignedIn, courses as d2lCourses, dueSoon as d2lDue, gradeSheet as d2lSheet, matchCourse as d2lMatch, SignInNeeded } from "./d2l";
 import { makeExam } from "./exam";
 import { transcribe } from "./ears";
 import { binaryPath, stopNative } from "./native";
@@ -1099,6 +1099,7 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === "media");
   createOverlay();
   if (overlay) startSync(overlay); // class folders, classes and game plans follow you to any Mac you sign in on
+  keepSignedIn(); // D2L / school login survives restarts
   if (overlay) startUpdates(overlay); // every fix reaches students on its own (installed app only)
   // `npm run test:milo`: drive Milo through his self-test, write the report, quit. (Sound muted so it runs quietly.)
   if (selfTestOn() && overlay) {
