@@ -5,6 +5,7 @@
 
 import { backend } from "./account";
 import { log as bb } from "./blackbox";
+import { guard, record } from "./usage";
 
 /** Model tiers. Fast = quick decisions and simple replies. Smart = vision, teaching, building. */
 export const models = {
@@ -40,7 +41,29 @@ export class NoBrainError extends Error {}
 
 /** POST to Claude's Messages API. Returns the raw Response (works for streaming too). */
 export async function anthropic(body: Body, signal?: AbortSignal): Promise<Response> {
-  const payload = JSON.stringify(withCache({ model: models.smart(), ...body }));
+  const full = withCache({ model: models.smart(), ...body });
+  let payload = JSON.stringify(full);
+  // Cost guardrails: over today's soft budget the small model takes anything without a picture;
+  // over the hard budget, no new heavy work today.
+  const hasImage = payload.includes('"type":"image"');
+  const g = guard(String(full.model), hasImage, full.tools ? "work" : "chat");
+  if (g.refuse) return new Response(JSON.stringify({ error: "limit", text: g.refuse }), { status: 429, headers: { "content-type": "application/json" } });
+  if (g.model !== full.model) {
+    full.model = g.model;
+    payload = JSON.stringify(full);
+  }
+  const res = await send(payload, signal);
+  // Meter what it cost (non-streaming answers carry their token counts).
+  if (res.ok && !full.stream)
+    res
+      .clone()
+      .json()
+      .then((d: { usage?: Record<string, number> }) => record(String(full.model), d?.usage, hasImage))
+      .catch(() => {});
+  return res;
+}
+
+async function send(payload: string, signal?: AbortSignal): Promise<Response> {
   const viaBackend = await backend("claude", { body: payload, signal }).catch((e) => {
     bb("gateway", "backend_network_error", { error: (e as Error).message });
     return null;

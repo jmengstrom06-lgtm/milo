@@ -1,6 +1,20 @@
 export {};
 
 declare global {
+  type MiloJobStep = { do: string; done_when: string; status: "todo" | "doing" | "retrying" | "done" | "failed" | "skipped"; tries: number; note?: string };
+  type MiloJob = {
+    id: string;
+    goal: string;
+    steps: MiloJobStep[];
+    status: "planning" | "running" | "checking" | "done" | "needs_you" | "stuck" | "paused" | "stopped" | "failed";
+    createdAt: number;
+    updatedAt: number;
+    replans: number;
+    approved: boolean;
+    question?: string;
+    summary?: string;
+    actions: number;
+  };
   type PlanStep = { text: string; minutes: number; kind: "read" | "solve" | "write" | "research" | "review" | "submit"; detail: string };
   type GamePlan = { found: boolean; title: string; course: string; due: string; steps: PlanStep[]; total_minutes: number; say: string; missing: string };
 
@@ -148,6 +162,20 @@ declare global {
       account: () => Promise<{ signedIn: boolean; email: string }>;
       accountSend: (email: string) => Promise<{ ok: boolean; text: string }>;
       perms: () => Promise<{ mic: boolean; screen: boolean; hands: boolean }>;
+      profileGet: () => Promise<Record<string, string>>;
+      profileSet: (patch: Record<string, string>) => Promise<Record<string, string>>;
+      feedFetch: (url: string) => Promise<{ ok: boolean; text: string }>;
+      feedConnect: (url?: string) => Promise<{ ok: true; url: string; text: string } | { ok: false; reason: "no_link" | "bad_feed"; text?: string }>;
+      forecast: (q: { course: string; letter: string; exam?: string; portal?: string; fresh?: boolean }) => Promise<{ ok: boolean; text: string }>;
+      finalWeight: (course: string, weight: number) => Promise<boolean>;
+      exam: (q: { course: string; kind?: string; extra?: string }) => Promise<{ ok: true; topic: string; questions: { q: string; choices: string[]; correct: number; explain: string }[] } | { ok: false; text: string }>;
+      usage: () => Promise<{ calls: number; cost: number; smart: number; fast: number; images: number; soft: number; hard: number }>;
+      jobStart: (goal: string, opts?: { approved?: boolean }) => Promise<MiloJob>;
+      jobResume: (approve?: boolean) => Promise<MiloJob | null>;
+      jobStop: () => Promise<void>;
+      jobLast: () => Promise<MiloJob | null>;
+      jobIs: (text: string) => Promise<boolean>;
+      onJob: (cb: (job: MiloJob) => void) => () => void;
       updateInstall: () => Promise<void>;
       onUpdateReady: (cb: (version: string) => void) => () => void;
       syncExchange: (kind: "gameplan", rows: { id: string; updated: number; deleted?: boolean; data?: unknown }[]) => Promise<{ id: string; updated: number; deleted?: boolean; data?: unknown }[] | null>;
@@ -174,7 +202,7 @@ declare global {
       onFocusState: (cb: (s: MiloFocusState) => void) => () => void;
       forgetAll: () => Promise<boolean>;
       reportError: (err: { name?: string; message?: string; stack?: string }) => void;
-      task: (task: string) => Promise<{ ok: true; status: "done" | "ask" | "stopped" | "quick"; text: string; rest?: string | null; did?: string[] } | Err>;
+      task: (task: string) => Promise<{ ok: true; status: "done" | "ask" | "stopped" | "quick" | "blocked"; text: string; rest?: string | null; did?: string[]; replayed?: boolean } | Err>;
       stopTask: () => void;
       handsAccess: () => Promise<boolean>;
       onTaskStep: (cb: (step: { say: string; action: string; point?: { x: number; y: number } | null }) => void) => () => void;

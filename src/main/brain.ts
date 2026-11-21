@@ -1,5 +1,6 @@
 import { log as bb } from "./blackbox";
 import { anthropic, limitText, models, NoBrainError } from "./gateway";
+import { profileText } from "./profile";
 import { memoryPrompt, noteTurn } from "./memory";
 // Milo's brain: all Anthropic API calls live in the main process,
 // so the API key never touches the renderer.
@@ -436,7 +437,7 @@ const ACT_TOOL = {
       steps: {
         type: "array",
         minItems: 1,
-        maxItems: 6,
+        maxItems: 10,
         items: { type: "object", properties: STEP_PROPS, required: ["action", "say"] },
         description:
           "Do as many steps as you can from THIS screenshot without needing to look again (e.g. click the box, type, press enter). End the list right after any step that changes the screen a lot (opening an app or site, a click that opens a new page or menu): you'll get a fresh screenshot then. Put done (or ask) last only when the request will be finished by these steps.",
@@ -466,6 +467,7 @@ How to work:
 - Do exactly what was asked, nothing extra. If asked to type something, don't press Enter or send it unless they asked (asking ChatGPT/Claude something DOES mean send it).
 - NEVER send, submit, post, publish, buy, pay, delete, or change account settings without asking first: use "ask".
 - Never type passwords or payment details. If a login is needed, use "ask".
+${profileText()}
 - Finish with "done" and a summary of 8 words or fewer.`;
 
   const log = history.length ? history.map((h, i) => `${i + 1}. ${h}`).join("\n") : "(nothing yet)";
@@ -495,7 +497,7 @@ How to work:
   // Some models answer with a single step object instead of a list.
   if (!steps.length && (r.data as unknown as Action)?.action) steps.push(r.data as unknown as Action);
   if (!steps.length) return { ok: false, text: "I got my wires crossed. Try again?" };
-  return { ok: true, data: steps.slice(0, 6) };
+  return { ok: true, data: steps.slice(0, 10) };
 }
 
 // ---------------------------------------------------------------------------
@@ -895,10 +897,10 @@ const WEB_TOOL = {
       steps: {
         type: "array",
         minItems: 1,
-        maxItems: 6,
+        maxItems: 12,
         items: WEB_STEP,
         description:
-          "Do as many steps as you can with THIS page's element ids (e.g. type in the search box, then press enter). End the list right after a step that loads a new page, switches tabs, or opens a menu/dialog: you'll get the updated page then. Put done (or ask) last only when the request will be finished by these steps.",
+          "Do as many steps as you can with THIS page's element ids (e.g. type in the search box, then press enter). On a form, fill EVERY field you can in this one list (all the typing, dropdown picks and checkboxes) before anything that loads a new page. End the list right after a step that loads a new page, switches tabs, or opens a menu/dialog: you'll get the updated page then. Put done (or ask) last only when the request will be finished by these steps.",
       },
     },
     required: ["steps"],
@@ -920,6 +922,7 @@ How to work:
 - Do exactly what was asked, nothing extra.
 - NEVER buy, pay, post publicly, delete, send email/messages to people, or change account settings without asking first: use "ask".
 - Never type passwords or payment details. If a login is needed, use "ask".
+${profileText()}
 - Finish with "done" and 8 words or fewer. If they asked a question, the done text IS the answer (short).`;
   const log = history.length ? history.map((h, i) => `${i + 1}. ${h}`).join("\n") : "(nothing yet)";
   const body = {
@@ -932,7 +935,7 @@ How to work:
   const pick = (d: { steps?: WebAction[] } | undefined): WebAction[] => {
     const steps = Array.isArray(d?.steps) ? d!.steps.filter((x) => x && x.action) : [];
     if (!steps.length && (d as unknown as WebAction)?.action) steps.push(d as unknown as WebAction);
-    return steps.slice(0, 6);
+    return steps.slice(0, 12);
   };
   // Reading a list of elements is easy: the fast model does it. The main model is the backup.
   let r = await callTool<{ steps: WebAction[] }>({ ...body, model: process.env.MILO_WEB_MODEL || "claude-haiku-5-5" }, WEB_TOOL.name);

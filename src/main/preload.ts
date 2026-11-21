@@ -102,6 +102,24 @@ contextBridge.exposeInMainWorld("milo", {
   stopTask: () => ipcRenderer.send("milo:task-stop"),
   handsAccess: () => ipcRenderer.invoke("milo:hands-access"),
   perms: () => ipcRenderer.invoke("milo:perms"),
+  profileGet: () => ipcRenderer.invoke("milo:profile-get"),
+  profileSet: (patch: Record<string, string>) => ipcRenderer.invoke("milo:profile-set", patch),
+  usage: () => ipcRenderer.invoke("milo:usage"),
+  forecast: (q: { course: string; letter: string; exam?: string; portal?: string; fresh?: boolean }) => ipcRenderer.invoke("milo:forecast", q),
+  finalWeight: (course: string, weight: number) => ipcRenderer.invoke("milo:final-weight", course, weight),
+  exam: (q: { course: string; kind?: string; extra?: string }) => ipcRenderer.invoke("milo:exam", q),
+  feedFetch: (url: string) => ipcRenderer.invoke("milo:feed-fetch", url),
+  feedConnect: (url?: string) => ipcRenderer.invoke("milo:feed-connect", url),
+  jobStart: (goal: string, opts?: { approved?: boolean }) => ipcRenderer.invoke("milo:job-start", goal, opts),
+  jobResume: (approve?: boolean) => ipcRenderer.invoke("milo:job-resume", approve),
+  jobStop: () => ipcRenderer.invoke("milo:job-stop"),
+  jobLast: () => ipcRenderer.invoke("milo:job-last"),
+  jobIs: (text: string) => ipcRenderer.invoke("milo:job-is", text),
+  onJob: (cb: (job: unknown) => void) => {
+    const l = (_e: unknown, j: unknown) => cb(j);
+    ipcRenderer.on("milo:job", l);
+    return () => ipcRenderer.removeListener("milo:job", l);
+  },
   updateInstall: () => ipcRenderer.invoke("milo:update-install"),
   onUpdateReady: (cb: (version: string) => void) => {
     const l = (_e: unknown, v: string) => cb(String(v ?? ""));

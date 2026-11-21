@@ -1756,3 +1756,34 @@ body,
 .upd-pill b { color: #6ee7b7; }
 .upd-pill:hover { border-color: #34d399; }
 .upd-dot { width: 8px; height: 8px; border-radius: 50%; background: #34d399; animation: rdPulse 1.8s ease-out infinite; }
+
+/* ---------- job card (long tasks) ---------- */
+.jb { position: fixed; z-index: 63; box-sizing: border-box; padding: 14px 14px 12px; border-radius: 20px; color: #f4f2fb; overflow-y: auto;
+  background: linear-gradient(165deg, rgba(34,30,52,0.97), rgba(18,16,30,0.97)); border: 1px solid rgba(196,181,253,0.25);
+  box-shadow: 0 20px 50px rgba(0,0,0,0.45); font-family: -apple-system, "Inter", sans-serif; animation: gpIn .4s cubic-bezier(.2,1.2,.3,1) both; }
+.jb--done { border-color: rgba(52,211,153,0.5); }
+.jb--needs_you, .jb--stuck { border-color: rgba(251,191,36,0.55); }
+.jb--failed { border-color: rgba(248,113,113,0.5); }
+.jb-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.jb-kicker { display: flex; align-items: center; gap: 7px; font: 700 11px/1 -apple-system, sans-serif; letter-spacing: .1em; text-transform: uppercase; color: #a78bfa; }
+.jb--done .jb-kicker { color: #6ee7b7; }
+.jb--needs_you .jb-kicker, .jb--stuck .jb-kicker { color: #fbbf24; }
+.jb-count { color: rgba(255,255,255,0.5); letter-spacing: 0; }
+.jb-goal { margin: 8px 0 10px; font: 700 14px/1.35 -apple-system, sans-serif; color: #fff; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.jb-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.jb-step { display: flex; gap: 9px; align-items: flex-start; padding: 6px 8px; border-radius: 10px; font: 550 12.5px/1.35 -apple-system, sans-serif; color: rgba(255,255,255,0.75); }
+.jb-step--doing, .jb-step--retrying { background: rgba(124,77,255,0.13); color: #fff; }
+.jb-step--done { color: rgba(255,255,255,0.45); }
+.jb-step--failed { color: #fca5a5; }
+.jb-step em { font-style: normal; color: #fbbf24; }
+.jb-ico { flex: none; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font: 900 11px -apple-system, sans-serif; border: 1.5px solid rgba(255,255,255,0.25); }
+.jb-step--done .jb-ico { background: #34d399; border-color: #34d399; color: #052e1f; }
+.jb-step--retrying .jb-ico { border-color: #fbbf24; color: #fbbf24; }
+.jb-step--failed .jb-ico { border-color: #f87171; color: #f87171; }
+.jb-text { min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.jb-spin { width: 11px; height: 11px; border-radius: 50%; border: 2px solid rgba(167,139,250,0.3); border-top-color: #c4b5fd; animation: obSpin .8s linear infinite; display: inline-block; }
+.jb-spin--sm { width: 9px; height: 9px; }
+.jb-msg { margin-top: 10px; padding: 9px 11px; border-radius: 12px; font: 550 12.5px/1.45 -apple-system, sans-serif; background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.35); color: #fde68a; }
+.jb-msg--ok { background: rgba(52,211,153,0.1); border-color: rgba(52,211,153,0.4); color: #d1fae5; }
+.jb-actions { display: flex; gap: 8px; margin-top: 10px; justify-content: flex-end; }
+.jb-actions:empty { display: none; }

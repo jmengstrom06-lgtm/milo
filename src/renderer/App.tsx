@@ -14,10 +14,13 @@ import { setSounds, sfx, soundsOn } from "./sfx";
 import ToolPanel, { SavedTool, loadTools, saveTools } from "./ToolPanel";
 import QuizPanel, { QuizHandle } from "./QuizPanel";
 import { BriefCard, BriefLoader, BriefState, SignInPanel } from "./Brief";
-import { fastDecide, parseHomework, parsePlanVoice, parseRadar, stripFiller, type DecideState } from "./decide";
+import { fastDecide, parseExam, parseFinalWeight, parseForecast, parseHomework, parsePlanVoice, parseRadar, stripFiller, type DecideState } from "./decide";
 import { alertLine, emptyRadar, markWarned, mergeScan, pendingAlerts, upcoming, whenText, type Radar, type RadarItem, type ScanItem, type Warn } from "./radar";
 import RadarCard, { type RadarView } from "./RadarCard";
 import Onboarding, { setupDone } from "./Onboarding";
+import JobCard from "./JobCard";
+import { parseProfileFact, profileLabel } from "../main/profileFacts";
+import { detectLms, LMS, parseIcs } from "../main/school";
 import GamePlanCard, { findPlan, loadPlans, nextStep, planKey, savePlan, syncPlans, type SavedPlan } from "./GamePlan";
 import AccountChip from "./Account";
 import LockIn, { type LockInHandle } from "./LockIn";
@@ -172,6 +175,14 @@ export default function App() {
   const [signIn, setSignIn] = useState(false);
   // First run: Milo sets himself up with the student (name, account, classes, permissions, D2L).
   const [setup, setSetup] = useState(() => !setupDone());
+  // The school's calendar feed (.ics): deadlines from ANY LMS, no AI, instant.
+  const [feed, setFeed] = useState(() => {
+    try {
+      return localStorage.getItem("milo.feed") || "";
+    } catch {
+      return "";
+    }
+  });
   const [portal, setPortal] = useState(() => {
     try {
       return localStorage.getItem("milo.portal") || "";
@@ -227,6 +238,7 @@ export default function App() {
     return p;
   };
   const pendingTask = useRef<string | null>(null);
+  const blockedTask = useRef<{ task: string; at: number } | null>(null); // waiting for the student to sign in
   const lastCommand = useRef<string | null>(null);
   const lastCommandAt = useRef(0);
   // The "Got it" card: what Milo heard, waiting for go / cancel / more.
@@ -610,6 +622,15 @@ export default function App() {
         setBubble(null);
         return false;
       }
+      if (r.status === "blocked") {
+        // a sign-in, 2-step code or "are you human" check: his job is to wait, not to fail
+        blockedTask.current = { task, at: Date.now() };
+        bb("task_blocked", { task: task.slice(0, 120) });
+        setMood("thinking");
+        await say(r.text);
+        setBubble(null);
+        return false;
+      }
       if (r.status === "ask") {
         pendingTask.current = task;
         setMood("happy");
@@ -661,6 +682,81 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [say, hover, listen, look]
   );
+
+  // ---- Jobs: long tasks that finish (plan -> do -> check each step -> retry -> final check) ----------
+  const [job, setJob] = useState<MiloJob | null>(null);
+  const jobRef = useRef<MiloJob | null>(null);
+  jobRef.current = job;
+  const jobSaid = useRef<string>("");
+  const jobActive = (j: MiloJob | null) => !!j && ["planning", "running", "checking"].includes(j.status);
+  useEffect(
+    () =>
+      window.milo.onJob((j) => {
+        setJob(j);
+        setWorking(jobActive(j));
+        // say each new outcome once
+        const key = `${j.id}:${j.status}`;
+        if (jobSaid.current === key) return;
+        jobSaid.current = key;
+        if (j.status === "done") {
+          sfx.success();
+          setMood("happy");
+          setConfetti({ x: posRef.current.x + MILO_W / 2, y: posRef.current.y + 40, seed: Date.now() });
+          void moveTo(home(), "jump");
+          say(j.summary || "All done.").then(() => setBubble(null));
+        } else if (j.status === "needs_you") say(`${j.question ?? "Should I go ahead?"} Say yes to go ahead.`).then(() => setBubble(null));
+        else if (j.status === "stuck") say(`${j.question ?? "I got stuck."} Say keep going and I'll try again.`).then(() => setBubble(null));
+        else if (j.status === "stopped") say("Stopped. Say keep going and I'll pick up right where I left off.").then(() => setBubble(null));
+        else if (j.status === "failed") say(j.question || "That didn't work.").then(() => setBubble(null));
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+  /** Do a computer task: a long, multi-part one becomes a job (planned, checked, finished); a quick one just runs. */
+  const work = async (task: string, spoken: boolean) => {
+    if (!(await window.milo.jobIs(task).catch(() => false))) return runTask(task, spoken);
+    bb("route_job", { task: task.slice(0, 200) });
+    hush();
+    setChatOpen(false);
+    setMood("thinking");
+    setBubble("Planning it out…");
+    void window.milo.jobStart(task);
+    return true;
+  };
+  /** Voice for jobs: "stop", "keep going", "yes go ahead", "what are you doing". */
+  const jobVoice = (text: string): boolean => {
+    const t = text.toLowerCase().replace(/[.!?,]+/g, " ").replace(/\s+/g, " ").trim();
+    const j = jobRef.current;
+    // after "sign in for me": "ok I'm in" picks the task back up
+    const bt = blockedTask.current;
+    if (bt && Date.now() - bt.at < 15 * 60e3 && !(j && ["needs_you", "stuck"].includes(j.status)) && /^(keep going|continue|i'?m in|i'?m signed in|signed in|done|ok(ay)?|go( ahead)?|all set|got it|go on|try (it )?again)\b/.test(t)) {
+      blockedTask.current = null;
+      setBubble("Picking it back up…");
+      void runTask(bt.task, true);
+      return true;
+    }
+    if (jobActive(j) && /^(stop|cancel|pause|hold on|wait|quit it|stop the job)\b/.test(t)) {
+      void window.milo.jobStop();
+      return true;
+    }
+    if (j?.status === "needs_you" && /^(yes|yeah|yep|sure|go ahead|do it|ok(ay)?|submit it|send it|approved?)\b/.test(t)) {
+      setBubble("Going!");
+      void window.milo.jobResume(true);
+      return true;
+    }
+    if (/^(keep going|continue|resume|go on|carry on|pick (it |that )?(back )?up|finish (it|that|the job|what you were doing)|try again)\b/.test(t) && j && ["stopped", "paused", "stuck", "needs_you"].includes(j.status)) {
+      setBubble("Picking up where I left off…");
+      void window.milo.jobResume(false);
+      return true;
+    }
+    if (j && jobActive(j) && /^(what are you (doing|working on)|status|how'?s it going|where are you at)\b/.test(t)) {
+      const cur = j.steps.find((s) => s.status === "doing" || s.status === "retrying");
+      const n = j.steps.filter((s) => s.status === "done").length;
+      say(`${n} of ${j.steps.length} done. ${cur ? `Now: ${cur.do.split("\n")[0]}` : ""}`).then(() => setBubble(null));
+      return true;
+    }
+    return false;
+  };
 
   // ---- "Start my stats homework": the Game Plan ---------------------------------------------------
   // Finds the assignment (D2L), opens it, reads it, splits it into small steps (step 1 is tiny), coaches each step.
@@ -902,10 +998,50 @@ export default function App() {
   const [clock, setClock] = useState(() => Date.now());
   const radarBusy = useRef(false); // is now a bad moment to interrupt? (kept fresh every render, below)
   const ingest = (items: ScanItem[]) => setRadar(mergeScan(radarRef.current, items, Date.now()));
+  /** Read the calendar feed (if connected) into the radar. Resolves true if it worked. */
+  const scanFeed = async (): Promise<boolean> => {
+    if (!feed) return false;
+    const r = await window.milo.feedFetch(feed).catch(() => ({ ok: false, text: "" }));
+    if (!r.ok) {
+      bb("feed_scan", { ok: false, why: r.text.slice(0, 120) });
+      return false;
+    }
+    const items = parseIcs(r.text);
+    bb("feed_scan", { ok: true, items: items.length });
+    if (!portal) {
+      // no hidden D2L scan to bump the scan count: count this one
+      setRadar({ ...mergeScan(radarRef.current, items, Date.now()) });
+    } else ingest(items);
+    return true;
+  };
   const scanRadar = (after?: (ok: boolean) => void) => {
-    if (!portal) return after?.(false);
+    const fed = scanFeed();
+    if (!portal) {
+      void fed.then((ok) => (after ? after(ok) : ok && checkAlerts()));
+      return;
+    }
     radarAfter.current = after ?? null;
     setRadarScan(Date.now());
+  };
+  /** "Connect my calendar": take the feed link they just copied, or tell them where to find it. */
+  const connectFeed = async () => {
+    setMood("thinking");
+    const r = await window.milo.feedConnect();
+    if (!r.ok) {
+      const help = LMS[detectLms(portal)].feedHelp;
+      setMood("idle");
+      say(r.reason === "no_link" ? `Copy your calendar link first. ${help} Then say connect my calendar.` : `That link didn't work as a calendar feed. ${help}`).then(() => setBubble(null));
+      return;
+    }
+    localStorage.setItem("milo.feed", r.url);
+    setFeed(r.url);
+    const items = parseIcs(r.text);
+    setRadar(mergeScan(radarRef.current, items, Date.now()));
+    bb("feed_connected", { items: items.length, lms: detectLms(r.url) });
+    sfx.success();
+    setMood("happy");
+    const soon = items.filter((x) => x.due_iso && x.due_iso < new Date(Date.now() + 7 * 86400e3).toISOString().slice(0, 16)).length;
+    say(`Connected! I can see ${items.length} things on your calendar${soon ? `, ${soon} due this week` : ""}. I'll warn you before anything's due.`).then(() => setBubble(null));
   };
   const onRadarScan = (st: BriefState) => {
     setRadarScan(0);
@@ -959,7 +1095,7 @@ export default function App() {
   const askRadar = (days: number) => {
     // Fresh enough: answer instantly from what the radar already knows.
     if (radarRef.current.scans > 0 && Date.now() - radarRef.current.lastScan < 3 * 3600e3) return showRadarList(days);
-    if (!portal) {
+    if (!portal && !feed) {
       if (radarRef.current.items.length) return showRadarList(days); // a bit old, but better than nothing
       return startBrief(true); // walks them through adding D2L
     }
@@ -980,7 +1116,7 @@ export default function App() {
   };
   // Background scans: shortly after startup if the last one is old, then every 3 hours. Warnings checked every minute.
   useEffect(() => {
-    if (!portal) return;
+    if (!portal && !feed) return;
     const stale = () => Date.now() - radarRef.current.lastScan > 3 * 3600e3;
     const first = window.setTimeout(() => stale() && !radarScan && scanRadar(), 90e3);
     const every = window.setInterval(() => stale() && scanRadar(), 10 * 60e3);
@@ -991,7 +1127,7 @@ export default function App() {
       window.clearInterval(alerts);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [portal]);
+  }, [portal, feed]);
 
   // During setup Milo stands to the left of the card, so he can talk you through it.
   useEffect(() => {
@@ -1359,6 +1495,41 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rpSize, !!(researchQ || tool || quiz)]);
 
+  // ---- Exam-proof mode: a practice test like the real one, from what this class covered ----
+  const lastForecastCourse = useRef("");
+  const startExam = async (kind: string, course: string) => {
+    const now = Date.now();
+    const cls = course || upcoming(radarRef.current, now, 21).find((x) => /exam|quiz|midterm|final|test/i.test(`${x.kind} ${x.title}`))?.course || "";
+    if (!cls) {
+      say(`Which class? Say it like: make me a practice ${kind} for stats.`).then(() => setBubble(null));
+      return;
+    }
+    closeOthers();
+    setTool(null);
+    setQuiz(null);
+    hover(false);
+    setMood("thinking");
+    setBubble(`Writing your practice ${kind}…`);
+    const soon = upcoming(radarRef.current, now, 30)
+      .filter((x) => !course || x.course.toLowerCase().includes(course.toLowerCase()) || course.toLowerCase().includes(x.course.toLowerCase()))
+      .slice(0, 8)
+      .map((x) => `${x.title} (${x.kind}, due ${x.due})`)
+      .join("; ");
+    const r = await window.milo.exam({ course: cls, kind, extra: soon });
+    setBubble(null);
+    if (!r.ok || !r.questions.length) {
+      setMood("idle");
+      await say(r.ok ? "I couldn't write that one. Save some notes to the class first?" : r.text);
+      setBubble(null);
+      return;
+    }
+    bb("exam_made", { course: cls, kind, questions: r.questions.length });
+    setRpSize("half");
+    setMood("happy");
+    setQuiz({ id: Date.now(), topic: r.topic, questions: r.questions, focus: `practice ${kind}` });
+    say(`Here's your practice ${kind}. ${r.questions.length} questions, just like the real thing. No peeking at notes!`).then(() => setBubble(null));
+  };
+
   // ---- Quiz Mode --------------------------------------------------------------------
   const startQuiz = async (focus: string) => {
     closeOthers();
@@ -1524,6 +1695,51 @@ export default function App() {
         lockRef.current?.start(p.minutes ?? 25, p.topic);
         return;
       }
+    }
+    if (jobVoice(text)) return;
+    // Grade forecaster: "what do I need on the final for a B in stats?"
+    const fc = parseForecast(text);
+    if (fc) {
+      const course = fc.course || lastForecastCourse.current;
+      if (!course) {
+        say("Which class? Say it like: what do I need on the final for a B in stats.").then(() => setBubble(null));
+        return;
+      }
+      lastForecastCourse.current = course;
+      hush();
+      setMood("looking");
+      setBubble("Checking your grades…");
+      void window.milo.forecast({ course, letter: fc.letter, exam: fc.exam, portal }).then((r) => {
+        setMood(r.ok ? "happy" : "thinking");
+        say(r.text).then(() => setBubble(null));
+      });
+      return;
+    }
+    const fw = parseFinalWeight(text);
+    if (fw) {
+      const course = fw.course || lastForecastCourse.current;
+      void window.milo.finalWeight(course, fw.weight).then((ok) => say(ok ? `Got it, the ${fw.exam} is ${fw.weight} percent. Ask me again what you need.` : "Ask me what you need on the final first, then tell me what it's worth.").then(() => setBubble(null)));
+      return;
+    }
+    // Exam-proof mode: "make me a practice midterm for stats"
+    const ex = parseExam(text);
+    if (ex) {
+      void startExam(ex.kind, ex.course);
+      return;
+    }
+    // "connect my calendar": any school's calendar feed into the deadline radar
+    if (/^(?:hey milo,?\s*)?(?:connect|add|link|hook up|set up)\s+(?:my\s+)?(?:school\s+|class\s+|canvas\s+|d2l\s+|blackboard\s+|moodle\s+)?(?:calendar|calendar feed|feed|deadlines)\b/i.test(text.trim())) {
+      void connectFeed();
+      return;
+    }
+    // "my student ID is 1234567": saved on this Mac, filled into forms for you
+    const fact = parseProfileFact(text);
+    if (fact) {
+      void window.milo.profileSet({ [fact.key]: fact.value });
+      bb("profile_saved", { key: fact.key });
+      setMood("happy");
+      say(`Got it, I'll remember your ${profileLabel(fact.key).toLowerCase()} and fill it in for you.`).then(() => setBubble(null));
+      return;
     }
     // "Update Milo" / "restart to update"
     if (updateReady && /^(update( yourself| milo)?|restart( to update| and update)?|install( the)? update|get the update)$/.test(text.toLowerCase().replace(/[.!?]+$/, "").trim())) {
@@ -1699,7 +1915,7 @@ export default function App() {
         setBubble(null);
         return;
       case "task":
-        runTask(intent.task, spoken);
+        void work(intent.task, spoken);
         return;
       case "research":
         startResearch(intent.question, spoken);
@@ -1800,7 +2016,7 @@ export default function App() {
         return;
       case "task":
         if (local.kind === "chain") runChain(local.steps, spoken);
-        else runTask(text, spoken);
+        else void work(text, spoken);
         return;
       case "look": {
         const m = rt.mode ?? "teach";
@@ -2458,7 +2674,7 @@ export default function App() {
   useEffect(() => {
     bb("app_boot", { boot: bootId.current }); // every time Milo's screen starts fresh (helps catch surprise reloads)
   }, []);
-  testSnap.current = { radar: radarView ? { mode: radarView.mode, rows: radarView.rows.length } : null, plan: gp ? { title: gp.plan.title, steps: gp.plan.steps.length, done: gp.done.length } : null, speaking, bubble, heard, pending: pending?.text ?? null, chatOpen, ringOpen, kitApp, lockOn, research: !!researchQ, tool: !!tool, quiz: !!quiz, notebook: !!box, mood, pos, name };
+  testSnap.current = { job: job ? { status: job.status, steps: job.steps.length, done: job.steps.filter((x) => x.status === "done").length } : null, radar: radarView ? { mode: radarView.mode, rows: radarView.rows.length } : null, plan: gp ? { title: gp.plan.title, steps: gp.plan.steps.length, done: gp.done.length } : null, speaking, bubble, heard, pending: pending?.text ?? null, chatOpen, ringOpen, kitApp, lockOn, research: !!researchQ, tool: !!tool, quiz: !!quiz, notebook: !!box, mood, pos, name };
   useEffect(() => {
     if (!location.protocol.startsWith("http")) return; // dev server only, never in the packaged app
     (window as unknown as { __milo: unknown }).__milo = {
@@ -2874,6 +3090,20 @@ export default function App() {
           say={(t) => void say(t).then(() => setBubble(null))}
           hover={hover}
           shifted={signIn}
+        />
+      )}
+      {job && (
+        <JobCard
+          job={job}
+          style={{ right: 18, top: updateReady ? 56 : 14, width: 330, maxHeight: H - 40 }}
+          hover={hover}
+          onStop={() => void window.milo.jobStop()}
+          onResume={() => void window.milo.jobResume(false)}
+          onApprove={() => void window.milo.jobResume(true)}
+          onClose={() => {
+            setJob(null);
+            hover(false);
+          }}
         />
       )}
       {radarScan > 0 && portal && <BriefLoader key={`radar-${radarScan}`} url={portal} onResult={onRadarScan} />}

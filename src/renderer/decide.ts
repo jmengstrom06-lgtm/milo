@@ -163,3 +163,30 @@ export function parseRadar(raw: string, cardOpen: boolean): { do: "list"; days: 
   const days = /\btoday|tonight\b/.test(t) ? 0 : /\btomorrow\b/.test(t) ? 1 : /\bnext week\b/.test(t) ? 14 : /\b(this week|week)\b/.test(t) ? 7 : Infinity;
   return { do: "list", days };
 }
+
+// ---------- grade forecaster + exam-proof mode ----------
+const letterize = (t: string) => t.replace(/\b([abcd])\s+plus\b/gi, "$1+").replace(/\b([abcd])\s+minus\b/gi, "$1-");
+/** "what do I need on the final for a B in stats" -> { exam: "final", letter: "B", course: "stats" } */
+export function parseForecast(text: string): { exam: string; letter: string; course: string } | null {
+  const t = letterize(text.trim().replace(/[?.!]+$/, "").replace(/^(hey )?milo,?\s*/i, ""));
+  const m = t.match(
+    /^what(?:'s| is)?\s+(?:do|would|will|should)?\s*i\s+(?:need|have)\s+(?:to\s+(?:get|score|make)\s+)?(?:on|in)\s+(?:the\s+|my\s+)?(final(?:\s+exam)?|midterm|exam|test)(?:\s+in\s+(?:my\s+)?(.+?))?\s+(?:to\s+(?:get|end\s+(?:up\s+)?with|keep|pass\s+with)|for)\s+(?:an?\s+)?([abcd][+-]?)(?:\s+in\s+(?:my\s+)?(.+?))?(?:\s+class)?$/i
+  );
+  if (!m) return null;
+  return { exam: m[1].toLowerCase().replace(/\s+exam$/, ""), letter: m[3].toUpperCase(), course: (m[4] || m[2] || "").replace(/\s+class$/i, "").trim() };
+}
+/** "the final is worth 25 percent in stats" */
+export function parseFinalWeight(text: string): { exam: string; weight: number; course: string } | null {
+  const t = text.trim().replace(/[?.!]+$/, "");
+  const m = t.match(/^(?:the |my )?(final|midterm)(?: exam)?(?: in (?:my )?(.+?))? (?:is|'s) (?:worth )?(\d+(?:\.\d+)?)\s*(?:%|percent)(?: (?:of|in) (?:my |the )?(.+?))?(?: grade)?$/i);
+  if (!m) return null;
+  const course = (m[4] || m[2] || "").replace(/^(the )?(grade|final grade|overall grade)$/i, "").trim();
+  return { exam: m[1].toLowerCase(), weight: +m[3], course };
+}
+/** "make me a practice midterm for stats" -> { kind: "midterm", course: "stats" } */
+export function parseExam(text: string): { kind: string; course: string } | null {
+  const t = text.trim().replace(/[?.!]+$/, "").replace(/^(hey )?milo,?\s*/i, "");
+  const m = t.match(/^(?:can you\s+)?(?:make|give|build|create|write|quiz)(?: me)? (?:a |an )?(?:practice|mock|sample|fake|real looking) (exam|test|midterm|final)(?: exam)?(?: (?:for|in|on|from) (?:my )?(.+?))?(?: class)?$/i);
+  if (!m) return null;
+  return { kind: m[1].toLowerCase(), course: (m[2] || "").trim() };
+}

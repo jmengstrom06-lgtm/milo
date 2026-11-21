@@ -24,9 +24,17 @@ import { runWebTask } from "./webagent";
 import { registerKit } from "./kitipc";
 import { registerLibrary } from "./library";
 import { quitAfterTest, runSelfTest, selfTestOn } from "./selftest";
+import { jobBenchOn, quitAfterBench, runJobBench } from "./jobbench";
 import { makeGamePlan } from "./homework";
 import { startSync } from "./sync";
 import { startUpdates } from "./updater";
+import { isJob, lastJob, resumable, resumeJob, startJob, type JobDeps } from "./jobs";
+import { getProfile, setProfile, type Profile } from "./profile";
+import { usageToday } from "./usage";
+import { feedUrl } from "./school";
+import { checkMath, isQuantitative, type MathVerdict } from "./mathcheck";
+import { askForecast, setFinalWeight } from "./grades";
+import { makeExam } from "./exam";
 import { transcribe } from "./ears";
 import { binaryPath, stopNative } from "./native";
 import { account, onAccountChange, sendCode, signOut, startCallbackServer, userId, verifyCode } from "./account";
@@ -224,11 +232,23 @@ ipcMain.handle("milo:look", async (_e, mode: Mode, request: string, focus: Box |
     cursor.x >= bounds.x && cursor.x <= bounds.x + bounds.width && cursor.y >= bounds.y && cursor.y <= bounds.y + bounds.height;
   const pointer = onScreen ? { x: (cursor.x - bounds.x) * pxPerPtSmall, y: (cursor.y - bounds.y) * pxPerPtSmall } : undefined;
 
-  const lesson = await teachFromScreen(small.b64, small.size, mode, request, {
+  let lesson = await teachFromScreen(small.b64, small.size, mode, request, {
     pointer,
     focus: focus ? toPx(focus) : undefined,
   });
   if (!lesson.ok) return lesson;
+  // Math and science checker: work the answer out in code before saying it. Wrong? Redo it with the computed value.
+  const L = lesson.data;
+  if (L.found && L.answer && isQuantitative(`${L.topic} ${L.steps.map((s) => s.write).join(" ")}`, L.answer)) {
+    const v = await checkMath(`${L.topic}. ${L.steps.map((s) => `${s.say} ${s.write}`).join(" ")}`, L.answer, small.b64).catch(() => ({ checked: false, agree: true }) as MathVerdict);
+    if (v.checked && !v.agree && v.computed) {
+      const redo = await teachFromScreen(small.b64, small.size, mode, `${request}\n(A calculator check of this problem computed ${v.computed.join(", ")} for the final answer, which doesn't match "${L.answer}". Re-work it carefully. If the calculator is right, fix your steps and answer.)`, {
+        pointer,
+        focus: focus ? toPx(focus) : undefined,
+      });
+      if (redo.ok && redo.data.found) lesson = redo;
+    }
+  }
 
   const t = lesson.data.target;
   const box = lesson.data.found && t ? toPt(t) : null;
@@ -294,7 +314,85 @@ ipcMain.on("milo:task-stop", () => {
   taskAbort = true;
 });
 
-ipcMain.handle("milo:task", async (_e, task: string) => {
+ipcMain.handle("milo:task", (_e, task: string) => doTask(String(task ?? "")));
+
+// ---------- jobs: long tasks that finish (jobs.ts) ----------
+let jobAbort = false;
+const jobDeps: JobDeps = {
+  doTask: (t) => doTask(t),
+  // What's on screen now. shot:false = just read the page (fast, free); shot:true = also a screenshot.
+  look: async (opts = {}) => {
+    const front = await frontApp().catch(() => "");
+    type El = { label?: string; value?: string; checked?: boolean; tag?: string };
+    let page: { text?: string; url?: string; title?: string; canvasHeavy?: boolean; elements?: El[] } | null = null;
+    if (bridgeConnected() && /Google Chrome/i.test(front)) page = await ext("snapshot", {}, 8000).catch(() => null);
+    const readable = page && !page.canvasHeavy && page.text;
+    let jpeg: string | undefined;
+    if (opts.shot || !readable) {
+      const cap = await captureScreen();
+      jpeg = cap.ok ? toJpeg(cap.shot.full, 1400).b64 : undefined;
+    }
+    const fields = (page?.elements ?? []).filter((e) => e.label && (e.value !== undefined || e.checked !== undefined)).map((e) => ({ label: e.label!, value: e.value, checked: e.checked }));
+    return { jpeg, pageText: readable ? page!.text : undefined, url: page?.url, title: page?.title, fields };
+  },
+  emit: (job) => overlay?.webContents.send("milo:job", job),
+  aborted: () => jobAbort || taskAbort,
+  resetAbort: () => (jobAbort = false),
+};
+export const jobs = {
+  start: (goal: string, opts: { approved?: boolean } = {}) => startJob(goal, jobDeps, opts),
+  resume: (approve = false) => resumeJob(null, jobDeps, { approve }),
+  stop: () => {
+    jobAbort = true;
+    taskAbort = true;
+  },
+};
+ipcMain.handle("milo:job-start", (_e, goal: string, opts?: { approved?: boolean }) => jobs.start(String(goal ?? ""), { approved: !!opts?.approved }));
+ipcMain.handle("milo:job-resume", (_e, approve?: boolean) => jobs.resume(!!approve));
+ipcMain.handle("milo:job-stop", () => jobs.stop());
+ipcMain.handle("milo:job-last", () => resumable() ?? lastJob());
+ipcMain.handle("milo:job-is", (_e, text: string) => isJob(String(text ?? "")));
+// The student's saved details (filled into forms for them) and today's AI spend.
+ipcMain.handle("milo:profile-get", () => getProfile());
+ipcMain.handle("milo:profile-set", (_e, patch: Profile) => setProfile(patch ?? {}));
+ipcMain.handle("milo:usage", () => usageToday());
+// Calendar feeds (any LMS): fetched here, not in the page, so no browser blocks it.
+async function fetchFeed(url: string) {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(15000), headers: { accept: "text/calendar, */*" } });
+    const text = await res.text();
+    if (!res.ok || !/BEGIN:VCALENDAR/.test(text)) return { ok: false as const, text: res.ok ? "That link isn't a calendar feed." : `The feed said ${res.status}.` };
+    return { ok: true as const, text };
+  } catch (e) {
+    return { ok: false as const, text: (e as Error).message };
+  }
+}
+ipcMain.handle("milo:feed-fetch", (_e, url: string) => fetchFeed(String(url ?? "")));
+// Grade forecaster: "what do I need on the final for a B in stats?"
+ipcMain.handle("milo:forecast", (_e, q: { course: string; letter: string; exam?: string; portal?: string; fresh?: boolean }) =>
+  askForecast(q, {
+    doTask: (t) => doTask(t),
+    pageText: async () => (bridgeConnected() ? ((await ext("snapshot", {}, 8000).catch(() => null)) as { text?: string } | null)?.text ?? null : null),
+  })
+);
+ipcMain.handle("milo:final-weight", (_e, course: string, weight: number) => setFinalWeight(String(course), Number(weight)));
+// Exam-proof mode: a practice test like the real one, from what this class covered.
+ipcMain.handle("milo:exam", async (_e, q: { course: string; kind?: string; extra?: string }) => {
+  const r = await makeExam(String(q?.course ?? ""), String(q?.kind ?? "exam"), String(q?.extra ?? ""));
+  if (!r.ok) return { ok: false, text: r.text };
+  return { ok: true, topic: r.data.topic, questions: (r.data.questions ?? []).filter((x) => x?.q && Array.isArray(x.choices) && x.choices.length === 4) };
+});
+/** "Connect my calendar": take the feed link the student just copied. */
+ipcMain.handle("milo:feed-connect", async (_e, given?: string) => {
+  const raw = String(given || clipboard.readText() || "").trim();
+  const url = feedUrl(raw);
+  if (!url) return { ok: false as const, reason: "no_link" as const };
+  const r = await fetchFeed(url);
+  return r.ok ? { ok: true as const, url, text: r.text } : { ok: false as const, reason: "bad_feed" as const, text: r.text };
+});
+/** One computer task, start to finish (instant commands, then the web helper, then screen mode).
+ *  The job engine (jobs.ts) calls this for each step of a long task. */
+async function doTask(task: string) {
   if (taskRunning) {
     // A new command replaces the old one (like a person would): stop it, then do this.
     taskAbort = true;
@@ -410,7 +508,9 @@ ipcMain.handle("milo:task", async (_e, task: string) => {
         () => taskAbort,
         pressKeys
       );
-      if (w.status === "done" || w.status === "ask" || w.status === "stopped") return { ok: true, status: w.status, text: w.text };
+      if (w.status === "done" || w.status === "ask" || w.status === "stopped") return { ok: true, status: w.status, text: w.text, replayed: "replayed" in w ? !!w.replayed : false };
+      // a sign-in, 2-step code or "are you human" check: the student's part
+      if (w.status === "blocked") return { ok: true, status: "blocked", text: w.text };
       if (w.status === "error") return { ok: false, text: w.text };
       bb("task", "web_mode_handoff_to_screen", { why: w.text });
     }
@@ -533,7 +633,7 @@ ipcMain.handle("milo:task", async (_e, task: string) => {
     overlay?.setFocusable(true);
     globalShortcut.unregister("Escape");
   }
-});
+}
 
 // ---------- worksheet sweep -------------------------------------------------------------
 ipcMain.handle("milo:sweep-plan", async (_e, skip: string[]) => {
@@ -939,6 +1039,14 @@ app.whenReady().then(() => {
     const win = overlay;
     win.webContents.setAudioMuted(true);
     win.webContents.once("did-finish-load", () => void runSelfTest(win).finally(quitAfterTest));
+  }
+  // `npm run test:jobs`: the long-task bench (fake site, real jobs, scored).
+  if (jobBenchOn() && overlay) {
+    const win = overlay;
+    win.webContents.setAudioMuted(true);
+    win.webContents.once("did-finish-load", () =>
+      void runJobBench({ start: jobs.start, resume: jobs.resume, stop: jobs.stop, connected: bridgeConnected }).finally(quitAfterBench)
+    );
   }
   // Ready for an emailed sign-in link even if Milo restarted after sending it.
   void startCallbackServer();
