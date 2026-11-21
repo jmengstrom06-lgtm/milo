@@ -14,7 +14,7 @@ import { setSounds, sfx, soundsOn } from "./sfx";
 import ToolPanel, { SavedTool, loadTools, saveTools } from "./ToolPanel";
 import QuizPanel, { QuizHandle } from "./QuizPanel";
 import { BriefCard, BriefLoader, BriefState, SignInPanel } from "./Brief";
-import { fastDecide, parseExam, parseFinalWeight, parseForecast, parseGradeNow, parseScore, parseSyllabus, parseHomework, parsePlanVoice, parseRadar, stripFiller, type DecideState } from "./decide";
+import { fastDecide, looksLikeBackground, parseExam, parseFinalWeight, parseForecast, parseGradeNow, parseScore, parseSyllabus, parseHomework, parsePlanVoice, parseRadar, stripFiller, type DecideState } from "./decide";
 import { alertLine, emptyRadar, markWarned, mergeScan, pendingAlerts, upcoming, whenText, type Radar, type RadarItem, type ScanItem, type Warn } from "./radar";
 import RadarCard, { type RadarView } from "./RadarCard";
 import Onboarding, { setupDone } from "./Onboarding";
@@ -1680,8 +1680,8 @@ export default function App() {
     lastCommand: lastCommand.current || undefined,
   });
   routeRef.current = (raw: string, spoken = true) => {
-    // Filler ("uh", "cool", "okay") never decides anything.
-    const text = stripFiller(raw);
+    // Filler ("uh", "cool", "okay") never decides anything. Curly quotes from speech-to-text become plain ones.
+    const text = stripFiller(raw.replace(/[’‘]/g, "'").replace(/[“”]/g, '"'));
     const dstate: DecideState = { kitOpen: (kitApp as DecideState["kitOpen"]) ?? null, researchOpen: !!researchQ, toolOpen: !!tool, lessonOpen: !!lessonRef.current, hasLastAnswer: !!lastAnswer() };
     if (fastDecide(text, dstate)?.do === "flag") return flagNow(text);
 
@@ -1761,7 +1761,12 @@ export default function App() {
     const gn = parseGradeNow(text);
     if (gn) {
       lastForecastCourse.current = gn.course;
-      void window.milo.gradeNow(gn.course, portal).then((r) => say(r.text).then(() => setBubble(null)));
+      void window.milo.gradeNow(gn.course, portal).then((r) =>
+        say(r.text).then(() => {
+          setBubble(null);
+          if (r.signin) startBrief(true); // opens the D2L sign-in
+        })
+      );
       return;
     }
     const fw = parseFinalWeight(text);
@@ -1985,7 +1990,9 @@ export default function App() {
         startQuiz(intent.focus);
         return;
       case "brief":
-        startBrief(spoken);
+        // "what's due…" is a radar question: answered instantly from D2L's data, not the slow page read
+        if (/\b(due|deadline|homework|assignment|coming up)\b/i.test(text)) askRadar(/\btoday\b/i.test(text) ? 0 : /\btomorrow\b/i.test(text) ? 1 : /\bweek\b/i.test(text) ? 7 : 14);
+        else startBrief(spoken);
         return;
       case "chain":
         runChain(intent.steps, spoken);
@@ -2134,7 +2141,9 @@ export default function App() {
         startQuiz(text);
         return;
       case "brief":
-        startBrief(spoken);
+        // "what's due…" is a radar question: answered instantly from D2L's data, not the slow page read
+        if (/\b(due|deadline|homework|assignment|coming up)\b/i.test(text)) askRadar(/\btoday\b/i.test(text) ? 0 : /\btomorrow\b/i.test(text) ? 1 : /\bweek\b/i.test(text) ? 7 : 14);
+        else startBrief(spoken);
         return;
       case "watch":
         setWatch(rt.on ?? true);
@@ -2320,8 +2329,16 @@ export default function App() {
         }
         return;
       }
-      let text = r.text;
+      let text = r.text.replace(/[’‘]/g, "'").replace(/[“”]/g, '"'); // "What’s" -> "What's" so every command matches
       const addressed = stripWake(r.text, true).woke;
+      // Only listening because he just spoke, and it sounds like room chatter, not you: let it go.
+      if (direct && !pushToTalk && !forced && !pendingRef.current && !addressed && looksLikeBackground(text)) {
+        bb("ignored_background", { text: text.slice(0, 120) });
+        followUntil.current = 0;
+        setMood((m) => (m === "thinking" || m === "listening" ? "idle" : m));
+        setEarState(e.mode === "off" ? "off" : "waiting");
+        return;
+      }
       bb("heard", { text, direct, addressed, pushToTalk, forced, followWindow: Date.now() < followUntil.current, cardUp: !!pendingRef.current }); // you said "Milo" again: that's a NEW command, not more of the last one
       // Did Milo just hear HIMSELF? (Speakers leaking into the mic right after an "interruption".)
       if (Date.now() - e.bargedAt < 20000 && isEcho(text, lastSaid.current)) {

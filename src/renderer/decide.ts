@@ -170,7 +170,7 @@ const letterize = (t: string) => t.replace(/\b([abcd])\s+plus\b/gi, "$1+").repla
 export function parseForecast(text: string): { exam: string; letter: string; course: string } | null {
   const t = letterize(text.trim().replace(/[?.!]+$/, "").replace(/^(hey )?milo,?\s*/i, ""));
   const m = t.match(
-    /^what(?:'s| is)?\s+(?:do|would|will|should)?\s*i\s+(?:need|have)\s+(?:to\s+(?:get|score|make)\s+)?(?:on|in)\s+(?:the\s+|my\s+)?(final(?:\s+exam)?|midterm|exam|test)(?:\s+in\s+(?:my\s+)?(.+?))?\s+(?:to\s+(?:get|end\s+(?:up\s+)?with|keep|pass\s+with)|for)\s+(?:an?\s+)?([abcd][+-]?)(?:\s+in\s+(?:my\s+)?(.+?))?(?:\s+class)?$/i
+    /^what(?:'s| is)?\s+(?:do|would|will|should)?\s*i\s+(?:need|have)\s+(?:to\s+(?:get|score|make)\s+)?(?:on|in)\s+(?:the\s+|my\s+)?(final(?:\s+exam)?|midterm(?:\s+\d+)?|exam(?:\s+\d+)?|test(?:\s+\d+)?|quiz\s+\d+)(?:\s+in\s+(?:my\s+)?(.+?))?\s+(?:to\s+(?:get|end\s+(?:up\s+)?with|keep|pass\s+with)|for)\s+(?:an?\s+)?([abcd][+-]?)(?:\s+in\s+(?:my\s+)?(.+?))?(?:\s+class)?$/i
   );
   if (!m) return null;
   return { exam: m[1].toLowerCase().replace(/\s+exam$/, ""), letter: m[3].toUpperCase(), course: (m[4] || m[2] || "").replace(/\s+class$/i, "").trim() };
@@ -212,9 +212,36 @@ export function parseSyllabus(text: string): { course: string } | null {
   if (!m) return null;
   return { course: (m[2] || m[1] || "").trim() };
 }
-/** "what's my grade in stats" */
+/** "what's my grade in stats", "check what my grade is in stats", "what's my graded stats" (misheard), "how am I doing in econ", "my stats grade" */
 export function parseGradeNow(text: string): { course: string } | null {
-  const t = text.trim().replace(/[.!?]+$/, "").replace(/^(hey )?milo,?\s*/i, "");
-  const m = t.match(/^(?:what(?:'s| is)|how(?:'s| is))\s+my\s+(?:current\s+|overall\s+)?grade\s+(?:in|for)\s+(?:my\s+)?(.+?)(?:\s+class)?(?:\s+right now)?$/i);
-  return m ? { course: m[1].trim() } : null;
+  const t = text.trim().replace(/[.!?]+$/, "").replace(/^(hey |ok |okay |no,? )?(milo,?\s*)?/i, "").replace(/[’‘]/g, "'");
+  // speech-to-text mishearings of "grade in": "GradenStat", "grade and stats", "great in stats"
+  const low = t
+    .toLowerCase()
+    .replace(/\bgrad(?:e)?n\s*(?=[a-z])/g, "grade in ")
+    .replace(/\b(grade|great)\s+(?:and|an|on|n)\s+(?=[a-z])/g, "grade in ")
+    .replace(/\bgreat in\b/g, "grade in");
+  if (/\b(need|have to get|to get an?|for an? [abcd])\b/.test(low)) return null; // that's the forecaster
+  const asking = /\b(what|what's|whats|check|tell|show|how|how's|give|pull up|look up|see|know)\b/.test(low);
+  if (!asking) return null;
+  const clean = (c: string) => c.replace(/\b(class|course|right now|currently|now|at the moment|so far|this semester|is|at)\b/gi, " ").replace(/\s+/g, " ").trim();
+  let m = low.match(/\bgrade(?:s)?\b(?:\s+is)?\s+(?:in|for)\s+(?:my\s+|the\s+)?([a-z][a-z0-9 &'-]*)$/);
+  if (!m) m = low.match(/\bgraded\s+(?:in\s+)?([a-z][a-z0-9 &'-]*)$/); // "what's my graded stats" (misheard "grade in")
+  if (!m) m = low.match(/\bmy\s+([a-z][a-z0-9 &'-]*?)\s+grade\b/);
+  if (!m) m = low.match(/\bhow\s+(?:am i|i'?m)\s+doing\s+in\s+(?:my\s+)?([a-z][a-z0-9 &'-]*)$/);
+  if (!m) return null;
+  const course = clean(m[1]);
+  return course && course.split(" ").length <= 5 ? { course } : null;
+}
+
+/** In the few seconds after Milo talks he listens without "Milo". Room chatter caught then ("Mike, we're
+ *  gonna go to Lowe's. For what?") shouldn't be treated as a command. */
+export function looksLikeBackground(text: string): boolean {
+  const t = text.trim();
+  const words = t.split(/\s+/).filter(Boolean).length;
+  const sentences = (t.match(/[.!?](\s|$)/g) ?? []).length;
+  const toMilo = /^(?:hey\s+)?(?:milo\b|what|how|why|when|where|who|which|can|could|would|will|is|are|do|does|did|should|open|close|quit|make|help|start|stop|pause|show|tell|give|read|check|remember|set|add|put|find|search|write|explain|solve|go|play|turn|save|keep going|continue|yes|yeah|yep|no|nope|okay|ok|sure|thanks|thank you|i need|i want|i got|my|please|let'?s|switch|undo|cancel)\b/i.test(t);
+  if (toMilo) return false;
+  if (/\b(milo|mylo)\b/i.test(t)) return false;
+  return (words >= 9 && sentences >= 2) || /^(?:[A-Z][a-z]+),\s/.test(t); // several sentences of chatter, or talking to someone by name ("Mike, ...")
 }

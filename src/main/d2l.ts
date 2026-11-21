@@ -5,7 +5,7 @@
 // Mapped from TCU's D2L (tcu.brightspace.com), but these are standard Brightspace addresses, so it works
 // at any D2L school.
 
-import { session } from "electron";
+import { BrowserWindow } from "electron";
 import { log as bb } from "./blackbox";
 import type { GradeSheet } from "./gradeMath";
 import type { Assignment } from "./school";
@@ -17,27 +17,69 @@ const PARTITION = "persist:milo-research"; // where the student signed in to D2L
 export type Course = { id: number; name: string; short: string; code: string; subject: string };
 
 // ---------- plumbing ----------
+// D2L only answers its data feed from inside one of its own pages (a plain request gets 403), so Milo keeps
+// one hidden D2L page open in his signed-in session and asks from there.
 let origin: string | null = null;
-/** "https://d2l.tcu.edu" redirects to "https://tcu.brightspace.com": find the real home once. */
-async function base(portal: string): Promise<string> {
-  if (origin) return origin;
-  const start = new URL(/^https?:\/\//.test(portal) ? portal : `https://${portal}`).origin;
-  try {
-    const r = await session.fromPartition(PARTITION).fetch(`${start}/d2l/api/versions/`, { redirect: "follow" });
-    origin = new URL(r.url).origin;
-  } catch {
-    origin = start;
-  }
-  return origin;
-}
+let page: BrowserWindow | null = null;
+let pageAt = 0;
 export class SignInNeeded extends Error {}
+
+/** The sign-in bounces through several pages (school login, then back to D2L). Wait until it has
+ *  really landed on a D2L page and stopped loading. */
+async function settle(w: BrowserWindow, ms = 20000): Promise<string> {
+  const t0 = Date.now();
+  let last = "";
+  let still = 0;
+  while (Date.now() - t0 < ms) {
+    const url = w.webContents.getURL();
+    const landed = /\/d2l\/(home|lp\/homepage|le\/)/.test(url) && !w.webContents.isLoading();
+    still = url === last && !w.webContents.isLoading() ? still + 1 : 0;
+    last = url;
+    if (landed && still >= 2) return url;
+    if (still >= 6 && !w.webContents.isLoading()) return url; // stopped somewhere else (a login page)
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  return w.webContents.getURL();
+}
+const feedStatus = async (w: BrowserWindow) =>
+  (await w.webContents.executeJavaScript(`fetch("/d2l/api/lp/${LP}/users/whoami", { headers: { Accept: "application/json" }, credentials: "include" }).then((r) => r.status).catch(() => 0)`, true)) as number;
+
+async function d2lPage(portal: string): Promise<BrowserWindow> {
+  if (page && !page.isDestroyed() && Date.now() - pageAt < 30 * 60e3) return page;
+  if (page && !page.isDestroyed()) page.destroy();
+  const start = new URL(/^https?:\/\//.test(portal) ? portal : `https://${portal}`).origin;
+  page = new BrowserWindow({ show: false, width: 1000, height: 700, webPreferences: { partition: PARTITION, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
+  page.webContents.setAudioMuted(true);
+  page.loadURL(`${start}/d2l/home`).catch(() => {});
+  const url = await settle(page);
+  pageAt = Date.now();
+  const status = /\/d2l\//.test(url) ? await feedStatus(page) : 0;
+  const title = page.webContents.getTitle().slice(0, 60);
+  bb("d2l", "page", { host: new URL(url || start).host, path: new URL(url || start).pathname.slice(0, 40), title, whoami: status });
+  if (status !== 200) {
+    page.destroy();
+    page = null;
+    // a login page (or the school's sign-in) = not signed in inside Milo; anything else = D2L is having a moment
+    if (status === 401 || status === 403 || !/\/d2l\/(home|lp\/homepage|le\/)/.test(url)) throw new SignInNeeded("Sign in to D2L in Milo first.");
+    throw new Error(`D2L's data feed answered ${status} at ${new URL(url).host}`);
+  }
+  origin = new URL(url).origin;
+  return page;
+}
+
 async function api<T>(portal: string, path: string): Promise<T> {
-  const url = `${await base(portal)}${path}`;
-  const r = await session.fromPartition(PARTITION).fetch(url, { headers: { accept: "application/json" }, redirect: "follow" });
-  const type = r.headers.get("content-type") ?? "";
-  if (r.status === 401 || r.status === 403 || !type.includes("json")) throw new SignInNeeded("Sign in to D2L in Milo first.");
-  if (!r.ok) throw new Error(`D2L said ${r.status} for ${path}`);
-  return (await r.json()) as T;
+  const w = await d2lPage(portal);
+  const r = (await w.webContents.executeJavaScript(
+    `fetch(${JSON.stringify(path)}, { headers: { Accept: "application/json" }, credentials: "include" }).then(async (r) => ({ s: r.status, t: r.headers.get("content-type") || "", b: await r.text() }))`,
+    true
+  )) as { s: number; t: string; b: string };
+  if (r.s !== 200 || !r.t.includes("json")) bb("d2l", "api_miss", { path: path.split("?")[0], status: r.s, type: r.t.slice(0, 40) });
+  if (r.s === 401 || r.s === 403 || !r.t.includes("json")) {
+    pageAt = 0; // session may have expired: reopen (and re-check sign-in) next time
+    throw new SignInNeeded("Sign in to D2L in Milo first.");
+  }
+  if (r.s !== 200) throw new Error(`D2L said ${r.s} for ${path}`);
+  return JSON.parse(r.b) as T;
 }
 
 // ---------- names ----------

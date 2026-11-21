@@ -401,9 +401,11 @@ ipcMain.handle("milo:grade-now", async (_e, course: string, portal?: string) => 
     try {
       const c = d2lMatch(String(course), await d2lCourses(portal));
       const d = c ? await d2lSheet(portal, c) : null;
+      bb("d2l", "grade_now", { course, matched: c?.short ?? null, current: d?.sheet.current_percent ?? null });
       if (d?.sheet.current_percent != null) return { ok: true, text: `You've got a ${d.sheet.current_percent}% in ${d.sheet.course} right now.` };
-    } catch {
-      /* fall back to Milo's gradebook */
+    } catch (e) {
+      bb("d2l", "grade_now_failed", { error: (e as Error).message, signin: e instanceof SignInNeeded });
+      if (e instanceof SignInNeeded) return { ok: false, signin: true, text: "I need you to sign in to D2L inside me once. I'll open it, then ask me again." };
     }
   }
   return gradeNow(String(course));
