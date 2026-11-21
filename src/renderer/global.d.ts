@@ -170,6 +170,7 @@ declare global {
       finalWeight: (course: string, weight: number) => Promise<boolean>;
       gradeScore: (q: { course: string; name: string; earned: number; possible?: number }) => Promise<{ ok: boolean; text: string }>;
       gradeNow: (course: string, portal?: string) => Promise<{ ok: boolean; text: string; signin?: boolean }>;
+      startupCheck: (portal?: string) => Promise<{ problems: { kind: string; text: string }[] }>;
       d2lDue: (portal: string) => Promise<{ ok: true; items: { title: string; course: string; due: string; due_iso?: string; kind?: string }[] } | { ok: false; signin: boolean; text: string }>;
       syllabus: (course: string) => Promise<{ ok: boolean; text: string }>;
       exam: (q: { course: string; kind?: string; extra?: string }) => Promise<{ ok: true; topic: string; questions: { q: string; choices: string[]; correct: number; explain: string }[] } | { ok: false; text: string }>;

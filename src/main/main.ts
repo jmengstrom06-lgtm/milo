@@ -35,7 +35,7 @@ import { feedUrl } from "./school";
 import { checkMath, isQuantitative, type MathVerdict } from "./mathcheck";
 import { askForecast, setFinalWeight } from "./grades";
 import { addScore, gradeNow, readSyllabus } from "./gradebook";
-import { courses as d2lCourses, dueSoon as d2lDue, gradeSheet as d2lSheet, matchCourse as d2lMatch, SignInNeeded } from "./d2l";
+import { d2lCheck, courses as d2lCourses, dueSoon as d2lDue, gradeSheet as d2lSheet, matchCourse as d2lMatch, SignInNeeded } from "./d2l";
 import { makeExam } from "./exam";
 import { transcribe } from "./ears";
 import { binaryPath, stopNative } from "./native";
@@ -928,6 +928,23 @@ ipcMain.handle("milo:perms", () => {
     screen: systemPreferences.getMediaAccessStatus("screen") === "granted",
     hands: systemPreferences.isTrustedAccessibilityClient(false),
   };
+});
+/** At startup: is everything Milo needs actually working? Problems are said up front, not mid-question. */
+ipcMain.handle("milo:startup-check", async (_e, portal?: string) => {
+  if (selfTestOn() || jobBenchOn()) return { problems: [] };
+  const problems: { kind: string; text: string }[] = [];
+  if (process.platform === "darwin") {
+    const who = app.isPackaged ? "Milo" : "Terminal";
+    if (systemPreferences.getMediaAccessStatus("screen") !== "granted") problems.push({ kind: "screen", text: `I can't see your screen. In System Settings, Privacy and Security, Screen Recording, turn on ${who}, then restart me.` });
+    if (!systemPreferences.isTrustedAccessibilityClient(false)) problems.push({ kind: "hands", text: `I can't click or type for you. In System Settings, Privacy and Security, Accessibility, turn on ${who}.` });
+    if (systemPreferences.getMediaAccessStatus("microphone") !== "granted") problems.push({ kind: "mic", text: `I can't hear you. In System Settings, Privacy and Security, Microphone, turn on ${who}.` });
+  }
+  if (portal) {
+    const c = await d2lCheck(String(portal)).catch(() => ({ ok: false, signin: false, text: "" }));
+    if (!c.ok && c.signin) problems.push({ kind: "d2l", text: "I'm not signed in to D2L, so I can't see your grades or what's due. I'll open it so you can sign in once." });
+  }
+  bb("startup", "check", { problems: problems.map((p) => p.kind) });
+  return { problems };
 });
 /** Turn one on: the system prompt if macOS still allows asking, otherwise the exact Settings page. */
 ipcMain.handle("milo:perm-ask", async (_e, kind: string) => {

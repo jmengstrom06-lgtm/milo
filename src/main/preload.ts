@@ -110,6 +110,7 @@ contextBridge.exposeInMainWorld("milo", {
   gradeScore: (q: { course: string; name: string; earned: number; possible?: number }) => ipcRenderer.invoke("milo:grade-score", q),
   gradeNow: (course: string, portal?: string) => ipcRenderer.invoke("milo:grade-now", course, portal),
   d2lDue: (portal: string) => ipcRenderer.invoke("milo:d2l-due", portal),
+  startupCheck: (portal?: string) => ipcRenderer.invoke("milo:startup-check", portal),
   syllabus: (course: string) => ipcRenderer.invoke("milo:syllabus", course),
   exam: (q: { course: string; kind?: string; extra?: string }) => ipcRenderer.invoke("milo:exam", q),
   feedFetch: (url: string) => ipcRenderer.invoke("milo:feed-fetch", url),

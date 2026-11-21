@@ -683,6 +683,23 @@ export default function App() {
     [say, hover, listen, look]
   );
 
+  // ---- Startup check: anything broken (permissions, D2L sign-in) is said once, up front ----
+  const startupChecked = useRef(false);
+  useEffect(() => {
+    if (setup || startupChecked.current) return;
+    startupChecked.current = true;
+    const t = window.setTimeout(async () => {
+      const r = await window.milo.startupCheck(portal || undefined).catch(() => ({ problems: [] as { kind: string; text: string }[] }));
+      if (!r.problems.length) return;
+      setMood("thinking");
+      for (const p of r.problems.slice(0, 2)) await say(p.text);
+      setBubble(null);
+      if (r.problems.some((p) => p.kind === "d2l")) startBrief(true); // opens the D2L sign-in
+    }, 6000);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setup]);
+
   // ---- Jobs: long tasks that finish (plan -> do -> check each step -> retry -> final check) ----------
   const [job, setJob] = useState<MiloJob | null>(null);
   const jobRef = useRef<MiloJob | null>(null);

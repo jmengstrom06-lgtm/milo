@@ -6,13 +6,14 @@
 import { app, type BrowserWindow } from "electron";
 import fs from "node:fs";
 import path from "node:path";
+import { courses as d2lCourses, d2lCheck, gradeSheet as d2lSheet } from "./d2l";
 import { log as bbLog, onLog } from "./blackbox";
 import { loadClasses, saveClasses } from "./classes";
 import { deleteItem, listItems } from "./library";
 import { frontApp, isRunning, openApp, quitApp } from "./hands";
 
-type Cat = "Speed" | "Control" | "Polish" | "Organization" | "Study power" | "Personal" | "Focus" | "Research" | "Computer";
-const WEIGHT: Record<Cat, number> = { Speed: 20, Control: 20, Polish: 20, Organization: 15, "Study power": 10, Personal: 5, Focus: 5, Research: 5, Computer: 20 };
+type Cat = "Speed" | "Control" | "Polish" | "Organization" | "Study power" | "Personal" | "Focus" | "Research" | "Computer" | "School";
+const WEIGHT: Record<Cat, number> = { Speed: 20, Control: 20, Polish: 20, Organization: 15, "Study power": 10, Personal: 5, Focus: 5, Research: 5, Computer: 20, School: 15 };
 const WHY: Record<Cat, string> = {
   Speed: "Feels instant. Slow = 'just another chatbot'.",
   Control: "Does exactly what you say, the moment you say it (stop, close, cancel).",
@@ -23,6 +24,7 @@ const WHY: Record<Cat, string> = {
   Focus: "Lock-in works first try.",
   Research: "Real answers with sources, fast.",
   Computer: "Opens, quits and switches apps however you say it (only in npm run test:computer).",
+  School: "Reads D2L directly: signed in, your grades, what's due, what you need on the final.",
 };
 
 type Result = { id: string; cat: Cat; name: string; score: number; pass: boolean; detail: string; ms?: number; shot?: string; events?: string[] };
@@ -456,6 +458,64 @@ export async function runSelfTest(win: BrowserWindow) {
     const ms = await waitFor("s.speaking || (document.querySelector('.rp')?.textContent || '').length > 400", 45000);
     return { ms, score: speed(ms, 8000, 20000), detail: ms < 0 ? "no answer" : `panel in ${open}ms, answer in ${(ms / 1000).toFixed(1)}s` };
   });
+
+  // ======================= SCHOOL: D2L, read directly =======================
+  // Real questions, asked out loud the way students ask them; graded on what Milo actually says.
+  {
+    const portal = await js<string>("localStorage.getItem('milo.portal') || ''").catch(() => "");
+    /** Wait for Milo to say something matching `re` (from his black box). Returns ms, or -1. */
+    const saidMatch = async (re: RegExp, timeout: number) => {
+      const st = Date.now();
+      while (Date.now() - st < timeout) {
+        if (events.some((e) => e.line.startsWith("app/say") && re.test(e.line))) return Date.now() - st;
+        await sleep(150);
+      }
+      return -1;
+    };
+    if (!portal) {
+      results.push({ id: "D0", cat: "School", name: "D2L connected", score: 0, pass: false, detail: "no school site set up (run setup)" });
+    } else {
+      const chk = await d2lCheck(portal);
+      await test("D0", "School", "Signed in to D2L (data feed answers)", async () => ({ score: chk.ok ? 1 : 0, detail: chk.ok ? "signed in" : chk.signin ? "NOT signed in inside Milo: ask him 'what's due', sign in once" : chk.text }));
+      // a class that posts grades, to ask about by its everyday name
+      let graded: { short: string } | null = null;
+      if (chk.ok)
+        for (const c of await d2lCourses(portal).catch(() => [])) {
+          const g = await d2lSheet(portal, c).catch(() => null);
+          if (g?.sheet.current_percent != null) {
+            graded = c;
+            break;
+          }
+        }
+      const word = graded ? graded.short.split(" ").find((w) => w.length > 3 && !/^(introduction|intro|understanding|survey)$/i.test(w)) ?? graded.short : "";
+      await test("D1", "School", `"What's my grade in ${word || "<class>"}" (from D2L)`, async () => {
+        if (!graded) return { score: 0, detail: chk.ok ? "no class posts grades in D2L" : "not signed in" };
+        await reset();
+        events = [];
+        const t0 = Date.now();
+        await hear(`What's my grade in ${word}?`);
+        const ms = await saidMatch(/\d+(\.\d+)?%/, 12000);
+        return { ms, score: ms < 0 ? 0 : speed(Date.now() - t0, 4000, 9000), detail: ms < 0 ? "never said a percent" : `answered in ${((Date.now() - t0) / 1000).toFixed(1)}s` };
+      });
+      await test("D2", "School", `"What do I need on the final for a B in ${word || "<class>"}"`, async () => {
+        if (!graded) return { score: 0, detail: "no graded class to ask about" };
+        await reset();
+        events = [];
+        const t0 = Date.now();
+        await hear(`What do I need on the final for a B in ${word}?`);
+        const ms = await saidMatch(/need about \d+%|already locked in|out of reach|which one do you mean|don't see a final/i, 15000);
+        return { ms, score: ms < 0 ? 0 : speed(Date.now() - t0, 5000, 10000), detail: ms < 0 ? "no forecast answer" : `answered in ${((Date.now() - t0) / 1000).toFixed(1)}s` };
+      });
+      await test("D3", "School", `"What's due this week" (instant, from D2L)`, async () => {
+        await reset();
+        events = [];
+        const t0 = Date.now();
+        await hear("What's due this week?");
+        const ms = await saidMatch(/due|caught up|nothing/i, 10000);
+        return { ms, score: ms < 0 ? 0 : speed(Date.now() - t0, 3000, 8000), detail: ms < 0 ? "no answer" : `answered in ${((Date.now() - t0) / 1000).toFixed(1)}s` };
+      });
+    }
+  }
 
   // ======================= COMPUTER CONTROL (npm run test:computer) =======================
   // Real clicks and keys on your Mac, with safe built-in apps that never ask "save changes?".

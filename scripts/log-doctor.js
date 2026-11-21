@@ -83,6 +83,21 @@ for (const { f } of files) {
     if (ev === "api_error" || /_crash$/.test(ev) || ev === "renderer-error") add("error", short(e.detail ?? e.error ?? e.message ?? JSON.stringify(e), 160));
     if (ev === "grant_failed") add("listening", `Smart ears couldn't get a listening pass (${e.status})`);
     if (ev === "dropped" && /not_you/.test(e.why ?? "")) stats.noiseDropped++;
+    // Misroutes: a question Milo has a fast, exact answer for went to the AI guesser instead.
+    if (ev === "route_ai") {
+      const t = String(e.text ?? "").toLowerCase();
+      const k = e.kind ?? "";
+      const want =
+        /\bgrade|\bgraded\b|how am i doing in/.test(t) && !/grade my|grade this/.test(t) ? ["grade"] :
+        /what do i need on|need to get on/.test(t) ? ["forecast"] :
+        /\bsyllabus\b/.test(t) ? ["syllabus"] :
+        /\b(due|deadlines?)\b/.test(t) ? ["radar", "brief"] :
+        /^(i )?(got|scored|made) (an? )?\d/.test(t) ? ["score"] :
+        /^my (student id|email|major|name|phone)/.test(t) ? ["profile"] : null;
+      if (want && !want.includes(k)) add("misroute", `Went to the AI ("${k}") instead of the ${want[0]} command`, { said: e.text });
+    }
+    // He couldn't answer something he should be able to
+    if (e.src === "app" && ev === "say" && /I don't have (your|any)|I can't see your screen|I couldn't find anything called|isn't something I can/i.test(e.text ?? "")) add("couldnt_answer", `He said: "${short(e.text, 90)}"`);
   }
   if (isTest) stats.selfTests++;
 }
@@ -96,8 +111,10 @@ for (const i of issues) {
   if (g.examples.length < 3 && i.said) g.examples.push(i.said);
   groups.set(key, g);
 }
-const order = ["didnt_work", "frustration", "flagged", "misheard_yes_no", "task_failed", "retry_loop", "task_asked", "slow_start", "error", "reload", "listening", "task_stopped"];
+const order = ["misroute", "couldnt_answer", "didnt_work", "frustration", "flagged", "misheard_yes_no", "task_failed", "retry_loop", "task_asked", "slow_start", "error", "reload", "listening", "task_stopped"];
 const NAMES = {
+  misroute: "Understood wrong (phrasing to add as a test)",
+  couldnt_answer: "Couldn't answer",
   didnt_work: "Said he did it, check says no",
   frustration: "You had to rephrase",
   flagged: "You flagged it",
@@ -130,7 +147,7 @@ for (const k of order) {
   md += "\n";
 }
 const cases = sorted
-  .filter((g) => g.said && ["didnt_work", "frustration", "flagged", "misheard_yes_no", "task_failed", "retry_loop", "task_asked"].includes(g.kind))
+  .filter((g) => g.said && ["misroute", "couldnt_answer", "didnt_work", "frustration", "flagged", "misheard_yes_no", "task_failed", "retry_loop", "task_asked"].includes(g.kind))
   .map((g) => ({ said: g.said, problem: g.why, kind: g.kind, seen: g.at }));
 md += `---\n${cases.length} of these are saved as test cases in doctor-cases.json (what you said + what went wrong), ready to turn into permanent tests.\n`;
 

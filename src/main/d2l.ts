@@ -233,3 +233,13 @@ export function links(origin_: string, ou: number) {
     calendar: `${o}/d2l/le/calendar/${ou}`,
   };
 }
+
+/** Is Milo signed in to D2L right now? (startup check + self-test) */
+export async function d2lCheck(portal: string): Promise<{ ok: boolean; signin: boolean; text: string }> {
+  try {
+    await d2lPage(portal);
+    return { ok: true, signin: false, text: "" };
+  } catch (e) {
+    return { ok: false, signin: e instanceof SignInNeeded, text: (e as Error).message };
+  }
+}
