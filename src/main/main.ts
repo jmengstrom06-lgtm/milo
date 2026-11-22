@@ -35,7 +35,7 @@ import { awayWatch } from "./away";
 import { calendarAdd, calendarDelete, calendarUpcoming, docsCreate, GoogleNotConnected, googleConnect, googleStatus, gmailDeleteDraft, gmailDraft, gmailSendDraft, gmailUnread } from "./google";
 import { activity, did, registerActivity } from "./activityLog";
 import { writePaper } from "./paper";
-import { addChunk, finishLecture, finishLeftovers, forgetLectureNote, lectureNow, startLecture } from "./lecture";
+import { addChunk, fileLecture, finishLecture, finishLeftovers, forgetLectureNote, lectureNow, startLecture } from "./lecture";
 import { classFor } from "./classes";
 import { parsePaperAsk } from "./paperFormat";
 import { composeEmail, parseEvent, sayCalendar, sayMail } from "./googleai";
@@ -1055,8 +1055,9 @@ activity.onUndo("draft_delete", async (d) => gmailDeleteDraft(String(d.draftId))
 activity.onUndo("memory_forget", async (d) => forget(String(d.fact)));
 activity.onUndo("note_delete", async (d) => forgetLectureNote(String(d.noteId)));
 // ---------- Lecture listener: saved to disk every 2 minutes, transcribed with retries, notes after class ----------
-ipcMain.handle("milo:lecture-start", (_e, said: string) => {
-  const m = startLecture(String(said ?? ""));
+ipcMain.handle("milo:lecture-file", (_e, lectureId: string, said: string) => fileLecture(String(lectureId), String(said ?? "")));
+ipcMain.handle("milo:lecture-start", async (_e, said: string) => {
+  const m = await startLecture(String(said ?? ""));
   track("lecture_start", { course: !!m.course });
   return { id: m.id, course: m.course, startedAt: m.startedAt };
 });

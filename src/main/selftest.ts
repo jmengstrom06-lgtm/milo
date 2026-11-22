@@ -14,7 +14,7 @@ import { deleteItem, listItems } from "./library";
 import { frontApp, isRunning, openApp, quitApp } from "./hands";
 import { calendarAdd, docsText, gmailDraft, googleStatus } from "./google";
 import { lastPaper } from "./paper";
-import { addChunk, finishLecture, forgetLectureNote, startLecture } from "./lecture";
+import { addChunk, fileLecture, finishLecture, forgetLectureNote, removeLecture, startLecture } from "./lecture";
 import { macSpeak } from "./macvoice";
 import { activity, did } from "./activityLog";
 import { memories, remember } from "./memory";
@@ -631,16 +631,35 @@ export async function runSelfTest(win: BrowserWindow) {
         "This will definitely be on Friday's exam, so make sure you know the formula. Your homework is problems 1 through 10 in chapter 6.";
       const v = await macSpeak(lecture);
       if (!v.ok) return { score: 0, detail: "couldn't make the test audio" };
-      const m = startLecture("stats");
+      const m = await startLecture("stats");
       addChunk(m.id, 0, new Uint8Array(Buffer.from(v.audio, "base64")).buffer);
       const t0 = Date.now();
       const r = await finishLecture(m.id);
       if (!r.ok) return { score: 0, detail: `no notes: ${r.text}` };
       if (r.noteId) forgetLectureNote(r.noteId); // don't leave test notes behind
       if (r.studyId) deleteItem(r.studyId);
+      removeLecture(m.id);
       const cards = r.flashcards ?? 0;
       const alert = (r.alerts ?? 0) > 0;
       return { ms: Date.now() - t0, score: (cards >= 3 ? 0.5 : cards ? 0.25 : 0) + (alert ? 0.5 : 0), detail: `"${r.title}": ${cards} flashcards, exam flag ${alert ? "caught" : "MISSED"}, notes in ${((Date.now() - t0) / 1000).toFixed(0)}s` };
+    });
+    await test("V3", "Study power", "No class named: never guesses the selected class; asks, then files it", async () => {
+      const v = await macSpeak("Today we are going over the causes of the French Revolution. The first cause was debt from wars. The second cause was a bad harvest that raised bread prices. The third cause was ideas from the Enlightenment about rights. Remember these three causes for the midterm.");
+      if (!v.ok) return { score: 0, detail: "couldn't make the test audio" };
+      const m = await startLecture("listen to my lecture");
+      const guessed = m.how === "named";
+      addChunk(m.id, 0, new Uint8Array(Buffer.from(v.audio, "base64")).buffer);
+      const r = await finishLecture(m.id);
+      if (!r.ok) return { score: 0, detail: `no notes: ${r.text}` };
+      let filed: string | null = null;
+      const anyClass = loadClasses().classes[0]?.name ?? "";
+      if (r.needsClass && r.lectureId && anyClass) filed = fileLecture(r.lectureId, anyClass.toLowerCase()); // the way a student says it
+      if (r.noteId) forgetLectureNote(r.noteId);
+      if (r.studyId) deleteItem(r.studyId);
+      removeLecture(m.id);
+      if (guessed) return { score: 0, detail: "picked a class from words that didn't name one" };
+      if (!r.needsClass) return { score: 1, detail: `knew the class from ${m.how === "calendar" ? "your calendar" : "last week's time slot"}: ${m.course}` };
+      return { score: filed ? 1 : anyClass ? 0.5 : 1, detail: filed ? `asked, then filed under ${filed}` : anyClass ? `asked, but "${anyClass}" didn't match a class` : "asked (no classes set up to file it under)" };
     });
   }
 

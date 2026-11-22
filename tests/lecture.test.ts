@@ -33,3 +33,16 @@ describe("lecture notes", () => {
     expect(t.split("\n")[0]).toBe("Stats · Mon, Nov 23 · 52 min");
   });
 });
+
+import { scheduleMatch } from "../src/main/lectureNotes";
+describe("which class: same time last week", () => {
+  const mon930 = new Date(2026, 10, 23, 9, 30).getTime(); // Monday
+  const week = 7 * 86400e3;
+  it("same weekday and time wins", () => {
+    expect(scheduleMatch([{ classId: "stats", startedAt: mon930 - week + 5 * 60e3 }, { classId: "bio", startedAt: mon930 - week + 4 * 3600e3 }], mon930)).toBe("stats");
+  });
+  it("different day = no guess", () => expect(scheduleMatch([{ classId: "stats", startedAt: mon930 - 86400e3 }], mon930)).toBeNull());
+  it("most common wins", () =>
+    expect(scheduleMatch([{ classId: "a", startedAt: mon930 - week }, { classId: "b", startedAt: mon930 - 2 * week }, { classId: "b", startedAt: mon930 - 3 * week }], mon930)).toBe("b"));
+  it("unfiled lectures don't vote", () => expect(scheduleMatch([{ classId: null, startedAt: mon930 - week }], mon930)).toBeNull());
+});

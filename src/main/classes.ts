@@ -65,6 +65,24 @@ const SUBJECT_WORDS: Record<Subject, RegExp> = {
 };
 
 /** Which class is this request about? An explicit mention wins, otherwise the active class. */
+/** Only a class the text actually names (code, name, or subject + "class"); never falls back to the active class. */
+export function classNamed(text: string): Klass | null {
+  const s = loadClasses();
+  const t = text.toLowerCase();
+  for (const c of s.classes) {
+    const words = [c.code, c.name].filter(Boolean).map((w) => w.toLowerCase());
+    if (words.some((w) => w.length > 2 && t.includes(w))) return c;
+    const code = c.code.toLowerCase().match(/^([a-z]{2,5})\s*(\d{3,5})/);
+    if (code && new RegExp(`\\b${code[1]}\\s*${code[2]}\\b`).test(t)) return c;
+    // the first real word of the name ("Statistical" in "Statistical Analysis") or its short form ("stats")
+    const first = c.name.toLowerCase().split(/\s+/).find((w) => w.length > 3 && !["intro", "introduction", "principles", "understanding"].includes(w));
+    if (first && new RegExp(`\\b${first.slice(0, 4)}`).test(t)) return c;
+  }
+  for (const c of s.classes) if (c.subject !== "other" && SUBJECT_WORDS[c.subject].test(t)) return c;
+  return null;
+}
+export const classById = (id: string | null) => (id ? loadClasses().classes.find((c) => c.id === id) ?? null : null);
+
 export function classFor(request: string): Klass | null {
   const s = loadClasses();
   const t = request.toLowerCase();

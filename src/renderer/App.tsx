@@ -164,6 +164,7 @@ export default function App() {
   const [lectureLevel, setLectureLevel] = useState(0);
   const [lectureWarn, setLectureWarn] = useState<string | null>(null);
   const recRef = useRef<LectureRecorder | null>(null);
+  const lectureClassAsk = useRef<{ id: string; at: number } | null>(null); // "Which class was that?"
   const earsBeforeClass = useRef<"always" | "off" | "once">("off");
   const [live, setLive] = useState<string | null>(null); // your words as you say them (smart ears)
   const [chromeOn, setChromeOn] = useState(false); // Milo's Chrome extension is connected
@@ -1240,10 +1241,14 @@ export default function App() {
     if (r.ok) sfx.success();
     await say(
       r.ok
-        ? `Your notes on ${r.title} are ready: ${r.minutes} of class, ${r.flashcards} flashcards${r.alerts ? `, and ${r.alerts} thing${r.alerts > 1 ? "s" : ""} the professor flagged for the exam` : ""}. They're in your Notes.`
+        ? `Your notes on ${r.title} are ready: ${r.minutes} of class, ${r.flashcards} flashcards${r.alerts ? `, and ${r.alerts} thing${r.alerts > 1 ? "s" : ""} the professor flagged for the exam` : ""}. They're in your Notes.${r.needsClass ? " Which class was that?" : ""}`
         : r.text
     );
     setBubble(null);
+    if (r.ok && r.needsClass && r.lectureId) {
+      lectureClassAsk.current = { id: r.lectureId, at: Date.now() };
+      waitForAnswer("say the class");
+    }
   };
   // In class: every minute, check he can actually hear (quietly, on screen only)
   useEffect(() => {
@@ -2239,6 +2244,18 @@ export default function App() {
     // Filler ("uh", "cool", "okay") never decides anything. Curly quotes from speech-to-text become plain ones.
     const text = stripFiller(raw.replace(/[’‘]/g, "'").replace(/[“”]/g, '"'));
     const dstate: DecideState = { kitOpen: (kitApp as DecideState["kitOpen"]) ?? null, researchOpen: !!researchQ, toolOpen: !!tool, lessonOpen: !!lessonRef.current, hasLastAnswer: !!lastAnswer() };
+    // "Which class was that?" -> "stats": file it there (and learn the time slot for next week)
+    if (lectureClassAsk.current && Date.now() - lectureClassAsk.current.at < 120e3) {
+      const ask = lectureClassAsk.current;
+      lectureClassAsk.current = null;
+      if (!/^(no|nope|never ?mind|skip|i don'?t know)\b/i.test(text.trim())) {
+        endAnswer("class");
+        void window.milo.lecture.file(ask.id, text).then((name) =>
+          say(name ? `Filed under ${name}. I'll remember this time slot.` : "I don't know that class. You can move the notes in your Notes app.").then(() => setBubble(null))
+        );
+        return;
+      }
+    }
     {
       const lc = lectureCommand(text);
       if (lc?.do === "start") return void startLecture(lc.course || text);

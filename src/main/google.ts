@@ -155,6 +155,17 @@ export async function calendarUpcoming(days = 7): Promise<Ev[]> {
   const r = await g<R>(`https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${from.toISOString()}&timeMax=${to.toISOString()}&singleEvents=true&orderBy=startTime&maxResults=25`);
   return (r.items ?? []).map((e) => ({ title: e.summary ?? "(no title)", start: e.start?.dateTime ?? e.start?.date ?? "", end: e.end?.dateTime ?? e.end?.date ?? "", allDay: !e.start?.dateTime, where: e.location }));
 }
+/** What's on the calendar right now (started up to 20 min from now, or already going). */
+export async function calendarNow(): Promise<Ev[]> {
+  const from = new Date(Date.now() - 4 * 3600e3);
+  const to = new Date(Date.now() + 20 * 60e3);
+  type R = { items?: { summary?: string; location?: string; start?: { dateTime?: string; date?: string }; end?: { dateTime?: string; date?: string } }[] };
+  const r = await g<R>(`https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${from.toISOString()}&timeMax=${to.toISOString()}&singleEvents=true&orderBy=startTime&maxResults=20`);
+  const now = Date.now();
+  return (r.items ?? [])
+    .filter((e) => e.start?.dateTime && e.end?.dateTime && Date.parse(e.end.dateTime) > now - 10 * 60e3 && Date.parse(e.start.dateTime) < now + 20 * 60e3)
+    .map((e) => ({ title: e.summary ?? "", start: e.start!.dateTime!, end: e.end!.dateTime!, allDay: false, where: e.location }));
+}
 /** Add an event (the renderer asks the student first). `start`/`end` are local "2026-11-24T15:00" or a date "2026-11-24". */
 export async function calendarAdd(ev: { title: string; start: string; end?: string; where?: string }) {
   const allDay = /^\d{4}-\d{2}-\d{2}$/.test(ev.start);

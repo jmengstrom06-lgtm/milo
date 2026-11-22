@@ -43,6 +43,14 @@ export function addNote(n: { title: string; course: string; body: string }): Not
   save("notes.json", notes);
   return note;
 }
+export function setNoteCourse(id: string, course: string) {
+  const notes = load<Note[]>("notes.json", []);
+  const n = notes.find((x) => x.id === id);
+  if (!n) return;
+  n.course = course.slice(0, 80);
+  n.updated = Date.now();
+  save("notes.json", notes);
+}
 export function removeNote(id: string) {
   save("notes.json", load<Note[]>("notes.json", []).filter((x) => x.id !== id));
 }

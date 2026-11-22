@@ -12,12 +12,13 @@ import { account, backend } from "./account";
 import { log as bb } from "./blackbox";
 import { callTool, persona } from "./brain";
 import { models } from "./gateway";
-import { addNote, removeNote } from "./kitipc";
-import { saveItem } from "./library";
-import { classFor } from "./classes";
-import { minutesText, notesText, type LectureNotes } from "./lectureNotes";
+import { addNote, removeNote, setNoteCourse } from "./kitipc";
+import { moveItem, saveItem } from "./library";
+import { classById, classNamed } from "./classes";
+import { calendarNow, googleStatus } from "./google";
+import { minutesText, notesText, scheduleMatch, type LectureNotes } from "./lectureNotes";
 
-type Meta = { id: string; course: string; classId: string | null; startedAt: number; endedAt?: number; chunks: number; done?: boolean; noteId?: string; keepAudio?: boolean };
+type Meta = { id: string; course: string; classId: string | null; startedAt: number; endedAt?: number; chunks: number; done?: boolean; noteId?: string; studyId?: string; keepAudio?: boolean; how?: string };
 const root = () => path.join(app.getPath("userData"), "lectures");
 const dirOf = (id: string) => path.join(root(), id);
 const pad = (n: number) => String(n).padStart(3, "0");
@@ -35,16 +36,44 @@ let awake: number | null = null;
 let queue: Promise<void> = Promise.resolve();
 export const lectureNow = () => (current ? { id: current.id, course: current.course, startedAt: current.startedAt, chunks: current.chunks } : null);
 
-export function startLecture(said: string): Meta {
+/** Which class is this? 1) the one they named 2) what's on their calendar right now 3) the class they had at this time last week. */
+async function whichClass(said: string): Promise<{ cls: ReturnType<typeof classNamed>; how: string }> {
+  const named = classNamed(said.replace(/\b(listen|record|lecture|class|lesson|notes?|take|start|my|the|this|to|on|for|mode)\b/gi, " "));
+  if (named) return { cls: named, how: "named" };
+  try {
+    if (googleStatus().connected) {
+      for (const ev of await calendarNow()) {
+        const c = classNamed(ev.title);
+        if (c) return { cls: c, how: "calendar" };
+      }
+    }
+  } catch {
+    /* calendar is a nice-to-have */
+  }
+  const past: { classId: string | null; startedAt: number }[] = [];
+  try {
+    for (const d of fs.readdirSync(root())) {
+      const m = readMeta(d);
+      if (m?.noteId) past.push({ classId: m.classId, startedAt: m.startedAt }); // only real lectures that made notes
+    }
+  } catch {
+    /* first lecture */
+  }
+  const id = scheduleMatch(past, Date.now());
+  if (id && classById(id)) return { cls: classById(id), how: "schedule" };
+  return { cls: null, how: "unknown" };
+}
+
+export async function startLecture(said: string): Promise<Meta> {
   if (current) return current;
-  const cls = said ? classFor(said) : classFor("");
+  const { cls, how } = await whichClass(said).catch(() => ({ cls: null, how: "unknown" }));
   const id = `lec-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}`;
   fs.mkdirSync(dirOf(id), { recursive: true });
-  current = { id, course: cls?.name ?? "", classId: cls?.id ?? null, startedAt: Date.now(), chunks: 0 };
+  current = { id, course: cls?.name ?? "", classId: cls?.id ?? null, startedAt: Date.now(), chunks: 0, how };
   writeMeta(current);
   // keep the Mac (and Milo) awake through the whole class
   awake = powerSaveBlocker.start("prevent-app-suspension");
-  bb("lecture", "start", { course: current.course || null });
+  bb("lecture", "start", { course: current.course || null, how });
   return current;
 }
 
@@ -136,7 +165,7 @@ const NOTES_TOOL = {
 };
 
 /** Class is over: finish every transcript, make the notes and flashcards, file them, delete the audio. */
-export async function finishLecture(id = current?.id): Promise<{ ok: boolean; text: string; noteId?: string; studyId?: string; minutes?: string; title?: string; flashcards?: number; alerts?: number }> {
+export async function finishLecture(id = current?.id): Promise<{ ok: boolean; text: string; lectureId?: string; needsClass?: boolean; noteId?: string; studyId?: string; minutes?: string; title?: string; flashcards?: number; alerts?: number }> {
   if (!id) return { ok: false, text: "I wasn't listening to a class." };
   const m = current?.id === id ? current : readMeta(id);
   if (!m) return { ok: false, text: "I couldn't find that lecture." };
@@ -199,12 +228,28 @@ export async function finishLecture(id = current?.id): Promise<{ ok: boolean; te
     });
   m.done = true;
   m.noteId = note.id;
+  m.studyId = study?.id;
   writeMeta(m);
   // the audio's job is done: delete it (the transcript is in the note)
   if (!m.keepAudio) for (let i = 0; i < m.chunks; i++) fs.rmSync(path.join(dirOf(id), `chunk-${pad(i)}.wav`), { force: true });
   bb("lecture", "notes", { sections: n.sections.length, terms: n.key_terms.length, alerts: n.exam_alerts.length, cards: n.flashcards.length, words });
-  return { ok: true, text: "", noteId: note.id, studyId: study?.id, minutes: length, title: n.title, flashcards: n.flashcards.length, alerts: n.exam_alerts.length };
+  return { ok: true, text: "", lectureId: id, needsClass: !m.classId, noteId: note.id, studyId: study?.id, minutes: length, title: n.title, flashcards: n.flashcards.length, alerts: n.exam_alerts.length };
 }
+/** "Which class was that?" -> "stats": file the notes and flashcards there, and remember the time slot for next week. */
+export function fileLecture(lectureId: string, said: string): string | null {
+  const m = readMeta(lectureId);
+  const c = classNamed(said);
+  if (!m || !c) return null;
+  m.course = c.name;
+  m.classId = c.id;
+  writeMeta(m);
+  if (m.noteId) setNoteCourse(m.noteId, c.name);
+  if (m.studyId) moveItem(m.studyId, c.id);
+  bb("lecture", "filed", {});
+  return c.name;
+}
+/** Remove a lecture completely (tests clean up after themselves, so they don't teach the time-slot guess). */
+export const removeLecture = (id: string) => fs.rmSync(dirOf(id), { recursive: true, force: true });
 export const forgetLectureNote = (noteId: string) => removeNote(noteId);
 
 /** At launch: a class that ended without notes (Milo quit, no internet) gets finished now. */

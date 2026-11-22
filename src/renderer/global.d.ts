@@ -189,8 +189,9 @@ declare global {
       lecture: {
         start: (said: string) => Promise<{ id: string; course: string; startedAt: number }>;
         chunk: (id: string, n: number, wav: ArrayBuffer) => Promise<boolean>;
-        stop: () => Promise<{ ok: boolean; text: string; noteId?: string; minutes?: string; title?: string; flashcards?: number; alerts?: number }>;
+        stop: () => Promise<{ ok: boolean; text: string; lectureId?: string; needsClass?: boolean; noteId?: string; minutes?: string; title?: string; flashcards?: number; alerts?: number }>;
         now: () => Promise<{ id: string; course: string; startedAt: number; chunks: number } | null>;
+        file: (lectureId: string, said: string) => Promise<string | null>;
       };
       paper: (request: string, name?: string) => Promise<{ ok: boolean; text: string; url?: string; link?: string; linkLabel?: string; needTopic?: boolean; connect?: boolean }>;
       paperStop: () => Promise<boolean>;
