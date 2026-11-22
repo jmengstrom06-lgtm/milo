@@ -134,6 +134,30 @@ contextBridge.exposeInMainWorld("milo", {
   d2lDue: (portal: string) => ipcRenderer.invoke("milo:d2l-due", portal),
   d2lCheck: (portal: string) => ipcRenderer.invoke("milo:d2l-check", portal),
   classesSync: (portal: string) => ipcRenderer.invoke("milo:classes-sync", portal),
+  home: {
+    open: () => ipcRenderer.invoke("milo:open-home"),
+    route: (text: string) => ipcRenderer.send("milo:home-route", text),
+    action: (a: unknown) => ipcRenderer.send("milo:home-action", a),
+    talk: () => ipcRenderer.send("milo:home-talk"),
+    grades: (portal: string, fresh?: boolean) => ipcRenderer.invoke("milo:home-grades", portal, !!fresh),
+    onEcho: (fn: (e: { kind: string; payload: unknown }) => void) => {
+      const l = (_e: unknown, ev: { kind: string; payload: unknown }) => fn(ev);
+      ipcRenderer.on("milo:echo", l);
+      return () => ipcRenderer.removeListener("milo:echo", l);
+    },
+    // (the frog's side)
+    echo: (kind: string, payload: unknown) => ipcRenderer.send("milo:echo", kind, payload),
+    onRouteText: (fn: (text: string) => void) => {
+      const l = (_e: unknown, t: string) => fn(t);
+      ipcRenderer.on("milo:route-text", l);
+      return () => ipcRenderer.removeListener("milo:route-text", l);
+    },
+    onAction: (fn: (a: { kind: string; item: { title: string; course: string; due: string } }) => void) => {
+      const l = (_e: unknown, a: { kind: string; item: { title: string; course: string; due: string } }) => fn(a);
+      ipcRenderer.on("milo:home-action", l);
+      return () => ipcRenderer.removeListener("milo:home-action", l);
+    },
+  },
   lecture: {
     start: (said: string) => ipcRenderer.invoke("milo:lecture-start", said),
     chunk: (id: string, n: number, wav: ArrayBuffer) => ipcRenderer.invoke("milo:lecture-chunk", id, n, wav),

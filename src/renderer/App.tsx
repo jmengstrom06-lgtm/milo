@@ -160,6 +160,8 @@ export default function App() {
   const [working, setWorking] = useState(false); // Milo is using the computer
   // Lecture listener: in class, Milo records quietly and makes notes after.
   const inClassRef = useRef(false);
+  const homeQuietUntil = useRef(0); // typed in Home base: answer there, quietly
+  const fromHome = useRef(false);
   const [lecture, setLecture] = useState<{ id: string; course: string; startedAt: number } | null>(null);
   const [lectureLevel, setLectureLevel] = useState(0);
   const [lectureWarn, setLectureWarn] = useState<string | null>(null);
@@ -380,8 +382,14 @@ export default function App() {
 
   // ---- voice ------------------------------------------------------------------
   const say = useCallback(async (text: string, opts: { minMs?: number; noBarge?: boolean; loud?: boolean } = {}) => {
-    // In class, Milo never talks out loud (unless they just asked him something): bubble only.
-    if (inClassRef.current && !opts.loud) {
+    // Home base sees everything Milo says (it's the same Milo)
+    try {
+      window.milo.home.echo("said", text);
+    } catch {
+      /* preload not ready */
+    }
+    // In class, or answering something typed in Home base: on screen only.
+    if ((inClassRef.current && !opts.loud) || Date.now() < homeQuietUntil.current) {
       setBubble(text);
       bb("say_quiet", { text: text.slice(0, 80) });
       await sleep(Math.max(opts.minMs ?? 1400, text.split(/\s+/).length * 300));
@@ -1222,6 +1230,7 @@ export default function App() {
     setBubble(null);
     // from here on: quiet, and no wake-word listening (the professor isn't talking to Milo)
     inClassRef.current = true;
+    window.milo.home.echo("lecture", { on: true, course: m.course, startedAt: m.startedAt });
     earsBeforeClass.current = (ears.current?.mode as "always" | "off" | "once") ?? "off";
     if (ears.current?.mode === "always") await ears.current.setMode("off");
   };
@@ -1234,6 +1243,7 @@ export default function App() {
     recRef.current = null;
     await rec.stop();
     inClassRef.current = false;
+    window.milo.home.echo("lecture", { on: false });
     setLecture(null);
     setLectureWarn(null);
     if (earsBeforeClass.current === "always") await ears.current?.setMode("always");
@@ -1270,6 +1280,9 @@ export default function App() {
       window.clearInterval(tick);
     };
   }, [lecture]);
+  const startHomeworkRef = useRef(startHomework);
+  startHomeworkRef.current = startHomework;
+  const doItForMeRef = useRef<(item: { title: string; course: string; due: string }, submit?: boolean) => Promise<void>>(async () => {});
   /** "Want to start on X?" Work through it together (default), or Milo does it himself. */
   const offerStart = async (item: { title: string; course: string; due: string }) => {
     setMood("happy");
@@ -1314,6 +1327,7 @@ export default function App() {
     bb("offer_do", { submit, approved: submit, goal });
     void window.milo.jobStart(goal, { approved: submit });
   };
+  doItForMeRef.current = doItForMe;
   const resumeHomework = async (text: string) => {
     const sp = findPlan(text);
     if (!sp) {
@@ -2261,6 +2275,12 @@ export default function App() {
   routeRef.current = (raw: string, spoken = true) => {
     // Filler ("uh", "cool", "okay") never decides anything. Curly quotes from speech-to-text become plain ones.
     const text = stripFiller(raw.replace(/[’‘]/g, "'").replace(/[“”]/g, '"'));
+    // Home base shows what you said to the frog; typed there = answered quietly there, spoken = out loud
+    if (!fromHome.current) {
+      window.milo.home.echo("heard", text);
+      homeQuietUntil.current = 0;
+    }
+    fromHome.current = false;
     const dstate: DecideState = { kitOpen: (kitApp as DecideState["kitOpen"]) ?? null, researchOpen: !!researchQ, toolOpen: !!tool, lessonOpen: !!lessonRef.current, hasLastAnswer: !!lastAnswer() };
     // "Which class was that?" -> "stats": file it there (and learn the time slot for next week)
     if (lectureClassAsk.current && Date.now() - lectureClassAsk.current.at < 120e3) {
@@ -2278,6 +2298,11 @@ export default function App() {
       const lc = lectureCommand(text);
       if (lc?.do === "start") return void startLecture(lc.course || text);
       if (lc?.do === "stop" && recRef.current) return void stopLecture();
+    }
+    if (/^(open|show|go to|pull up)( my| the)? (home|home ?base|dashboard)$/i.test(text.trim().replace(/[.!?]+$/, ""))) {
+      void window.milo.home.open();
+      say("Opening Home base.").then(() => setBubble(null));
+      return;
     }
     if (offerAnswer(text)) return;
     // "What's it about?" -> "the french revolution"
@@ -2856,6 +2881,26 @@ export default function App() {
   flagRef.current = flagNow;
   useEffect(() => window.milo.onFlag(() => flagRef.current("shortcut")), []);
   useEffect(() => window.milo.activity.onOpen(() => setActivityOpen(true)), []);
+  // Typed in Home base: same router, same Milo, answered quietly there.
+  useEffect(
+    () =>
+      window.milo.home.onRouteText((text) => {
+        homeQuietUntil.current = Date.now() + 120e3;
+        fromHome.current = true;
+        routeRef.current(text, false);
+      }),
+    []
+  );
+  // Home base's Next up card: Start together / Do it for me
+  useEffect(
+    () =>
+      window.milo.home.onAction((a) => {
+        homeQuietUntil.current = Date.now() + 120e3;
+        if (a.kind === "together") void startHomeworkRef.current(`${a.item.title} ${a.item.course}`.trim(), false, { target: "", here: false }, a.item);
+        else void doItForMeRef.current(a.item, a.kind === "do_submit");
+      }),
+    []
+  );
   useEffect(() => window.milo.onOpenFeedback(() => setFeedback("")), []);
 
   /** "Milo, when's my next exam?" with D2L open: read the screen and answer out loud. */
@@ -3462,6 +3507,7 @@ export default function App() {
       },
       reset: () => {
         hush();
+        homeQuietUntil.current = 0;
         pendingRef.current = null;
         setPending(null);
         setBubble(null);

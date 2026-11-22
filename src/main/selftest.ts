@@ -19,9 +19,10 @@ import { macSpeak } from "./macvoice";
 import { activity, did } from "./activityLog";
 import { memories, remember } from "./memory";
 import { sendFeedback } from "./telemetry";
+import { homeWin, openHome } from "./home";
 
-type Cat = "Trust" | "Speed" | "Control" | "Polish" | "Organization" | "Study power" | "Personal" | "Focus" | "Research" | "Computer" | "School" | "Google";
-const WEIGHT: Record<Cat, number> = { Trust: 20, Speed: 20, Control: 20, Polish: 20, Organization: 15, "Study power": 10, Personal: 5, Focus: 5, Research: 5, Computer: 20, School: 15, Google: 15 };
+type Cat = "Trust" | "Speed" | "Control" | "Polish" | "Organization" | "Study power" | "Personal" | "Focus" | "Research" | "Computer" | "School" | "Google" | "Home";
+const WEIGHT: Record<Cat, number> = { Trust: 20, Speed: 20, Control: 20, Polish: 20, Organization: 15, "Study power": 10, Personal: 5, Focus: 5, Research: 5, Computer: 20, School: 15, Google: 15, Home: 15 };
 const WHY: Record<Cat, string> = {
   Trust: "You can see everything Milo did and take it back. Problems reach Jake in one tap.",
   Speed: "Feels instant. Slow = 'just another chatbot'.",
@@ -35,6 +36,7 @@ const WHY: Record<Cat, string> = {
   Computer: "Opens, quits and switches apps however you say it (only in npm run test:computer).",
   School: "Reads D2L directly: signed in, your grades, what's due, what you need on the final.",
   Google: "Calendar and Gmail, direct and fast; asks before adding or sending; a plain yes/no works after the ding.",
+  Home: "Home base: opens fast, shows your classes, typing reaches the same Milo, Undo right there.",
 };
 
 type Result = { id: string; cat: Cat; name: string; score: number; pass: boolean; detail: string; ms?: number; shot?: string; events?: string[] };
@@ -972,6 +974,118 @@ export async function runSelfTest(win: BrowserWindow) {
         return { ms, score: added ? 0 : ms < 0 ? 0 : speed(ms, 1500, 4000), detail: added ? "ADDED even though you said no" : ms < 0 ? "didn't hear the no" : `cancelled in ${(ms / 1000).toFixed(1)}s, nothing added` };
       });
     }
+  }
+
+  // ======================= HOME BASE (Z): the real app window, same Milo as the frog =======================
+  // Run just these: npm run test:home
+  {
+    const isDev = process.env.MILO_DEV === "1";
+    const hjs = <T = unknown>(code: string): Promise<T> => {
+      const w = homeWin();
+      if (!w) return Promise.reject(new Error("Home base isn't open"));
+      return w.webContents.executeJavaScript(code, true) as Promise<T>;
+    };
+    const hwait = async (cond: string, timeout: number) => {
+      const st = Date.now();
+      while (Date.now() - st < timeout) {
+        if (await hjs<boolean>(`(() => { try { return !!(${cond}); } catch { return false; } })()`).catch(() => false)) return Date.now() - st;
+        await sleep(100);
+      }
+      return -1;
+    };
+    const hshot = async (id: string) => {
+      try {
+        const img = await homeWin()!.webContents.capturePage();
+        fs.writeFileSync(path.join(dir, "shots", `${id}.png`), img.toPNG());
+      } catch {
+        /* closed */
+      }
+    };
+
+    await test("Z1", "Home", "Home base opens fast and draws (sidebar, Today, composer)", async () => {
+      const w = homeWin();
+      if (w) w.close();
+      await sleep(400);
+      const t = Date.now();
+      openHome(isDev);
+      const ms = await hwait("document.querySelector('.hb-side') && document.querySelector('.hb-hello') && document.getElementById('hb-ask')", 8000);
+      await sleep(1500); // let D2L and grades fill in
+      await hshot("Z1-home-today"); // always saved, so you can look at it
+      if (ms < 0) return { score: 0, detail: "the window never drew" };
+      const total = Date.now() - t - 1500;
+      return { ms: total, score: speed(total, 1500, 4000), detail: `drew in ${(total / 1000).toFixed(1)}s (screenshot: shots/Z1-home-today.png)` };
+    });
+
+    await test("Z2", "Home", "Your classes show in the sidebar", async () => {
+      if (!homeWin()) openHome(isDev);
+      const want = loadClasses().classes?.length ?? 0;
+      const ms = await hwait(`document.querySelectorAll('.hb-cls').length >= ${Math.max(1, want)}`, 6000);
+      const got = await hjs<number>("document.querySelectorAll('.hb-cls').length").catch(() => 0);
+      if (!want) return { score: got === 0 ? 0.6 : 1, detail: "no classes saved yet (connect D2L)" };
+      return { ms, score: got === want ? 1 : got ? 0.6 : 0, detail: `${got} of ${want} classes shown` };
+    });
+
+    await test("Z3", "Home", "Typing in Home base runs through the same Milo, answer shows in the chat", async () => {
+      if (!homeWin()) openHome(isDev);
+      await hjs("document.querySelector('.hb-new') && document.querySelector('.hb-new').click()");
+      await sleep(300);
+      const typed = await hjs<boolean>(`(() => {
+        const t = document.getElementById('hb-ask'); if (!t) return false;
+        const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+        set.call(t, "What time is it?"); t.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+      if (!typed) return { score: 0, detail: "couldn't find the message box" };
+      await sleep(150);
+      await hjs("document.getElementById('hb-ask').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))");
+      const t = Date.now();
+      const you = await hwait("document.querySelector('.hb-you')", 2000);
+      const milo = await hwait("document.querySelector('.hb-milo')", 20000);
+      const quiet = events.some((e) => e.line.startsWith("app/say_quiet"));
+      const loud = events.some((e) => e.line.startsWith("app/say "));
+      if (you < 0) return { score: 0, detail: "your message didn't show up" };
+      if (milo < 0) return { score: 0.3, detail: "sent, but Milo's answer never showed in Home base" };
+      return { ms: Date.now() - t, score: loud && !quiet ? 0.7 : speed(Date.now() - t, 6000, 15000), detail: loud && !quiet ? "answered, but the frog said it out loud (should be quiet when typed)" : "answered in the chat, frog stayed quiet" };
+    });
+
+    await test("Z4", "Home", "Talking to the frog after typing gets a spoken answer again", async () => {
+      await hear("What time is it?");
+      const st = Date.now();
+      while (Date.now() - st < 15000 && !events.some((e) => e.line.startsWith("app/say ") || e.line.startsWith("app/say_quiet"))) await sleep(150);
+      const loud = events.some((e) => e.line.startsWith("app/say "));
+      const quiet = events.some((e) => e.line.startsWith("app/say_quiet"));
+      return { score: loud ? 1 : quiet ? 0 : 0.3, detail: loud ? "spoke out loud" : quiet ? "stayed silent (still in Home's quiet mode)" : "didn't answer" };
+    });
+
+    await test("Z5", "Home", "Something Milo does pops up in Home base with Undo, and Undo works", async () => {
+      if (!homeWin()) openHome(isDev);
+      await hjs("document.querySelector('.hb-toast button') && document.querySelector('.hb-toast button').click()").catch(() => {});
+      await sleep(300);
+      const fact = `Home base test fact ${Date.now()}`;
+      await remember(fact);
+      const ms = await hwait("document.querySelector('.hb-toast')", 4000);
+      if (ms < 0) return { score: 0, detail: "no Undo bar showed up" };
+      await hjs("document.querySelector('.hb-toast button').click()");
+      const st = Date.now();
+      while (Date.now() - st < 8000 && memories().includes(fact)) await sleep(150);
+      const gone = !memories().includes(fact);
+      return { ms, score: gone ? speed(ms, 1500, 3500) : 0.3, detail: gone ? `Undo bar in ${(ms / 1000).toFixed(1)}s, Undo took it back` : "Undo bar showed, but Undo didn't work" };
+    });
+
+    await test("Z6", "Home", "⌘K opens the command bar, Esc closes it", async () => {
+      if (!homeWin()) openHome(isDev);
+      await hjs("window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))");
+      const open = await hwait("document.querySelector('.hb-cmd')", 2000);
+      await hshot("Z6-command-bar");
+      await hjs("window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))");
+      const closed = await hwait("!document.querySelector('.hb-cmd')", 2000);
+      return { ms: open, score: open < 0 ? 0 : closed < 0 ? 0.6 : 1, detail: open < 0 ? "didn't open" : closed < 0 ? "opened, Esc didn't close it" : "opens and closes" };
+    });
+
+    await test("Z7", "Home", "Closing Home base leaves Milo running as the frog", async () => {
+      homeWin()?.close();
+      await sleep(800);
+      const alive = await js<boolean>("!!(window.__milo && window.__milo.ready)").catch(() => false);
+      return { score: !homeWin() && alive ? 1 : 0, detail: alive ? "closed, frog still here" : "the frog went away too" };
+    });
   }
 
   // ======================= COMPUTER CONTROL (npm run test:computer) =======================

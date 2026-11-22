@@ -35,6 +35,7 @@ import { awayWatch } from "./away";
 import { calendarAdd, calendarDelete, calendarUpcoming, docsCreate, GoogleNotConnected, googleConnect, googleStatus, gmailDeleteDraft, gmailDraft, gmailSendDraft, gmailUnread } from "./google";
 import { activity, did, registerActivity } from "./activityLog";
 import { writePaper } from "./paper";
+import { homeWin, openHome, toHome } from "./home";
 import { addChunk, fileLecture, finishLecture, finishLeftovers, forgetLectureNote, lectureNow, startLecture } from "./lecture";
 import { classFor, COLORS, loadClasses, saveClasses, SUBJECT_WORDS, type Klass } from "./classes";
 import { mergeD2l } from "./classSync";
@@ -323,6 +324,7 @@ let taskAbort = false;
 function sendStep(step: { say: string; action: string; point?: { x: number; y: number } | null; status?: string }) {
   bb("task", "step", step);
   overlay?.webContents.send("milo:task-step", step);
+  toHome("milo:task-step", step);
 }
 
 ipcMain.on("milo:task-stop", () => {
@@ -352,6 +354,7 @@ const jobDeps: JobDeps = {
   },
   emit: (job) => {
     overlay?.webContents.send("milo:job", job);
+    toHome("milo:job", job);
     logJob(job);
     // away mode: Mac stays awake while working; a notification when it's done or needs you
     awayWatch(job, () => {
@@ -463,7 +466,10 @@ ipcMain.handle("milo:paper", async (_e, request: string, studentName?: string) =
   paperRunning = true;
   paperStop = false;
   let opened = false;
-  const send = (p: unknown) => overlay?.webContents.send("milo:paper-progress", p);
+  const send = (p: unknown) => {
+    overlay?.webContents.send("milo:paper-progress", p);
+    toHome("milo:paper-progress", p);
+  };
   try {
     // the class goes in the MLA header only if they named it (classFor falls back to the active class otherwise)
     const named = classFor(String(request));
@@ -1045,6 +1051,32 @@ ipcMain.handle("milo:bridge-status", () => bridgeConnected());
 registerLibrary();
 // ---------- "What Milo did": the timeline, and how each kind of thing gets undone ----------
 registerActivity();
+// ---------- Home base: the same agent as the frog, in a real window ----------
+ipcMain.handle("milo:open-home", () => void openHome(isDev));
+// typed in Home base -> the frog's command router (one agent); Milo's words come back as echoes
+ipcMain.on("milo:home-route", (_e, text: string) => overlay?.webContents.send("milo:route-text", String(text ?? "").slice(0, 4000)));
+ipcMain.on("milo:home-action", (_e, a: unknown) => overlay?.webContents.send("milo:home-action", a));
+ipcMain.on("milo:home-talk", () => overlay?.webContents.send("milo:talk"));
+ipcMain.on("milo:echo", (_e, kind: string, payload: unknown) => toHome("milo:echo", { kind: String(kind), payload }));
+let gradeCache: { at: number; portal: string; list: { name: string; grade: number | null }[] } | null = null;
+ipcMain.handle("milo:home-grades", async (_e, portal: string, fresh?: boolean) => {
+  const p = String(portal ?? "");
+  if (!p) return [];
+  if (!fresh && gradeCache && gradeCache.portal === p && Date.now() - gradeCache.at < 30 * 60e3) return gradeCache.list;
+  try {
+    const list = await Promise.all(
+      (await d2lCourses(p))
+        .filter((c) => !/ Lab$/.test(c.short))
+        .map(async (c) => ({ name: c.short, grade: (await d2lSheet(p, c).catch(() => null))?.sheet.current_percent ?? null }))
+    );
+    gradeCache = { at: Date.now(), portal: p, list };
+    bb("home", "grades", { n: list.length, known: list.filter((x) => x.grade != null).length });
+    return list;
+  } catch (e) {
+    bb("home", "grades_failed", { error: (e as Error).message.slice(0, 100) });
+    return gradeCache?.list ?? [];
+  }
+});
 // Tester feedback: one tap, their words + the last few event names (never what they said or saw).
 ipcMain.handle("milo:feedback", async (_e, message: string, kind?: string) => {
   const ok = await sendFeedback(String(message ?? ""), { email: account().email || undefined, kind: kind ? String(kind) : "feedback", recent: recentEvents() });
@@ -1364,6 +1396,7 @@ app.whenReady().then(() => {
     overlay?.focus();
   });
   // Talk to Milo from anywhere.
+  globalShortcut.register("CommandOrControl+Shift+H", () => void openHome(isDev));
   globalShortcut.register("CommandOrControl+Shift+Space", () => {
     overlay?.webContents.send("milo:talk");
   });
@@ -1377,6 +1410,7 @@ app.whenReady().then(() => {
   const tray = createTray({
     overlay: () => overlay,
     talk: () => overlay?.webContents.send("milo:talk"),
+    home: () => void openHome(isDev),
     feedback: () => {
       overlay?.showInactive();
       overlay?.webContents.send("milo:open-feedback");

@@ -187,6 +187,17 @@ declare global {
       d2lCheck: (portal: string) => Promise<{ ok: boolean; signin: boolean; text: string; via?: "chrome" | "milo"; chrome: boolean }>;
       d2lOpenChrome: (url: string) => Promise<boolean>;
       classesSync: (portal: string) => Promise<{ ok: boolean; changed: boolean; added?: string[]; renamed?: { from: string; to: string }[]; names?: string[]; text?: string }>;
+      home: {
+        open: () => Promise<void>;
+        route: (text: string) => void;
+        action: (a: { kind: "together" | "do" | "do_submit"; item: { title: string; course: string; due: string } }) => void;
+        talk: () => void;
+        grades: (portal: string, fresh?: boolean) => Promise<{ name: string; grade: number | null }[]>;
+        onEcho: (fn: (e: { kind: string; payload: unknown }) => void) => () => void;
+        echo: (kind: string, payload: unknown) => void;
+        onRouteText: (fn: (text: string) => void) => () => void;
+        onAction: (fn: (a: { kind: string; item: { title: string; course: string; due: string } }) => void) => () => void;
+      };
       lecture: {
         start: (said: string) => Promise<{ id: string; course: string; startedAt: number }>;
         chunk: (id: string, n: number, wav: ArrayBuffer) => Promise<boolean>;
@@ -288,3 +299,4 @@ declare global {
     };
   }
 }
+
