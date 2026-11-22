@@ -26,6 +26,8 @@ export type Recipe = { key: string; task: string; steps: RStep[]; wins: number; 
 export const RISKY = /\b(submit|send|post|publish|pay|buy|purchase|place (the |my |an? )?order|check ?out|delete|remove|turn in|unenroll|drop (the )?class)\b/i;
 export const APPROVED = /already approved|student said yes|approved placing|I approve/i;
 
+export { needsYes } from "./commit";
+
 // ---------- task shape ----------
 const VALUE = /"[^"]{1,120}"|'[^']{2,120}'|https?:\/\/\S+|[\w.+-]+@[\w-]+\.[\w.]+|\$?\d+(?:[.,]\d+)*%?/g;
 /** The task's first line with its specific values swapped for slots. */

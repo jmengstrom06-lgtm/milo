@@ -367,7 +367,7 @@ async function runJob(j: Job, deps: JobDeps): Promise<Job> {
             bb("job", "blocked", { step: i + 1, question: j.question });
             return j;
           }
-          if (r.status === "ask" && !RISKY.test(`${r.text ?? ""} ${step.do}`)) {
+          if (r.status === "ask" && !/all filled in/i.test(r.text ?? "") && !RISKY.test(`${r.text ?? ""} ${step.do}`)) {
             // his hands asked something that isn't about submitting / sending / buying: don't bother the student
             r = await deps.doTask(`${step.do}\n${context}\n(Don't ask the student anything: just do this one step exactly as written and nothing more. If there's nothing to click, read what the step asks for and finish with done, putting what you found in the done text.)`);
             j.actions++;

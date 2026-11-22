@@ -14,6 +14,7 @@ import { setSounds, sfx, soundsOn } from "./sfx";
 import ToolPanel, { SavedTool, loadTools, saveTools } from "./ToolPanel";
 import QuizPanel, { QuizHandle } from "./QuizPanel";
 import { BriefCard, BriefLoader, BriefState, SignInPanel } from "./Brief";
+import { parseAnswer, parseGoogle, parseGoogleMulti } from "./decide";
 import { fastDecide, looksLikeBackground, parseExam, parseFinalWeight, parseForecast, parseGradeNow, parseScore, parseSyllabus, parseHomework, parsePlanVoice, parseRadar, stripFiller, type DecideState } from "./decide";
 import { alertLine, emptyRadar, markWarned, mergeScan, pendingAlerts, upcoming, whenText, type Radar, type RadarItem, type ScanItem, type Warn } from "./radar";
 import RadarCard, { type RadarView } from "./RadarCard";
@@ -636,7 +637,8 @@ export default function App() {
         setMood("happy");
         await say(r.text);
         setBubble(null);
-        listen();
+        if (/\?\s*$/.test(r.text)) waitForAnswer(); // a yes/no question: ding, then just say yes
+        else listen();
         return false;
       }
       if (r.status === "stopped") {
@@ -707,6 +709,157 @@ export default function App() {
   const jobRef = useRef<MiloJob | null>(null);
   jobRef.current = job;
   const jobSaid = useRef<string>("");
+  // Google: an email waiting to be sent, or an event waiting to be added: both need a yes
+  const pendingGoogle = useRef<{ kind: "send"; draftId: string; at: number } | { kind: "event"; ev: { title: string; start: string; end?: string; where?: string }; at: number } | null>(null);
+  const googleConnecting = useRef(false);
+  // ---- Follow-up answers, like Alexa/Siri: after Milo ASKS something, the mic opens for a short
+  // answer with no "Milo" needed. The clock starts when he stops talking, gets longer once you start
+  // speaking, and only yes/no style answers count. Silence = nothing happens.
+  const answerUntil = useRef(0);
+  const answerTimer = useRef<number | undefined>(undefined);
+  const [answering, setAnswering] = useState(false);
+  const ANSWER_MS = 8000;
+  const answerTick = useRef(() => {});
+  answerTick.current = () => {
+    if (!answerUntil.current) return;
+    const left = answerUntil.current - Date.now();
+    if (left > 0) {
+      answerTimer.current = window.setTimeout(() => answerTick.current(), left + 50);
+      return;
+    }
+    answerUntil.current = 0;
+    setAnswering(false);
+    ears.current?.stopExpect();
+    bb("answer_window_end", { why: "no answer" });
+    setMood((m) => (m === "listening" ? "idle" : m));
+  };
+  const waitForAnswer = () => {
+    answerUntil.current = Date.now() + ANSWER_MS;
+    followUntil.current = Math.max(followUntil.current, answerUntil.current);
+    setAnswering(true);
+    setMood("listening");
+    ears.current?.mute(false); // open the mic now, before the ding, so an instant "yes" is caught
+    ears.current?.expect(ANSWER_MS + 4000);
+    sfx.chime(); // the "I'm listening" sound, like Siri's ding
+    bb("answer_window_open", { ms: ANSWER_MS });
+    window.clearTimeout(answerTimer.current);
+    answerTimer.current = window.setTimeout(() => answerTick.current(), ANSWER_MS + 50);
+    if (ears.current && ears.current.mode !== "always") void listen();
+  };
+  const endAnswer = (why: string) => {
+    if (!answerUntil.current) return;
+    answerUntil.current = 0;
+    window.clearTimeout(answerTimer.current);
+    setAnswering(false);
+    ears.current?.stopExpect();
+    bb("answer_window_end", { why });
+  };
+  // Proof after a Google action: a little "View in Calendar" button, so the student can check it really happened.
+  const [proof, setProof] = useState<{ label: string; url: string } | null>(null);
+  const proofTimer = useRef<number | undefined>(undefined);
+  const showProof = (r: GoogleReply) => {
+    if (!r.ok || !r.link) return;
+    window.clearTimeout(proofTimer.current);
+    setProof({ label: r.linkLabel || "Open it", url: r.link });
+    proofTimer.current = window.setTimeout(() => setProof(null), 30000);
+  };
+  const googleVoice = (text: string): boolean => {
+    const t = text.toLowerCase().replace(/[.!?,]+/g, " ").replace(/\s+/g, " ").trim();
+    const pg = pendingGoogle.current;
+    if (pg && Date.now() - pg.at < 60e3) {
+      const ans = parseAnswer(t);
+      if (ans === "yes") {
+        endAnswer("yes");
+        pendingGoogle.current = null;
+        setMood("thinking");
+        void (pg.kind === "send" ? window.milo.google.send(pg.draftId) : window.milo.google.eventAdd(pg.ev)).then((r) => {
+          if (r.ok) sfx.success();
+          setMood(r.ok ? "happy" : "thinking");
+          showProof(r);
+          say(r.text).then(() => setBubble(null));
+        });
+        return true;
+      }
+      if (ans === "no") {
+        endAnswer("no");
+        pendingGoogle.current = null;
+        say(pg.kind === "send" ? "Okay, I won't send it. It's still in your drafts." : "Okay, I won't add it.").then(() => setBubble(null));
+        return true;
+      }
+    }
+    // Two answers back to back: keep each one short (top 3), like Alexa does.
+    const brief = (x: string) => {
+      const list = x.match(/^([^:]+):\s*(.+)$/);
+      if (list) {
+        const items = list[2].replace(/\.\s*$/, "").split(/,\s+(?=[A-Z0-9])/);
+        return items.length > 3 ? `${list[1]}: ${items.slice(0, 3).join(", ")}, and ${items.length - 3} more.` : x;
+      }
+      const sents = x.split(/(?<=\.)\s+/);
+      return sents.length > 3 ? sents.slice(0, 3).join(" ") : x;
+    };
+    // Two questions in one breath: answer both, in order.
+    const multi = parseGoogleMulti(text);
+    if (multi) {
+      hush();
+      setMood("thinking");
+      bb("google_voice", { do: multi.map((m) => m.do).join("+") });
+      void (async () => {
+        for (const m of multi) {
+          const r = m.do === "calendar" ? await window.milo.google.calendar(m.days, m.range) : await window.milo.google.mail();
+          setMood(r.ok ? "happy" : "thinking");
+          await say(r.ok ? brief(r.text) : r.text);
+          if (!r.ok) break;
+        }
+        setBubble(null);
+      })();
+      return true;
+    }
+    const ga = parseGoogle(text);
+    if (!ga) return false;
+    hush();
+    const reply = (r: GoogleReply) => {
+      setMood(r.ok ? "happy" : "thinking");
+      showProof(r);
+      say(r.text).then(() => setBubble(null));
+    };
+    if (ga.do === "connect") {
+      if (googleConnecting.current) return true; // already waiting on the sign-in
+      googleConnecting.current = true;
+      setBubble("Opening Google sign-in…");
+      say("Sign in with Google in your browser, and I'll be connected.").then(() => setBubble(null));
+      void window.milo.google.connect().then((r) => {
+        googleConnecting.current = false;
+        reply(r);
+      });
+    } else if (ga.do === "calendar") void window.milo.google.calendar(ga.days, ga.range).then(reply);
+    else if (ga.do === "mail") void window.milo.google.mail().then(reply);
+    else if (ga.do === "doc") void window.milo.google.doc(ga.title).then(reply);
+    else if (ga.do === "draft") {
+      setMood("thinking");
+      setBubble("Writing it…");
+      void window.milo.google.draft(ga.request).then((r) => {
+        if (r.ok && r.draftId) pendingGoogle.current = { kind: "send", draftId: r.draftId, at: Date.now() };
+        setMood(r.ok ? "happy" : "thinking");
+        showProof(r);
+        say(r.text).then(() => {
+          setBubble(null);
+          if (r.ok && pendingGoogle.current) waitForAnswer();
+        });
+      });
+    } else if (ga.do === "event") {
+      setMood("thinking");
+      void window.milo.google.eventParse(ga.request).then((r) => {
+        if (r.ok && r.ev) pendingGoogle.current = { kind: "event", ev: r.ev, at: Date.now() };
+        setMood(r.ok ? "happy" : "thinking");
+        say(r.text).then(() => {
+          setBubble(null);
+          if (r.ok && pendingGoogle.current) waitForAnswer();
+        });
+      });
+    }
+    bb("google_voice", { do: ga.do });
+    return true;
+  };
   const jobActive = (j: MiloJob | null) => !!j && ["planning", "running", "checking"].includes(j.status);
   useEffect(
     () =>
@@ -1732,6 +1885,7 @@ export default function App() {
       }
     }
     if (jobVoice(text)) return;
+    if (googleVoice(text)) return;
     // Grade forecaster: "what do I need on the final for a B in stats?"
     const fc = parseForecast(text);
     if (fc) {
@@ -2035,9 +2189,11 @@ export default function App() {
         return;
       }
       case "yes":
+        endAnswer("yes");
         if (pendingTask.current) runTask(`${pendingTask.current}\n(The student said yes, go ahead with what you asked about.)`);
         return;
       case "no":
+        endAnswer("no");
         pendingTask.current = null;
         say("No problem, I won't.").then(() => setBubble(null));
         return;
@@ -2275,6 +2431,10 @@ export default function App() {
         return;
       }
       setEarState(st);
+      if (st === "hearing" && answerUntil.current && Date.now() < answerUntil.current) {
+        answerUntil.current = Date.now() + 12000; // you're answering: don't cut you off mid-word
+        followUntil.current = Math.max(followUntil.current, answerUntil.current);
+      }
       if (st === "hearing" && (e.mode !== "always" || Date.now() < followUntil.current)) setMood("listening");
       if (st === "timeout") {
         setHeard(null);
@@ -2391,7 +2551,7 @@ export default function App() {
         if (!w.rest) {
           // Just "Hey Milo": chime and show "Yeah?" without talking, so his ears stay open for your command.
           setMood("listening");
-          followUntil.current = Date.now() + 10000;
+          followUntil.current = Date.now() + 15000; // "Milo" ... (pause) ... command: people take a breath
           sfx.chime();
           setHeard(null);
           setBubble("Yeah?");
@@ -2523,7 +2683,7 @@ export default function App() {
       const cleaned = stripGo(text);
       const sure = fastDecide(cleaned, { kitOpen: null, researchOpen: false, toolOpen: false, lessonOpen: false, hasLastAnswer: false });
       const planWords = !!gpRef.current && !!parsePlanVoice(cleaned, !!lessonRef.current);
-      if ((sure && ["kit_menu", "open_kit", "hold", "flag"].includes(sure.do)) || parseHomework(cleaned) || planWords || parseRadar(cleaned, !!radarViewRef.current)) {
+      if ((answerUntil.current && Date.now() < answerUntil.current && parseAnswer(cleaned)) || (sure && ["kit_menu", "open_kit", "hold", "flag"].includes(sure.do)) || parseHomework(cleaned) || planWords || parseRadar(cleaned, !!radarViewRef.current)) {
         bb("card_skipped", { text: cleaned, do: sure?.do ?? (planWords ? "plan_voice" : parseRadar(cleaned, !!radarViewRef.current) ? "radar" : "homework") });
         return runPending(cleaned);
       }
@@ -3122,10 +3282,28 @@ export default function App() {
             <span className="watch-eye" /> Watching · Stop
           </button>
         )}
-        {handsFree && !watching && !working && !pending && !sweep && <div className={`ears-on ${earState === "hearing" ? "ears-on--hot" : ""}`}>Say "Hey Milo"</div>}
+        {answering && !pending && <div className="ears-on ears-on--answer">Listening… say yes or no</div>}
+        {handsFree && !answering && !watching && !working && !pending && !sweep && <div className={`ears-on ${earState === "hearing" ? "ears-on--hot" : ""}`}>Say "Hey Milo"</div>}
       </div>
 
       {bubble && <Bubble text={short(bubble)} style={bStyle} />}
+      {proof && !pending && (
+        <button
+          className="proof"
+          style={{ ...bStyle, ...(bubble ? { transform: "translateY(-46px)" } : {}) }}
+          onMouseEnter={() => hover(true)}
+          onMouseMove={() => hover(true)}
+          onMouseLeave={() => hover(false)}
+          onClick={() => {
+            window.milo.openUrl(proof.url);
+            bb("proof_opened", { label: proof.label });
+            setProof(null);
+            hover(false);
+          }}
+        >
+          ✓ {proof.label} ↗
+        </button>
+      )}
       {pending && (
         <div className="got-it" style={bStyle} onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)} onMouseLeave={() => hover(false)}>
           <div className="got-it__label">{pending.unfinished ? "Keep going…" : "Got it"}</div>

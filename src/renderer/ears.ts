@@ -40,6 +40,27 @@ export class Ears {
   private ring: Float32Array[] = [];
   private speech: Float32Array[] = [];
   private speaking = false;
+  /** Milo just asked you a question: an answer is EXPECTED, so a quick soft "yes" must count (Alexa follow-up mode). */
+  private expectUntil = 0;
+  private expectFrom = 0;
+  private expectPeak = 0;
+  private uttExpected = false;
+  expect(ms: number) {
+    this.expectUntil = Date.now() + ms;
+    this.expectFrom = Date.now() + 300; // skip the ding itself
+    this.expectPeak = 0;
+    this.loudRun = 0;
+    if (this.smart && !this.streaming && !this.muted) this.startStream(); // Flux hears from the first sound
+    this.onDebug("expect", { ms });
+  }
+  stopExpect() {
+    if (this.expectUntil && !this.uttExpected) this.onDebug("expect_end", { peak: +this.expectPeak.toFixed(4), floor: +this.floor.toFixed(4) });
+    this.expectUntil = 0;
+  }
+  private get expecting() {
+    const now = Date.now();
+    return now >= this.expectFrom && now < this.expectUntil;
+  }
   private loudRun = 0;
   private quietRun = 0;
   private idleFrames = 0;
@@ -177,7 +198,8 @@ export class Ears {
     const level = voiced ? energy[Math.floor(voiced * 0.7)] : 0;
     this.voicedFrames = Math.max(voiced, Math.round((text.split(/\s+/).length * 0.35 * RATE) / FRAME));
     this.lastLevel = level;
-    const tooFar = this.mode === "always" && this.userLevel > 0 && voiced > 0 && level < this.userLevel * 0.45;
+    const tooFar = !this.uttExpected && this.mode === "always" && this.userLevel > 0 && voiced > 0 && level < this.userLevel * 0.45;
+    this.uttExpected = false;
     this.onDebug("end", { reason: forced ? "flux_forced" : "flux_end_of_turn", seconds, level: +level.toFixed(4), userLevel: +this.userLevel.toFixed(4), mode: this.mode, text });
     if (!text.trim() || tooFar) {
       this.onDebug("dropped", { why: !text.trim() ? "no_words" : "too_quiet_not_you", seconds });
@@ -360,6 +382,11 @@ export class Ears {
     let on = Math.max(strict ? 0.028 : 0.018, this.floor * (strict ? 4 : 3));
     // Once Milo knows how loud you are, quieter voices (other people, the TV) can't start a recording.
     if (strict && this.userLevel > 0) on = Math.max(on, this.userLevel * 0.5);
+    const expecting = this.expecting;
+    if (expecting) {
+      on = Math.max(0.016, this.floor * 2.5, this.userLevel * 0.22); // a short, soft "yes" right after the ding
+      this.expectPeak = Math.max(this.expectPeak, rms);
+    }
     // End of your sentence = when it drops well below YOUR level, even if others keep talking.
     const off = Math.max(0.011, this.floor * 1.8, this.uttPeak * 0.2); // only real quiet ends it, not a softer phrase
 
@@ -375,8 +402,9 @@ export class Ears {
         this.loudRun = 0;
         this.floor = this.floor * 0.95 + rms * 0.05; // learn the room's background noise
       }
-      if (this.loudRun >= START_FRAMES) {
-        this.onDebug("start", { mode: this.mode, rms: +rms.toFixed(4), on: +on.toFixed(4), floor: +this.floor.toFixed(4), smart: this.smart });
+      if (this.loudRun >= (expecting ? 2 : START_FRAMES)) {
+        this.uttExpected = expecting;
+        this.onDebug("start", { mode: this.mode, rms: +rms.toFixed(4), on: +on.toFixed(4), floor: +this.floor.toFixed(4), smart: this.smart, expecting });
         this.speaking = true;
         this.speech = [...this.ring];
         if (this.smart && !this.streaming) {
@@ -444,9 +472,11 @@ export class Ears {
     const level = voiced ? energy[Math.floor(voiced * 0.7)] : 0;
     this.voicedFrames = voiced;
     this.lastLevel = level;
-    const tooShort = voiced * FRAME < RATE * MIN_VOICED_S;
+    const exp = this.uttExpected;
+    this.uttExpected = false;
+    const tooShort = voiced * FRAME < RATE * (exp ? 0.15 : MIN_VOICED_S);
     // Voice focus: in hands-free, ignore voices much quieter than yours (TV, people across the room).
-    const tooFar = this.mode === "always" && this.userLevel > 0 && level < this.userLevel * 0.45;
+    const tooFar = !exp && this.mode === "always" && this.userLevel > 0 && level < this.userLevel * 0.45;
     this.onDebug("end", { reason, seconds, voicedS: +((voiced * FRAME) / RATE).toFixed(2), level: +level.toFixed(4), peak, userLevel: +this.userLevel.toFixed(4), floor: +this.floor.toFixed(4), mode: this.mode });
     if (tooShort || tooFar) {
       this.onDebug("dropped", { why: tooShort ? "too_short" : "too_quiet_not_you", seconds });

@@ -6,7 +6,7 @@ import { webActions, WebAction } from "./brain";
 import { log as bb } from "./blackbox";
 import { activateApp, quitApp } from "./hands";
 import { detectBlocker } from "./blockers";
-import { APPROVED, describeEl, fill, findEl, recipeFor, RISKY, RStep, saveRecipe } from "./recipes";
+import { APPROVED, describeEl, fill, findEl, needsYes, recipeFor, RISKY, RStep, saveRecipe } from "./recipes";
 
 type El = {
   id: string; tag: string; role?: string; type?: string; label: string; inView: boolean;
@@ -129,6 +129,13 @@ export async function runWebTask(
       }
       lastSig = sig;
       const el = a.id ? snap.elements.find((e) => e.id === a.id) : undefined;
+      // Hard stop before anything that can't be taken back (Save on a calendar, Send, Submit, Buy...).
+      const commit = a.action === "click" && el && !APPROVED.test(task) ? needsYes(el.label, snap.url) : null;
+      if (commit) {
+        bb("web", "held_for_yes", { label: el!.label, url: snap.url });
+        const what = commit === "send" ? "send it" : commit === "save" || commit === "add" || commit === "create" || commit === "schedule" ? "save it" : `click "${el!.label.slice(0, 30)}"`;
+        return { status: "ask", text: `It's all filled in. Want me to ${what}?` };
+      }
       onStep({ say: a.say, action: a.action === "type" ? "typing" : a.action, screenPt: screenPoint(snap, el?.rect) });
 
       let newPage = false;

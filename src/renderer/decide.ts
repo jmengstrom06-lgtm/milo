@@ -240,8 +240,64 @@ export function looksLikeBackground(text: string): boolean {
   const t = text.trim();
   const words = t.split(/\s+/).filter(Boolean).length;
   const sentences = (t.match(/[.!?](\s|$)/g) ?? []).length;
-  const toMilo = /^(?:hey\s+)?(?:milo\b|what|how|why|when|where|who|which|can|could|would|will|is|are|do|does|did|should|open|close|quit|make|help|start|stop|pause|show|tell|give|read|check|remember|set|add|put|find|search|write|explain|solve|go|play|turn|save|keep going|continue|yes|yeah|yep|no|nope|okay|ok|sure|thanks|thank you|i need|i want|i got|my|please|let'?s|switch|undo|cancel)\b/i.test(t);
+  const toMilo = /^(?:hey\s+)?(?:milo\b|what|how|why|when|where|who|which|can|could|would|will|is|are|do|does|did|should|open|close|quit|make|help|start|stop|pause|show|tell|give|read|check|remember|set|add|put|find|search|write|explain|solve|go|play|turn|save|keep going|continue|yes|yeah|yep|no|nope|okay|ok|sure|thanks|thank you|i need|i want|i got|my|please|let'?s|switch|undo|cancel|next|back|again|more|done|skip|repeat|louder|slower|faster|both|none|all|first|second|third|last|that|this|the|cool|nice|perfect|great|awesome|got it|sounds good|never ?mind)\b/i.test(t);
   if (toMilo) return false;
   if (/\b(milo|mylo)\b/i.test(t)) return false;
+  if (words <= 3) return true; // "Those procedure": a scrap of room talk, not a command
   return (words >= 9 && sentences >= 2) || /^(?:[A-Z][a-z]+),\s/.test(t); // several sentences of chatter, or talking to someone by name ("Mike, ...")
+}
+
+// ---------- Google: calendar, email, docs ----------
+export type GoogleAsk =
+  | { do: "connect" }
+  | { do: "calendar"; days: number; range: string }
+  | { do: "mail" }
+  | { do: "doc"; title: string }
+  | { do: "draft"; request: string }
+  | { do: "event"; request: string };
+export function parseGoogle(text: string): GoogleAsk | null {
+  const t = text.trim().replace(/[.!?]+$/, "").replace(/^(hey |ok |okay )?(milo,?\s*)?/i, "").replace(/[’‘]/g, "'");
+  const low = t.toLowerCase();
+  if (/^(connect|link|hook up|set up|sign (me )?in to|add) (my )?(google|gmail|google (calendar|drive|docs)|google account)\b/.test(low)) return { do: "connect" };
+  // add to calendar (before reading it)
+  if (/\b(add|adds|added|put|puts|schedule|stick)\b.+\b(on|to|in|onto) my (google )?calendar\b/.test(low) || /^(schedule|set up) (a |an )?(meeting|study (group|session)|call)\b/.test(low)) return { do: "event", request: t.replace(/^adds\b/i, "add") };
+  if (/\b(calendar|schedule|events|meetings)\b/.test(low) && /\b(what'?s|what is|what do i have|anything|check|read|show|tell me|how'?s|look at)\b/.test(low)) {
+    const days = /\btoday\b/.test(low) ? 1 : /\btomorrow\b/.test(low) ? 2 : /\bnext week\b/.test(low) ? 14 : 7;
+    const range = /\btoday\b/.test(low) ? "today" : /\btomorrow\b/.test(low) ? "through tomorrow" : /\bnext week\b/.test(low) ? "in the next two weeks" : "this week";
+    return { do: "calendar", days, range };
+  }
+  if (/\b(e-?mails?|inbox|gmail)\b/.test(low) && /\b(any|new|unread|check|read|what'?s|do i have|got)\b/.test(low) && !/\b(write|draft|send|email (him|her|them|professor|prof|my))\b/.test(low)) return { do: "mail" };
+  const doc = t.match(/^(?:make|create|start|open)(?: me)? (?:a |an )?(?:new )?google doc(?:ument)?(?:\s+(?:called|named|titled|for|about))?\s*(.*)$/i);
+  if (doc) return { do: "doc", title: (doc[1] || "Untitled").replace(/^["']|["']$/g, "").trim() || "Untitled" };
+  if (/\b(draft|write|compose|send)( up)?( an?| me an?)? (e-?mail|gmail)\b/.test(low) || /^e-?mail (professor|prof|dr|mr|ms|mrs|my|[a-z]+@)/.test(low)) return { do: "draft", request: t.replace(/^(?:go into|open( up)?|in) my gmail,? and /i, "") };
+  return null;
+}
+
+/** A spoken answer to Milo's own yes/no question (Alexa-style follow-up). "yes but make it 4" is NOT a plain yes. */
+export function parseAnswer(text: string): "yes" | "no" | null {
+  const t = text
+    .toLowerCase()
+    .replace(/[’‘]/g, "'")
+    .replace(/[^a-z' ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^(hey |hi |ok |okay )?(milo|mylo|my low)\b\s*/, "");
+  if (!t || t.split(" ").length > 6) return null;
+  if (/\b(but|change|instead|actually|except|make it|move it)\b/.test(t)) return null;
+  if (/^(no|nope|nah|don'?t|do not|cancel|never ?mind|not yet|not now|wait|stop|hold on)\b/.test(t)) return "no";
+  if (/^(yes|yeah|yea|yep|yup|ya|sure|do it|go ahead|go for it|send it|add it|save it|ok|okay|sounds good|perfect|please|correct|that'?s right|confirm|absolutely|definitely|of course)\b/.test(t)) return "yes";
+  return null;
+}
+
+/** "What's on my calendar this week, and any new emails?" = two questions. Only read-only asks are split
+ *  (calendar + mail), so nothing that changes anything ever runs twice or by accident. */
+export function parseGoogleMulti(text: string): GoogleAsk[] | null {
+  const parts = text.split(/,?\s+\b(?:and also|and|also|plus)\b\s+|[,;]\s+(?=(?:is|are|do|any|what|check|how)\b)/i).map((p) => p.trim()).filter(Boolean);
+  if (parts.length < 2) return null;
+  const asks: GoogleAsk[] = [];
+  for (const p of parts) {
+    const a = parseGoogle(p);
+    if (a && (a.do === "calendar" || a.do === "mail") && !asks.some((x) => x.do === a.do)) asks.push(a);
+  }
+  return asks.length >= 2 ? asks : null;
 }

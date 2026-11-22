@@ -1,6 +1,7 @@
 export {};
 
 declare global {
+  type GoogleReply = { ok: boolean; text: string; connect?: boolean; link?: string; linkLabel?: string };
   type MiloJobStep = { do: string; done_when: string; status: "todo" | "doing" | "retrying" | "done" | "failed" | "skipped"; tries: number; note?: string };
   type MiloJob = {
     id: string;
@@ -174,6 +175,17 @@ declare global {
       d2lDue: (portal: string) => Promise<{ ok: true; items: { title: string; course: string; due: string; due_iso?: string; kind?: string }[] } | { ok: false; signin: boolean; text: string }>;
       syllabus: (course: string) => Promise<{ ok: boolean; text: string }>;
       exam: (q: { course: string; kind?: string; extra?: string }) => Promise<{ ok: true; topic: string; questions: { q: string; choices: string[]; correct: number; explain: string }[] } | { ok: false; text: string }>;
+      google: {
+        status: () => Promise<{ ready: boolean; connected: boolean; email: string | null }>;
+        connect: () => Promise<{ ok: boolean; text: string }>;
+        calendar: (days: number, range: string) => Promise<GoogleReply>;
+        mail: () => Promise<GoogleReply>;
+        doc: (title: string, text?: string) => Promise<GoogleReply>;
+        draft: (request: string) => Promise<GoogleReply & { draftId?: string; to?: string; subject?: string }>;
+        send: (draftId: string) => Promise<GoogleReply>;
+        eventParse: (request: string) => Promise<GoogleReply & { ev?: { title: string; start: string; end?: string; where?: string } }>;
+        eventAdd: (ev: { title: string; start: string; end?: string; where?: string }) => Promise<GoogleReply>;
+      };
       usage: () => Promise<{ calls: number; cost: number; smart: number; fast: number; images: number; soft: number; hard: number }>;
       jobStart: (goal: string, opts?: { approved?: boolean }) => Promise<MiloJob>;
       jobResume: (approve?: boolean) => Promise<MiloJob | null>;

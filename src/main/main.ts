@@ -31,6 +31,9 @@ import { startUpdates } from "./updater";
 import { isJob, lastJob, resumable, resumeJob, startJob, type JobDeps } from "./jobs";
 import { getProfile, setProfile, type Profile } from "./profile";
 import { usageToday } from "./usage";
+import { awayWatch } from "./away";
+import { calendarAdd, calendarUpcoming, docsCreate, GoogleNotConnected, googleConnect, googleStatus, gmailDraft, gmailSendDraft, gmailUnread } from "./google";
+import { composeEmail, parseEvent, sayCalendar, sayMail } from "./googleai";
 import { feedUrl } from "./school";
 import { checkMath, isQuantitative, type MathVerdict } from "./mathcheck";
 import { askForecast, setFinalWeight } from "./grades";
@@ -337,7 +340,14 @@ const jobDeps: JobDeps = {
     const fields = (page?.elements ?? []).filter((e) => e.label && (e.value !== undefined || e.checked !== undefined)).map((e) => ({ label: e.label!, value: e.value, checked: e.checked }));
     return { jpeg, pageText: readable ? page!.text : undefined, url: page?.url, title: page?.title, fields };
   },
-  emit: (job) => overlay?.webContents.send("milo:job", job),
+  emit: (job) => {
+    overlay?.webContents.send("milo:job", job);
+    // away mode: Mac stays awake while working; a notification when it's done or needs you
+    awayWatch(job, () => {
+      overlay?.showInactive();
+      overlay?.webContents.send("milo:job", job);
+    });
+  },
   aborted: () => jobAbort || taskAbort,
   // starting or resuming a job clears BOTH stop flags (a leftover "stop" froze the next job)
   resetAbort: () => {
@@ -373,6 +383,72 @@ ipcMain.handle("milo:job-is", (_e, text: string) => isJob(String(text ?? "")));
 ipcMain.handle("milo:profile-get", () => getProfile());
 ipcMain.handle("milo:profile-set", (_e, patch: Profile) => setProfile(patch ?? {}));
 ipcMain.handle("milo:usage", () => usageToday());
+// ---------- Google: Gmail, Calendar, Docs (sending and adding always wait for the student's yes) ----------
+const gerr = (e: unknown) =>
+  e instanceof GoogleNotConnected
+    ? { ok: false as const, connect: true, text: googleStatus().ready ? "Connect your Google account first. Say connect Google." : "Google isn't set up in Milo yet." }
+    : { ok: false as const, text: `Google had a problem: ${(e as Error).message.slice(0, 120)}` };
+ipcMain.handle("milo:google-status", () => googleStatus());
+ipcMain.handle("milo:google-connect", () => googleConnect());
+ipcMain.handle("milo:google-calendar", async (_e, days: number, range: string) => {
+  try {
+    return { ok: true, text: sayCalendar(await calendarUpcoming(Number(days) || 7), String(range || "this week")) };
+  } catch (e) {
+    return gerr(e);
+  }
+});
+ipcMain.handle("milo:google-mail", async () => {
+  try {
+    return { ok: true, text: sayMail(await gmailUnread(8)) };
+  } catch (e) {
+    return gerr(e);
+  }
+});
+ipcMain.handle("milo:google-doc", async (_e, title: string, text?: string) => {
+  try {
+    const d = await docsCreate(String(title || "Untitled"), String(text ?? ""));
+    void shell.openExternal(d.url);
+    return { ok: true, text: `Made your Google Doc "${title}" and opened it.`, url: d.url, link: d.url, linkLabel: "Open doc" };
+  } catch (e) {
+    return gerr(e);
+  }
+});
+/** Draft only. Sending is a separate call, after the student's yes. */
+ipcMain.handle("milo:google-draft", async (_e, request: string) => {
+  try {
+    const r = await composeEmail(String(request));
+    if (!r.ok) return { ok: false, text: r.text };
+    if (!r.data.found) return { ok: false, text: `I couldn't find ${r.data.to}'s email address in your inbox. Say it with their address, like "email jsmith@tcu.edu".` };
+    const d = await gmailDraft(r.data);
+    return { ok: true, draftId: d.draftId, link: d.link, linkLabel: "Open draft", to: r.data.to, subject: r.data.subject, body: r.data.body, text: `I wrote an email to ${r.data.to}, subject "${r.data.subject}". It's in your drafts. Want me to send it?` };
+  } catch (e) {
+    return gerr(e);
+  }
+});
+ipcMain.handle("milo:google-send", async (_e, draftId: string) => {
+  try {
+    await gmailSendDraft(String(draftId));
+    return { ok: true, text: "Sent!", link: "https://mail.google.com/mail/u/0/#sent", linkLabel: "View in Gmail" };
+  } catch (e) {
+    return gerr(e);
+  }
+});
+ipcMain.handle("milo:google-event-parse", async (_e, request: string) => {
+  const r = await parseEvent(String(request)).catch((e) => ({ ok: false as const, text: (e as Error).message }));
+  if (!r.ok) return { ok: false, text: r.text };
+  const ev = { title: r.data.title, start: r.data.start, end: r.data.end || undefined, where: r.data.where || undefined };
+  const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(ev.start) ? `${ev.start}T12:00` : ev.start);
+  const when = isNaN(d.getTime()) ? ev.start : /^\d{4}-\d{2}-\d{2}$/.test(ev.start) ? d.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" }) : d.toLocaleString("en-US", { weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return { ok: true, ev, text: `Add "${ev.title}" on ${when}${ev.where ? ` at ${ev.where}` : ""} to your calendar?` };
+});
+ipcMain.handle("milo:google-event-add", async (_e, ev: { title: string; start: string; end?: string; where?: string }) => {
+  try {
+    const r = await calendarAdd(ev);
+    return { ok: true, text: "Added to your calendar.", link: r.link || "https://calendar.google.com/calendar/r", linkLabel: "View in Calendar" };
+  } catch (e) {
+    return gerr(e);
+  }
+});
 // Calendar feeds (any LMS): fetched here, not in the page, so no browser blocks it.
 async function fetchFeed(url: string) {
   try {

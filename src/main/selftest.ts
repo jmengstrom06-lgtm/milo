@@ -11,9 +11,10 @@ import { log as bbLog, onLog } from "./blackbox";
 import { loadClasses, saveClasses } from "./classes";
 import { deleteItem, listItems } from "./library";
 import { frontApp, isRunning, openApp, quitApp } from "./hands";
+import { googleStatus } from "./google";
 
-type Cat = "Speed" | "Control" | "Polish" | "Organization" | "Study power" | "Personal" | "Focus" | "Research" | "Computer" | "School";
-const WEIGHT: Record<Cat, number> = { Speed: 20, Control: 20, Polish: 20, Organization: 15, "Study power": 10, Personal: 5, Focus: 5, Research: 5, Computer: 20, School: 15 };
+type Cat = "Speed" | "Control" | "Polish" | "Organization" | "Study power" | "Personal" | "Focus" | "Research" | "Computer" | "School" | "Google";
+const WEIGHT: Record<Cat, number> = { Speed: 20, Control: 20, Polish: 20, Organization: 15, "Study power": 10, Personal: 5, Focus: 5, Research: 5, Computer: 20, School: 15, Google: 15 };
 const WHY: Record<Cat, string> = {
   Speed: "Feels instant. Slow = 'just another chatbot'.",
   Control: "Does exactly what you say, the moment you say it (stop, close, cancel).",
@@ -25,6 +26,7 @@ const WHY: Record<Cat, string> = {
   Research: "Real answers with sources, fast.",
   Computer: "Opens, quits and switches apps however you say it (only in npm run test:computer).",
   School: "Reads D2L directly: signed in, your grades, what's due, what you need on the final.",
+  Google: "Calendar and Gmail, direct and fast; asks before adding or sending; a plain yes/no works after the ding.",
 };
 
 type Result = { id: string; cat: Cat; name: string; score: number; pass: boolean; detail: string; ms?: number; shot?: string; events?: string[] };
@@ -82,6 +84,9 @@ export async function runSelfTest(win: BrowserWindow) {
   const speed = (ms: number, great: number, ok: number) => (ms < 0 ? 0 : ms <= great ? 1 : ms <= ok ? 0.6 : 0.25);
 
   async function test(id: string, cat: Cat, name: string, fn: () => Promise<{ score: number; detail: string; ms?: number }>) {
+    // MILO_TEST_ONLY=W  -> just the Google tests; MILO_TEST_ONLY=W1,W4 -> just those
+    const only = (process.env.MILO_TEST_ONLY || "").split(",").map((x) => x.trim()).filter(Boolean);
+    if (only.length && !only.some((o) => id === o || (o.length === 1 && id.startsWith(o)))) return;
     log(`${id} ${name}…`);
     let r: { score: number; detail: string; ms?: number } = { score: 0, detail: "" };
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -313,7 +318,7 @@ export async function runSelfTest(win: BrowserWindow) {
       const score = (leaked ? 0 : 0.5) + (back < 0 ? 0 : 0.5);
       return { score, detail: [leaked ? `${label(A)} drawing still showing in ${label(B)}` : `${label(B)} was clean`, back < 0 ? `drawing didn't come back in ${label(A)}` : `came back in ${label(A)}`].join("; ") };
     });
-    results.push({
+    if (!process.env.MILO_TEST_ONLY || sketchMs >= 0) results.push({ // skipped O1 (MILO_TEST_ONLY) = no drawing to time
       id: "S4", cat: "Speed", name: "Drawing made ('draw y equals x squared')", ms: sketchMs, pass: sketchMs >= 0 && sketchMs < 15000,
       score: speed(sketchMs, 8000, 15000), detail: sketchMs < 0 ? "never finished" : `drawn in ${(sketchMs / 1000).toFixed(1)}s`,
     });
@@ -540,6 +545,81 @@ export async function runSelfTest(win: BrowserWindow) {
         await hear("What's due this week?");
         const ms = await saidMatch(/due|caught up|nothing/i, 10000);
         return { ms, score: ms < 0 ? 0 : speed(Date.now() - t0, 3000, 8000), detail: ms < 0 ? "no answer" : `answered in ${((Date.now() - t0) / 1000).toFixed(1)}s` };
+      });
+    }
+  }
+
+  // ======================= GOOGLE: calendar + Gmail, and the yes/no follow-up =======================
+  // Nothing here creates or sends anything: the "add" test answers NO.
+  {
+    const said = async (re: RegExp, timeout: number, after = 0) => {
+      const st = Date.now();
+      while (Date.now() - st < timeout) {
+        if (events.some((e) => e.t >= after && e.line.startsWith("app/say") && re.test(e.line))) return Date.now() - st;
+        await sleep(150);
+      }
+      return -1;
+    };
+    const has = (prefix: string) => events.some((e) => e.line.startsWith(prefix));
+    const g = (() => { try { return googleStatus(); } catch { return { connected: false, email: null as string | null }; } })();
+    await test("W0", "Google", "Google connected", async () => ({ score: g.connected ? 1 : 0, detail: g.connected ? `as ${g.email}` : "not connected: say 'Milo, connect Google'" }));
+    if (g.connected) {
+      const CAL = /this week|nothing on your calendar|thing(s)? this week|calendar is (clear|empty)|One thing/i;
+      const MAIL = /new emails?|inbox is (clear|empty)|no new|unread/i;
+      await test("W1", "Google", `"What's on my calendar this week?"`, async () => {
+        await reset();
+        const t0 = Date.now();
+        await hear("What's on my calendar this week?");
+        const ms = await said(CAL, 10000);
+        return { ms, score: ms < 0 ? 0 : speed(Date.now() - t0, 3000, 7000), detail: ms < 0 ? "no calendar answer" : `answered in ${((Date.now() - t0) / 1000).toFixed(1)}s` };
+      });
+      await test("W2", "Google", `"Do I have any new emails?"`, async () => {
+        await reset();
+        const t0 = Date.now();
+        await hear("Do I have any new emails?");
+        const ms = await said(MAIL, 10000);
+        return { ms, score: ms < 0 ? 0 : speed(Date.now() - t0, 3000, 7000), detail: ms < 0 ? "no email answer" : `answered in ${((Date.now() - t0) / 1000).toFixed(1)}s` };
+      });
+      await test("W3", "Google", "Two questions in one breath: calendar AND emails", async () => {
+        await reset();
+        const t0 = Date.now();
+        await hear("What's on my calendar this week, and do I have any new emails?");
+        const c = await said(CAL, 12000);
+        const m = await said(MAIL, 35000); // the calendar part is read out first
+        const both = c >= 0 && m >= 0;
+        return { ms: both ? Date.now() - t0 : -1, score: both ? 1 : c >= 0 || m >= 0 ? 0.3 : 0, detail: both ? `both answered in ${((Date.now() - t0) / 1000).toFixed(1)}s` : c >= 0 ? "only answered the calendar" : m >= 0 ? "only answered the emails" : "answered neither" };
+      });
+      await test("W4", "Google", "Adding an event ASKS first, then dings for a yes/no", async () => {
+        await reset();
+        await hear("Add Milo self test Monday at 9 to my calendar");
+        const ask = await said(/to your calendar\?/i, 10000);
+        if (ask < 0) return { score: 0, detail: "never asked to confirm" };
+        await sleep(1500);
+        const added = has("google/event_added");
+        const win = await (async () => {
+          const st = Date.now();
+          while (Date.now() - st < 10000) {
+            if (has("app/answer_window_open")) return true;
+            await sleep(150);
+          }
+          return false;
+        })();
+        if (added) return { score: 0, detail: "ADDED WITHOUT ASKING" };
+        return { score: win ? 1 : 0.5, detail: win ? "asked, then opened the yes/no window" : "asked, but no ding / answer window" };
+      });
+      await test("W5", "Google", 'Plain "no" (no "Milo") cancels instantly', async () => {
+        await reset();
+        await hear("Add Milo self test Monday at 9 to my calendar");
+        if ((await said(/to your calendar\?/i, 10000)) < 0) return { score: 0, detail: "never asked to confirm" };
+        const st = Date.now();
+        while (Date.now() - st < 10000 && !has("app/answer_window_open")) await sleep(100);
+        if (!has("app/answer_window_open")) return { score: 0, detail: "no answer window after the question" };
+        await sleep(400); // the ding
+        const t0 = Date.now();
+        await js(`window.__milo.hear("No.", false)`);
+        const ms = await said(/won't add it/i, 5000, t0);
+        const added = has("google/event_added");
+        return { ms, score: added ? 0 : ms < 0 ? 0 : speed(ms, 1500, 4000), detail: added ? "ADDED even though you said no" : ms < 0 ? "didn't hear the no" : `cancelled in ${(ms / 1000).toFixed(1)}s, nothing added` };
       });
     }
   }
