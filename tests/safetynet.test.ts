@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { needsYes } from "../src/main/recipes";
+import { needsYes } from "../src/main/commit";
 import { parseGoogleMulti } from "../src/renderer/decide";
 
 describe("browser safety net", () => {
