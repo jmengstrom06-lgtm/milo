@@ -14,6 +14,8 @@ import { deleteItem, listItems } from "./library";
 import { frontApp, isRunning, openApp, quitApp } from "./hands";
 import { calendarAdd, docsText, gmailDraft, googleStatus } from "./google";
 import { lastPaper } from "./paper";
+import { addChunk, finishLecture, forgetLectureNote, startLecture } from "./lecture";
+import { macSpeak } from "./macvoice";
 import { activity, did } from "./activityLog";
 import { memories, remember } from "./memory";
 import { sendFeedback } from "./telemetry";
@@ -515,26 +517,7 @@ export async function runSelfTest(win: BrowserWindow) {
           await sleep(400);
           return events.some((e) => e.line.startsWith("app/say") && /backup/i.test(e.line));
         };
-        await test("L4", "School", "Offers the calendar backup once; 'no thanks' drops it", async () => {
-          if (!(await feedOffer())) return { score: 0, detail: "never offered the backup" };
-          const t0 = Date.now();
-          await js(`window.__milo.hear("No thanks.", false)`);
-          const ms = await saidMatch(/no problem/i, 6000);
-          const opened = events.some((e) => e.t >= t0 && e.line.startsWith("ipc/d2l-open-chrome"));
-          return { ms, score: opened ? 0 : ms < 0 ? 0 : 1, detail: opened ? "OPENED D2L after 'no'" : ms < 0 ? "didn't answer the no" : "offered, then dropped it" };
-        });
-        if (process.env.MILO_TEST_COMPUTER === "1") {
-          await test("L5", "School", "'Yes' opens D2L's Subscribe page in Chrome", async () => {
-            if (!(await feedOffer())) return { score: 0, detail: "never offered the backup" };
-            await js(`window.__milo.hear("Yes.", false)`);
-            const st = Date.now();
-            while (Date.now() - st < 15000 && !events.some((e) => e.line.startsWith("ipc/d2l-open-chrome"))) await sleep(150);
-            const ok = events.some((e) => e.line.startsWith("ipc/d2l-open-chrome") && /"out":true/.test(e.line));
-            const said = await saidMatch(/tap Reset/i, 8000);
-            await js("window.__milo.reset()").catch(() => {});
-            return { score: ok && said >= 0 ? 1 : ok ? 0.7 : 0, detail: ok ? "opened the Subscribe page in Chrome (close that tab; don't press Reset unless you want the backup)" : "didn't open it" };
-          });
-        }
+        void feedOffer; // the calendar-backup offer is off (TCU's D2L doesn't allow the link)
       }
       await test("L3", "School", '"Brief me" reads D2L directly (fast, no page reading)', async () => {
         await reset();
@@ -611,6 +594,54 @@ export async function runSelfTest(win: BrowserWindow) {
         return { ms, score: ms < 0 ? 0 : speed(Date.now() - t0, 3000, 8000), detail: ms < 0 ? "no answer" : `answered in ${((Date.now() - t0) / 1000).toFixed(1)}s` };
       });
     }
+  }
+
+  // ======================= LECTURE LISTENER (V) =======================
+  {
+    const said = async (re: RegExp, timeout: number, after = 0) => {
+      const st = Date.now();
+      while (Date.now() - st < timeout) {
+        if (events.some((e) => e.t >= after && e.line.startsWith("app/say") && re.test(e.line))) return Date.now() - st;
+        await sleep(200);
+      }
+      return -1;
+    };
+    await test("V1", "Study power", "\"Listen to my lecture\" starts recording, then stays quiet in class", async () => {
+      await reset();
+      await hear("Listen to my lecture");
+      const rec = await waitFor("s.lecture && s.inClass", 15000);
+      if (rec < 0) return { score: 0, detail: "didn't start recording" };
+      const t0 = Date.now();
+      await hear("What did you do?"); // anything he'd normally say out loud
+      await sleep(4000);
+      const loud = events.some((e) => e.t >= t0 && e.line.startsWith("voice/play"));
+      const quiet = events.some((e) => e.t >= t0 && e.line.startsWith("app/say_quiet"));
+      await hear("Class is over");
+      const stopped = await waitFor("!s.lecture", 10000);
+      if (stopped < 0) await js("window.__milo.stopLecture()").catch(() => {}); // never leave it recording (or quiet) for the next tests
+      await said(/barely heard|notes|couldn't/i, 60000, t0); // nothing real was said, so no notes: that's fine
+      return { score: loud ? 0.3 : !quiet ? 0.5 : stopped < 0 ? 0.6 : 1, detail: loud ? "TALKED OUT LOUD during class" : !quiet ? "recorded, but didn't answer quietly" : stopped < 0 ? "quiet in class, but 'class is over' didn't stop it" : "recorded, answered on screen only, stopped on 'class is over'" };
+    });
+    await test("V2", "Study power", "A spoken mini-lecture becomes notes, flashcards and a flagged exam item", async () => {
+      const lecture =
+        "Okay everyone, today we are covering z scores. A z score tells you how many standard deviations a value is from the mean. " +
+        "The formula is z equals x minus the mean, divided by the standard deviation. For example, if the mean test score is 70, " +
+        "the standard deviation is 10, and you scored 85, your z score is 1.5. A positive z score means above the mean, and a negative z score means below it. " +
+        "About 68 percent of values fall within one standard deviation of the mean, and about 95 percent fall within two. " +
+        "This will definitely be on Friday's exam, so make sure you know the formula. Your homework is problems 1 through 10 in chapter 6.";
+      const v = await macSpeak(lecture);
+      if (!v.ok) return { score: 0, detail: "couldn't make the test audio" };
+      const m = startLecture("stats");
+      addChunk(m.id, 0, new Uint8Array(Buffer.from(v.audio, "base64")).buffer);
+      const t0 = Date.now();
+      const r = await finishLecture(m.id);
+      if (!r.ok) return { score: 0, detail: `no notes: ${r.text}` };
+      if (r.noteId) forgetLectureNote(r.noteId); // don't leave test notes behind
+      if (r.studyId) deleteItem(r.studyId);
+      const cards = r.flashcards ?? 0;
+      const alert = (r.alerts ?? 0) > 0;
+      return { ms: Date.now() - t0, score: (cards >= 3 ? 0.5 : cards ? 0.25 : 0) + (alert ? 0.5 : 0), detail: `"${r.title}": ${cards} flashcards, exam flag ${alert ? "caught" : "MISSED"}, notes in ${((Date.now() - t0) / 1000).toFixed(0)}s` };
+    });
   }
 
   // ======================= PAPERS (X): "write a paper on…", written live into a Google Doc =======================

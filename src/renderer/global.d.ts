@@ -186,6 +186,12 @@ declare global {
       startupCheck: (portal?: string) => Promise<{ problems: { kind: string; text: string }[] }>;
       d2lCheck: (portal: string) => Promise<{ ok: boolean; signin: boolean; text: string; via?: "chrome" | "milo"; chrome: boolean }>;
       d2lOpenChrome: (url: string) => Promise<boolean>;
+      lecture: {
+        start: (said: string) => Promise<{ id: string; course: string; startedAt: number }>;
+        chunk: (id: string, n: number, wav: ArrayBuffer) => Promise<boolean>;
+        stop: () => Promise<{ ok: boolean; text: string; noteId?: string; minutes?: string; title?: string; flashcards?: number; alerts?: number }>;
+        now: () => Promise<{ id: string; course: string; startedAt: number; chunks: number } | null>;
+      };
       paper: (request: string, name?: string) => Promise<{ ok: boolean; text: string; url?: string; link?: string; linkLabel?: string; needTopic?: boolean; connect?: boolean }>;
       paperStop: () => Promise<boolean>;
       onPaperProgress: (fn: (p: { stage: string; text: string; url?: string; step?: number; of?: number }) => void) => () => void;

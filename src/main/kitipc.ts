@@ -35,6 +35,17 @@ function save(name: string, v: unknown) {
 }
 
 export type Note = { id: string; title: string; course: string; body: string; created: number; updated: number };
+/** Add a note from elsewhere in Milo (lecture notes). Returns it. */
+export function addNote(n: { title: string; course: string; body: string }): Note {
+  const notes = load<Note[]>("notes.json", []);
+  const note: Note = { id: Date.now().toString(36), title: n.title.slice(0, 200), course: n.course.slice(0, 80) || "General", body: n.body.slice(0, 100000), created: Date.now(), updated: Date.now() };
+  notes.unshift(note);
+  save("notes.json", notes);
+  return note;
+}
+export function removeNote(id: string) {
+  save("notes.json", load<Note[]>("notes.json", []).filter((x) => x.id !== id));
+}
 export type PocketItem = { id: string; text: string; from: string; at: number };
 type Memory = { skills: Record<string, { right: number; wrong: number; last: number }> };
 

@@ -1835,3 +1835,11 @@ body,
 .fb-note { font-size: 11px; opacity: 0.6; margin: 6px 0; }
 .act-foot { font-size: 12px; margin-top: 8px; opacity: 0.75; }
 .act-foot a { cursor: pointer; text-decoration: underline; }
+
+/* ---- Lecture listener ---- */
+.lec { position: fixed; left: 50%; top: 10px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.95); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15); font-size: 12px; z-index: 50; flex-wrap: wrap; justify-content: center; max-width: 420px; }
+.lec-dot { width: 9px; height: 9px; border-radius: 50%; background: #e5484d; animation: lecPulse 1.6s infinite; }
+@keyframes lecPulse { 50% { opacity: 0.35; } }
+.lec-meter { width: 60px; height: 5px; border-radius: 3px; background: rgba(0, 0, 0, 0.08); overflow: hidden; }
+.lec-meter i { display: block; height: 100%; background: #30a46c; transition: width 0.2s; }
+.lec-warn { width: 100%; text-align: center; color: #b3261e; font-size: 11px; }

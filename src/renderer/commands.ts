@@ -184,6 +184,8 @@ function parseSingle(raw: string, ctx: Ctx): Intent {
 
 /** Drop a trailing "go" / "do it" / "complete task" the student says to send the command. */
 export function stripGo(text: string): string {
+  // "class is over", "lecture's over", "game over": "over" is the meaning there, not the radio-style end word
+  if (/\b(is|'s|are|was|game|all)\s+over[.!?]*$/i.test(text.trim())) return text.trim();
   const out = text.replace(/[\s,.!-]*\b(okay |ok |alright )?(go|go ahead|go now|go for it|do it|do it now|complete( the)? task|execute|send( it)?|that'?s it|over|thanks)[.!?]*$/i, "").trim();
   return out || text.trim();
 }

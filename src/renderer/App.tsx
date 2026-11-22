@@ -28,6 +28,8 @@ import GamePlanCard, { findPlan, loadPlans, nextStep, planKey, savePlan, syncPla
 import AccountChip from "./Account";
 import LockIn, { type LockInHandle } from "./LockIn";
 import { parseLockIn } from "../main/focusRules";
+import { lectureCommand, minutesText } from "../main/lectureNotes";
+import { LectureRecorder } from "./lectureRecorder";
 import { plan as quickPlan } from "../main/quick";
 import { stripMath } from "./MathText";
 
@@ -156,6 +158,13 @@ export default function App() {
   }, [heard]);
   const [pause, setPause] = useState(0); // "sending…" bar while you finish talking
   const [working, setWorking] = useState(false); // Milo is using the computer
+  // Lecture listener: in class, Milo records quietly and makes notes after.
+  const inClassRef = useRef(false);
+  const [lecture, setLecture] = useState<{ id: string; course: string; startedAt: number } | null>(null);
+  const [lectureLevel, setLectureLevel] = useState(0);
+  const [lectureWarn, setLectureWarn] = useState<string | null>(null);
+  const recRef = useRef<LectureRecorder | null>(null);
+  const earsBeforeClass = useRef<"always" | "off" | "once">("off");
   const [live, setLive] = useState<string | null>(null); // your words as you say them (smart ears)
   const [chromeOn, setChromeOn] = useState(false); // Milo's Chrome extension is connected
   const workingRef = useRef(false);
@@ -369,7 +378,14 @@ export default function App() {
   }, [chatOpen, lesson, busy, working, moveTo, researchQ, kitApp, lockOn]);
 
   // ---- voice ------------------------------------------------------------------
-  const say = useCallback(async (text: string, opts: { minMs?: number; noBarge?: boolean } = {}) => {
+  const say = useCallback(async (text: string, opts: { minMs?: number; noBarge?: boolean; loud?: boolean } = {}) => {
+    // In class, Milo never talks out loud (unless they just asked him something): bubble only.
+    if (inClassRef.current && !opts.loud) {
+      setBubble(text);
+      bb("say_quiet", { text: text.slice(0, 80) });
+      await sleep(Math.max(opts.minMs ?? 1400, text.split(/\s+/).length * 300));
+      return;
+    }
     setBubble(text);
     setHeard(null);
     lastSaid.current = text;
@@ -1164,6 +1180,88 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
+  /** "Listen to my stats lecture": record quietly (saved every 2 minutes), notes after class. */
+  const startLecture = async (said: string) => {
+    if (recRef.current) {
+      say("I'm already listening to class.", { loud: true }).then(() => setBubble(null));
+      return;
+    }
+    let first = true;
+    try {
+      first = localStorage.getItem("milo.lectureNotice") !== "1";
+      localStorage.setItem("milo.lectureNotice", "1");
+    } catch {
+      /* ignore */
+    }
+    const m = await window.milo.lecture.start(said);
+    const rec = new LectureRecorder(
+      m.id,
+      (id, n, wav) => void window.milo.lecture.chunk(id, n, wav),
+      (rms) => setLectureLevel(rms)
+    );
+    try {
+      await rec.start();
+    } catch (e) {
+      bb("lecture_mic_failed", { error: (e as Error).message });
+      await window.milo.lecture.stop().catch(() => null);
+      say("I can't use the microphone. Turn on the mic for me in System Settings, Privacy and Security.", { loud: true }).then(() => setBubble(null));
+      return;
+    }
+    recRef.current = rec;
+    setLecture(m);
+    setLectureWarn(null);
+    bb("lecture_start", { course: !!m.course });
+    await say(
+      `Got it. I'm listening${m.course ? ` to ${m.course}` : ""}. I'll stay quiet and make your notes when class is over. Say “class is over” or tap stop.${first ? " Heads up: check that your professor allows recording." : ""}`,
+      { loud: true }
+    );
+    setBubble(null);
+    // from here on: quiet, and no wake-word listening (the professor isn't talking to Milo)
+    inClassRef.current = true;
+    earsBeforeClass.current = (ears.current?.mode as "always" | "off" | "once") ?? "off";
+    if (ears.current?.mode === "always") await ears.current.setMode("off");
+  };
+  const stopLecture = async () => {
+    const rec = recRef.current;
+    if (!rec) {
+      say("I wasn't listening to a class.").then(() => setBubble(null));
+      return;
+    }
+    recRef.current = null;
+    await rec.stop();
+    inClassRef.current = false;
+    setLecture(null);
+    setLectureWarn(null);
+    if (earsBeforeClass.current === "always") await ears.current?.setMode("always");
+    setMood("thinking");
+    setBubble("Making your lecture notes…");
+    const r = await window.milo.lecture.stop();
+    setMood(r.ok ? "happy" : "thinking");
+    if (r.ok) sfx.success();
+    await say(
+      r.ok
+        ? `Your notes on ${r.title} are ready: ${r.minutes} of class, ${r.flashcards} flashcards${r.alerts ? `, and ${r.alerts} thing${r.alerts > 1 ? "s" : ""} the professor flagged for the exam` : ""}. They're in your Notes.`
+        : r.text
+    );
+    setBubble(null);
+  };
+  // In class: every minute, check he can actually hear (quietly, on screen only)
+  useEffect(() => {
+    if (!lecture) return;
+    setClock(Date.now());
+    const tick = window.setInterval(() => setClock(Date.now()), 15e3); // the pill's minute counter
+    const t = window.setInterval(() => {
+      const rec = recRef.current;
+      if (rec?.tooQuiet()) {
+        setLectureWarn("I can barely hear. Move closer or use AirPods.");
+        bb("lecture_quiet", {});
+      } else setLectureWarn(null);
+    }, 60e3);
+    return () => {
+      window.clearInterval(t);
+      window.clearInterval(tick);
+    };
+  }, [lecture]);
   /** "Want to start on X?" Work through it together (default), or Milo does it himself. */
   const offerStart = async (item: { title: string; course: string; due: string }) => {
     setMood("happy");
@@ -2141,6 +2239,11 @@ export default function App() {
     // Filler ("uh", "cool", "okay") never decides anything. Curly quotes from speech-to-text become plain ones.
     const text = stripFiller(raw.replace(/[’‘]/g, "'").replace(/[“”]/g, '"'));
     const dstate: DecideState = { kitOpen: (kitApp as DecideState["kitOpen"]) ?? null, researchOpen: !!researchQ, toolOpen: !!tool, lessonOpen: !!lessonRef.current, hasLastAnswer: !!lastAnswer() };
+    {
+      const lc = lectureCommand(text);
+      if (lc?.do === "start") return void startLecture(lc.course || text);
+      if (lc?.do === "stop" && recRef.current) return void stopLecture();
+    }
     if (offerAnswer(text)) return;
     // "What's it about?" -> "the french revolution"
     // (a whole new "write a paper on X" is its own request, not the topic of the last one)
@@ -2968,6 +3071,8 @@ export default function App() {
         const standalone =
           !connects &&
           (!!fastDecide(tt, { kitOpen: null, researchOpen: false, toolOpen: false, lessonOpen: !!lessonRef.current, hasLastAnswer: false }) ||
+            !!lectureCommand(tt) || // "class is over" is never the end of the last sentence
+            ["undo", "activity", "feedback", "paper"].includes(parse(tt, { inLesson: false, awaitingAnswer: false, pendingAsk: false }).kind) ||
             !!parseHomework(tt) ||
             !!parseRadar(tt, !!radarViewRef.current) ||
             (!!gpRef.current && !!parsePlanVoice(tt, !!lessonRef.current)) ||
@@ -3282,7 +3387,7 @@ export default function App() {
   useEffect(() => {
     bb("app_boot", { boot: bootId.current }); // every time Milo's screen starts fresh (helps catch surprise reloads)
   }, []);
-  testSnap.current = { job: job ? { status: job.status, steps: job.steps.length, done: job.steps.filter((x) => x.status === "done").length } : null, radar: radarView ? { mode: radarView.mode, rows: radarView.rows.length } : null, plan: gp ? { title: gp.plan.title, steps: gp.plan.steps.length, done: gp.done.length } : null, speaking, bubble, heard, pending: pending?.text ?? null, chatOpen, ringOpen, kitApp, lockOn, research: !!researchQ, tool: !!tool, quiz: !!quiz, notebook: !!box, mood, pos, name, activityOpen, feedback, working };
+  testSnap.current = { job: job ? { status: job.status, steps: job.steps.length, done: job.steps.filter((x) => x.status === "done").length } : null, radar: radarView ? { mode: radarView.mode, rows: radarView.rows.length } : null, plan: gp ? { title: gp.plan.title, steps: gp.plan.steps.length, done: gp.done.length } : null, speaking, bubble, heard, pending: pending?.text ?? null, chatOpen, ringOpen, kitApp, lockOn, research: !!researchQ, tool: !!tool, quiz: !!quiz, notebook: !!box, mood, pos, name, activityOpen, feedback, working, lecture: !!lecture, inClass: inClassRef.current };
   useEffect(() => {
     if (!location.protocol.startsWith("http")) return; // dev server only, never in the packaged app
     (window as unknown as { __milo: unknown }).__milo = {
@@ -3298,6 +3403,7 @@ export default function App() {
       offer: (item: { title: string; course: string; due: string }) => offerStart(item),
       offerOpen: () => !!offerRef.current,
       offerFeed: () => offerFeed(portal),
+      stopLecture: () => (recRef.current ? stopLecture() : null),
       radarSet: (items: ScanItem[]) => setRadar(mergeScan(mergeScan(emptyRadar(), [], Date.now()), items, Date.now())),
       radarCheck: () => checkAlerts(true),
       radarLoad: (json: string | null) => {
@@ -3462,6 +3568,21 @@ export default function App() {
         </>
       )}
 
+      {lecture && (
+        <div className="lec" onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)}>
+          <span className="lec-dot" />
+          <span className="lec-text">
+            Listening{lecture.course ? ` · ${lecture.course}` : ""} · {minutesText(clock - lecture.startedAt)}
+          </span>
+          <span className="lec-meter">
+            <i style={{ width: `${Math.min(100, Math.round(lectureLevel * 900))}%` }} />
+          </span>
+          <button className="kit-btn kit-btn--sm" onClick={() => void stopLecture()}>
+            Stop
+          </button>
+          {lectureWarn && <div className="lec-warn">{lectureWarn}</div>}
+        </div>
+      )}
       {feedback !== null && (
         <FeedbackPanel
           start={feedback}

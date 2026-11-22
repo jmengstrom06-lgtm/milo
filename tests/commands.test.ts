@@ -39,3 +39,10 @@ describe("feedback", () => {
   it("opens with their words", () => expect(parse("tell Jake that the calendar added the wrong day", ctx)).toEqual({ kind: "feedback", text: "the calendar added the wrong day" }));
   it("bare", () => expect(parse("report a bug", ctx)).toEqual({ kind: "feedback", text: "" }));
 });
+
+import { stripGo } from "../src/renderer/commands";
+describe("go words never eat the meaning", () => {
+  it("class is over stays", () => expect(stripGo("Class is over")).toBe("Class is over"));
+  it("lecture's over stays", () => expect(stripGo("the lecture's over")).toBe("the lecture's over"));
+  it("radio-style over still goes", () => expect(stripGo("open chrome over")).toBe("open chrome"));
+});

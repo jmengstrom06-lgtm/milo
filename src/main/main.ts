@@ -35,6 +35,7 @@ import { awayWatch } from "./away";
 import { calendarAdd, calendarDelete, calendarUpcoming, docsCreate, GoogleNotConnected, googleConnect, googleStatus, gmailDeleteDraft, gmailDraft, gmailSendDraft, gmailUnread } from "./google";
 import { activity, did, registerActivity } from "./activityLog";
 import { writePaper } from "./paper";
+import { addChunk, finishLecture, finishLeftovers, forgetLectureNote, lectureNow, startLecture } from "./lecture";
 import { classFor } from "./classes";
 import { parsePaperAsk } from "./paperFormat";
 import { composeEmail, parseEvent, sayCalendar, sayMail } from "./googleai";
@@ -1052,6 +1053,24 @@ ipcMain.handle("milo:feedback", async (_e, message: string, kind?: string) => {
 activity.onUndo("calendar_delete", async (d) => calendarDelete(String(d.id)));
 activity.onUndo("draft_delete", async (d) => gmailDeleteDraft(String(d.draftId)));
 activity.onUndo("memory_forget", async (d) => forget(String(d.fact)));
+activity.onUndo("note_delete", async (d) => forgetLectureNote(String(d.noteId)));
+// ---------- Lecture listener: saved to disk every 2 minutes, transcribed with retries, notes after class ----------
+ipcMain.handle("milo:lecture-start", (_e, said: string) => {
+  const m = startLecture(String(said ?? ""));
+  track("lecture_start", { course: !!m.course });
+  return { id: m.id, course: m.course, startedAt: m.startedAt };
+});
+ipcMain.handle("milo:lecture-chunk", (_e, id: string, n: number, wav: ArrayBuffer) => addChunk(String(id), Number(n), wav));
+ipcMain.handle("milo:lecture-now", () => lectureNow());
+ipcMain.handle("milo:lecture-stop", async () => {
+  const r = await finishLecture();
+  if (r.ok && r.noteId) {
+    did({ kind: "doc", title: `Took notes on a lecture: ${r.title} (${r.minutes})`, detail: `${r.flashcards} flashcards${r.alerts ? `, ${r.alerts} things the professor flagged` : ""}`, undo: { type: "note_delete", data: { noteId: r.noteId } } });
+    track("lecture_done", { cards: r.flashcards, alerts: r.alerts });
+  } else track("lecture_failed", {});
+  return r;
+});
+setTimeout(() => void finishLeftovers().catch(() => {}), 60e3); // a class that ended while Milo was closed or offline
 activity.onUndo("app_quit", async (d) => {
   await quitApp(String(d.app));
 });
