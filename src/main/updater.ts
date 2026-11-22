@@ -6,6 +6,18 @@
 import { app, ipcMain, type BrowserWindow } from "electron";
 import { log as bb } from "./blackbox";
 
+// Hooks for the menu-bar frog (appshell.ts): show "Restart to update", check on demand.
+let readyVersion: string | null = null;
+let onChange: () => void = () => {};
+let installNow: () => void = () => {};
+let checkNow: () => Promise<string> = async () => (app.isPackaged ? "Updates aren't set up in this copy." : "Updates only run in the installed app.");
+export const updateReady = () => readyVersion;
+export const installUpdate = () => installNow();
+export const checkForUpdate = (_manual = false) => checkNow();
+export function startUpdater(fn: () => void) {
+  onChange = fn;
+}
+
 export function startUpdates(win: BrowserWindow) {
   if (!app.isPackaged || process.env.MILO_NO_UPDATES === "1") return;
   // loaded lazily so the dev build never needs it
@@ -35,6 +47,8 @@ export function startUpdates(win: BrowserWindow) {
   autoUpdater.on("update-not-available", () => bb("update", "none", {}));
   autoUpdater.on("update-downloaded", (i) => {
     bb("update", "ready", { version: i.version });
+    readyVersion = i.version;
+    onChange();
     win.webContents.send("milo:update-ready", i.version);
   });
   autoUpdater.on("error", (e) => bb("update", "error", { error: String(e?.message ?? e).slice(0, 300) }));
@@ -42,6 +56,19 @@ export function startUpdates(win: BrowserWindow) {
     bb("update", "install_now", {});
     setImmediate(() => autoUpdater.quitAndInstall(false, true));
   });
+  installNow = () => {
+    bb("update", "install_now", { from: "menu" });
+    setImmediate(() => autoUpdater.quitAndInstall(false, true));
+  };
+  checkNow = async () => {
+    if (readyVersion) return `Version ${readyVersion} is ready. Pick "Restart to update".`;
+    try {
+      await autoUpdater.checkForUpdates();
+      return "Checking… I'll let you know if there's a new Milo.";
+    } catch (e) {
+      return `Couldn't check for updates: ${String((e as Error)?.message ?? e).slice(0, 80)}`;
+    }
+  };
   const check = () => autoUpdater.checkForUpdates().catch((e) => bb("update", "check_failed", { error: String(e?.message ?? e).slice(0, 200) }));
   setTimeout(check, 45e3);
   setInterval(check, 4 * 3600e3);

@@ -10,6 +10,7 @@ import {
   screen,
   systemPreferences,
   shell,
+  Notification,
 } from "electron";
 import path from "node:path";
 import fs from "node:fs";
@@ -27,7 +28,6 @@ import { quitAfterTest, runSelfTest, selfTestOn } from "./selftest";
 import { jobBenchOn, quitAfterBench, runJobBench } from "./jobbench";
 import { makeGamePlan } from "./homework";
 import { startSync } from "./sync";
-import { startUpdates } from "./updater";
 import { isJob, lastJob, resumable, resumeJob, startJob, type JobDeps } from "./jobs";
 import { getProfile, setProfile, type Profile } from "./profile";
 import { usageToday } from "./usage";
@@ -53,10 +53,14 @@ import { plan } from "./quick";
 import { research } from "./research";
 import { buildTool } from "./builder";
 import { askScreen } from "./brain";
+import { createTray, extensionDirs, firstRunDefaults, loadKeys } from "./appshell";
+import { checkForUpdate, installUpdate, startUpdater, startUpdates, updateReady } from "./updater";
 import { Action, askMilo, classify, RouteCtx, makeQuiz, readBrief, setUserName, sweepPlan, watchCheck, ChatMessage, checkAnswer, locateInCrop, nextActions, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
 if (!app.isPackaged) dotenv.config({ path: path.join(app.getAppPath(), ".env") }); // dev keys only; installed Milo uses the student's account
 startTelemetry();
+// One Milo at a time (login item + opening the app = still one frog).
+if (!app.requestSingleInstanceLock()) app.quit();
 
 // ---------- black-box log: every request Milo handles, how long it took, what came back ----------
 const QUIET = new Set(["milo:watch-check", "milo:mic-access", "milo:hands-access", "milo:log-flag"]);
@@ -1170,6 +1174,7 @@ app.whenReady().then(() => {
   startBridge(extensionFolder());
   registerNativeHost(binaryPath()); // so the Chrome Web Store version of the extension can find Milo
   if (process.platform === "darwin") app.dock?.hide();
+  firstRunDefaults();
   // Let Milo's window use the microphone.
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === "media"));
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === "media");
@@ -1212,6 +1217,18 @@ app.whenReady().then(() => {
   globalShortcut.register("CommandOrControl+Shift+Y", () => {
     overlay?.webContents.send("milo:teach-screen");
   });
+
+  // The frog in the menu bar: show/hide, keys, logs, start at login, updates, quit.
+  const notify = (body: string) => body && new Notification({ title: "Milo", body }).show();
+  const tray = createTray({
+    overlay: () => overlay,
+    talk: () => overlay?.webContents.send("milo:talk"),
+    say: notify,
+    checkUpdates: () => checkForUpdate(true).then(notify),
+    updateReady,
+    installUpdate,
+  });
+  startUpdater(() => tray.refresh());
 });
 
 app.on("will-quit", () => {

@@ -54,7 +54,7 @@
   "build": {
     "appId": "app.milo.desktop",
     "productName": "Milo",
-    "copyright": "Copyright \u00a9 2026 Jake Engstrom",
+    "copyright": "Copyright © 2026 Jake Engstrom",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -62,7 +62,8 @@
     "files": [
       "dist/main/**",
       "dist/renderer/**",
-      "package.json"
+      "package.json",
+      "build/trayTemplate*.png"
     ],
     "extraResources": [
       {
