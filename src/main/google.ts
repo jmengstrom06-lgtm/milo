@@ -256,6 +256,23 @@ export async function docsCreate(title: string, text = "") {
   bb("google", "doc_made", { chars: text.length });
   return { id: d.documentId, url: `https://docs.google.com/document/d/${d.documentId}/edit` };
 }
+/** An empty Google Doc (the paper writer fills it in live, so the student watches it appear). */
+export async function docsNew(title: string) {
+  const d = await g<{ documentId: string }>("https://docs.googleapis.com/v1/documents", { method: "POST", body: JSON.stringify({ title }) });
+  bb("google", "doc_made", { chars: 0 });
+  return { id: d.documentId, url: `https://docs.google.com/document/d/${d.documentId}/edit` };
+}
+/** A doc's plain text (the self-test reads back what the paper writer wrote). */
+export async function docsText(id: string): Promise<string> {
+  type El = { paragraph?: { elements?: { textRun?: { content?: string } }[] } };
+  const d = await g<{ body?: { content?: El[] } }>(`https://docs.googleapis.com/v1/documents/${id}`);
+  return (d.body?.content ?? []).map((e) => (e.paragraph?.elements ?? []).map((x) => x.textRun?.content ?? "").join("")).join("");
+}
+/** Apply Docs edits (insert text, styles) in one go. */
+export async function docsBatch(id: string, requests: unknown[]) {
+  if (!requests.length) return;
+  await g(`https://docs.googleapis.com/v1/documents/${id}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) });
+}
 export async function driveSearch(words: string, max = 8) {
   const q = `name contains '${words.replace(/['\\]/g, " ")}' and trashed = false`;
   const r = await g<{ files?: { id: string; name: string; webViewLink?: string; mimeType: string; modifiedTime: string }[] }>(

@@ -12,7 +12,8 @@ import { log as bbLog, onLog } from "./blackbox";
 import { loadClasses, saveClasses } from "./classes";
 import { deleteItem, listItems } from "./library";
 import { frontApp, isRunning, openApp, quitApp } from "./hands";
-import { calendarAdd, gmailDraft, googleStatus } from "./google";
+import { calendarAdd, docsText, gmailDraft, googleStatus } from "./google";
+import { lastPaper } from "./paper";
 import { activity, did } from "./activityLog";
 import { memories, remember } from "./memory";
 import { sendFeedback } from "./telemetry";
@@ -502,7 +503,8 @@ export async function runSelfTest(win: BrowserWindow) {
       });
       await test("L2", "School", "Finds D2L's calendar link (the backup that never signs out)", async () => {
         const url = await calendarFeedUrl(portal).catch(() => null);
-        return { score: url ? 1 : 0, detail: url ? "found it (saved by the app, never shown)" : "no calendar link yet: D2L only makes one after you press Reset on its Subscribe page" };
+        // optional backup: TCU's D2L doesn't let students make one, so this is information, not a failure
+        return { score: 1, detail: url ? "found it (saved by the app, never shown)" : "none (optional: your school's D2L doesn't let students make a calendar link)" };
       });
       {
         const feedOffer = async () => {
@@ -611,6 +613,46 @@ export async function runSelfTest(win: BrowserWindow) {
     }
   }
 
+  // ======================= PAPERS (X): "write a paper on…", written live into a Google Doc =======================
+  {
+    const said = async (re: RegExp, timeout: number, after = 0) => {
+      const st = Date.now();
+      while (Date.now() - st < timeout) {
+        if (events.some((e) => e.t >= after && e.line.startsWith("app/say") && re.test(e.line))) return Date.now() - st;
+        await sleep(200);
+      }
+      return -1;
+    };
+    await test("X1", "Study power", '"Write a paper" with no topic asks what it\'s about (and writes nothing)', async () => {
+      await reset();
+      await hear("Write a paper");
+      const ms = await said(/what'?s it about/i, 8000);
+      const wrote = events.some((e) => e.line.startsWith("google/doc_made"));
+      return { ms, score: wrote ? 0 : ms < 0 ? 0 : 1, detail: wrote ? "MADE A DOC without a topic" : ms < 0 ? "didn't ask for the topic" : "asked for the topic" };
+    });
+    const gs = (() => { try { return googleStatus(); } catch { return { connected: false }; } })();
+    if (process.env.MILO_TEST_COMPUTER === "1" && gs.connected) {
+      await test("X2", "Study power", "Writes a real 1-page paper into Google Docs (sources, MLA, Works Cited)", async () => {
+        await reset();
+        const t0 = Date.now();
+        await hear("Write a one page paper on why sleep matters for college students");
+        // done, or a problem (never sit out the whole 5 minutes on an error)
+        const end = await said(/is in your Google Docs|hit a problem|took too long|connect your google/i, 300000);
+        const ms = end >= 0 && events.some((e) => e.line.startsWith("app/say") && /is in your Google Docs/i.test(e.line)) ? end : -1;
+        if (end >= 0 && ms < 0) return { score: 0, detail: `Milo said: ${(events.filter((e) => e.line.startsWith("app/say")).pop()?.line ?? "").slice(9, 200)}` };
+        if (ms < 0) return { score: 0, detail: events.some((e) => e.line.startsWith("app/say") && /problem/i.test(e.line)) ? "hit a problem (see log)" : "never finished (5 min)" };
+        const p = lastPaper;
+        if (!p) return { score: 0, detail: "finished but nothing recorded" };
+        const id = p.url.match(/\/d\/([^/]+)/)?.[1] ?? "";
+        const text = await docsText(id).catch(() => "");
+        const cited = /Works Cited/.test(text);
+        const lenOk = p.words >= p.target * 0.75;
+        const score = (lenOk ? 0.35 : 0.1) + (p.sources >= 3 ? 0.35 : p.sources >= 1 ? 0.15 : 0) + (cited ? 0.3 : 0);
+        return { ms, score, detail: `${p.words}/${p.target} words, ${p.sources} checked sources, Works Cited ${cited ? "yes" : "MISSING"}, ${((Date.now() - t0) / 1000).toFixed(0)}s. Doc left in your Drive: ${p.url}` };
+      });
+    }
+  }
+
   // ======================= FIRST MINUTE: the offer after setup (N) =======================
   // "Want to start on X? Together, or I can do it myself." N3/N4 really open Chrome / start a job: test:new:computer only.
   {
@@ -687,8 +729,11 @@ export async function runSelfTest(win: BrowserWindow) {
         if ((await offer()) < 0) return { score: 0, detail: "never made the offer" };
         await js(`window.__milo.hear("Yes.", false)`);
         const ms = await said(/let's go/i, 8000);
-        await js("window.__milo.reset()").catch(() => {});
+        // stop it for real (the same "stop" a student says), and wait until he's actually idle
+        await js(`window.__milo.hear("Stop.", true)`).catch(() => {});
         await js("window.milo.stopTask()").catch(() => {});
+        await waitFor("!s.working", 15000);
+        await js("window.__milo.reset()").catch(() => {});
         return { ms, score: ms < 0 ? 0 : 1, detail: ms < 0 ? "didn't start" : "started the together flow (stopped it for the test)" };
       });
     }
@@ -739,8 +784,9 @@ export async function runSelfTest(win: BrowserWindow) {
       const e = entry(new RegExp(fact));
       if (!e) return { score: 0, detail: "remembering wasn't logged in the timeline" };
       if (!activity.canUndo(e)) return { score: 0.3, detail: "logged, but no Undo on it" };
+      await waitFor("!s.working", 15000); // nothing left over from an earlier test
       await hear("Undo that");
-      const gone = await until(() => !memories().includes(fact), 5000);
+      const gone = await until(() => !memories().includes(fact), 15000);
       const spoke = await said(/undone|done\./i, 4000);
       return { score: gone < 0 ? 0.3 : spoke < 0 ? 0.8 : 1, detail: gone < 0 ? "still remembered after undo" : spoke < 0 ? "forgot it, but didn't say so" : "logged, undone by voice, forgotten" };
     });

@@ -91,8 +91,23 @@ function using(v: Via) {
 export const d2lVia = () => via;
 type Raw = { s: number; t: string; b: string | null; url?: string };
 /** Chrome's answer, asked twice before giving up: right after Milo starts, the first answer can be a page instead of data. */
+/** Chrome's extension naps (Chrome stops idle extensions) and reconnects within a few seconds: wait for it. */
+async function bridgeReady(ms = 5000): Promise<boolean> {
+  if (bridgeConnected()) return true;
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    await new Promise((r) => setTimeout(r, 250));
+    if (bridgeConnected()) {
+      bb("d2l", "chrome_reconnected", { waitedMs: Date.now() - t0 });
+      return true;
+    }
+  }
+  bb("d2l", "chrome_not_connected", {});
+  return false;
+}
 async function chromeFetch(portal: string, path: string, binary = false, maxBytes = 12e6, text = false): Promise<Raw | null> {
-  if (!bridgeConnected() || Date.now() < chromeOutUntil) return null; // just said "signed out": don't ask again yet
+  if (Date.now() < chromeOutUntil) return null; // just said "signed out": don't ask again yet
+  if (!(await bridgeReady())) return null;
   const first = await chromeFetchOnce(portal, path, binary, maxBytes, text);
   if (first || !bridgeConnected()) return first;
   await new Promise((r) => setTimeout(r, 1200));
@@ -354,8 +369,8 @@ export function links(origin_: string, ou: number) {
 
 /** Is Milo signed in to D2L right now? (startup check + self-test) */
 export async function d2lCheck(portal: string): Promise<{ ok: boolean; signin: boolean; text: string; via?: Via; chrome: boolean }> {
-  const chrome = bridgeConnected();
   const c = await chromeFetch(portal, `/d2l/api/lp/${LP}/users/whoami`);
+  const chrome = bridgeConnected(); // after asking: the extension may have just woken up
   if (c && c.s === 200) {
     using("chrome");
     return { ok: true, signin: false, text: "", via: "chrome", chrome };

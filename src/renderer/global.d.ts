@@ -186,6 +186,9 @@ declare global {
       startupCheck: (portal?: string) => Promise<{ problems: { kind: string; text: string }[] }>;
       d2lCheck: (portal: string) => Promise<{ ok: boolean; signin: boolean; text: string; via?: "chrome" | "milo"; chrome: boolean }>;
       d2lOpenChrome: (url: string) => Promise<boolean>;
+      paper: (request: string, name?: string) => Promise<{ ok: boolean; text: string; url?: string; link?: string; linkLabel?: string; needTopic?: boolean; connect?: boolean }>;
+      paperStop: () => Promise<boolean>;
+      onPaperProgress: (fn: (p: { stage: string; text: string; url?: string; step?: number; of?: number }) => void) => () => void;
       d2lFeedUrl: (portal: string) => Promise<string | null>;
       d2lSubscribeUrl: (portal: string) => Promise<string | null>;
       d2lDue: (portal: string) => Promise<{ ok: true; items: { title: string; course: string; due: string; due_iso?: string; kind?: string }[] } | { ok: false; signin: boolean; text: string }>;

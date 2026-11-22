@@ -133,6 +133,13 @@ contextBridge.exposeInMainWorld("milo", {
   gradeNow: (course: string, portal?: string) => ipcRenderer.invoke("milo:grade-now", course, portal),
   d2lDue: (portal: string) => ipcRenderer.invoke("milo:d2l-due", portal),
   d2lCheck: (portal: string) => ipcRenderer.invoke("milo:d2l-check", portal),
+  paper: (request: string, name?: string) => ipcRenderer.invoke("milo:paper", request, name),
+  paperStop: () => ipcRenderer.invoke("milo:paper-stop"),
+  onPaperProgress: (fn: (p: unknown) => void) => {
+    const l = (_e: unknown, p: unknown) => fn(p);
+    ipcRenderer.on("milo:paper-progress", l);
+    return () => ipcRenderer.removeListener("milo:paper-progress", l);
+  },
   d2lFeedUrl: (portal: string) => ipcRenderer.invoke("milo:d2l-feed-url", portal),
   d2lSubscribeUrl: (portal: string) => ipcRenderer.invoke("milo:d2l-subscribe-url", portal),
   d2lOpenChrome: (url: string) => ipcRenderer.invoke("milo:d2l-open-chrome", url),

@@ -25,6 +25,7 @@ export type Intent =
   | { kind: "activity" } // "what did you do?": open the timeline
   | { kind: "undo" } // "undo that": take back the newest thing
   | { kind: "feedback"; text: string } // "report a problem", "tell Jake that…"
+  | { kind: "paper"; text: string } // "write a 5 page paper on…": written live into a Google Doc
   | { kind: "fill" } // type the lesson's answer into the blank
   | { kind: "yes" }
   | { kind: "no" }
@@ -117,6 +118,9 @@ function parseSingle(raw: string, ctx: Ctx): Intent {
   if (!t) return { kind: "chat", text };
   if (/^(keep going|continue|go on|resume|carry on|where were we|pick up where you left off|finish what you were (doing|saying)|ok(ay)? continue)$/.test(t))
     return { kind: "resume" };
+  // "write (me) a 5 page paper on…", "draft an essay about…", "help me write a research paper on…"
+  if (/^(?:can you |could you |please |help me |i need (?:you )?to |i have to )?(?:write|draft|type up|start)\b(?! (?:an? |the |my )?(?:email|message|text|poem|song|story|code|program))[^.?!]{0,60}?\b(?:research paper|paper|essay|report)\b/.test(t) && !/\b(read|grade|check|proofread|edit|fix)\b.{0,20}\b(paper|essay)\b/.test(t))
+    return { kind: "paper", text };
   {
     const fb = t.match(/^(send feedback|give feedback|report (a |this )?(bug|problem|issue)|tell jake|that'?s a bug|feedback)\b[\s:,-]*(that )?/);
     if (fb) return { kind: "feedback", text: text.slice(fb[0].length).trim() };

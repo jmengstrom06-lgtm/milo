@@ -1126,6 +1126,44 @@ export default function App() {
     const item = preset ?? { title: r.data.title, course: r.data.course, due: r.data.due };
     offerRef.current = { item, at: Date.now(), mode: "do_only" };
   };
+  /** "Write a 5 page paper on…": Milo plans, finds real sources, and writes it into a Google Doc live. */
+  const paperTopic = useRef<{ base: string; at: number } | null>(null);
+  const startPaper = async (text: string) => {
+    paperTopic.current = null;
+    hush();
+    setChatOpen(false);
+    setMood("thinking");
+    bb("paper_start", {});
+    const first = window.milo.paper(text, name || undefined);
+    // the main side answers right away when something's missing (no topic, no Google)
+    const quick = await Promise.race([first, new Promise<null>((r) => setTimeout(() => r(null), 600))]);
+    if (quick && !quick.ok) {
+      setMood("idle");
+      await say(quick.text);
+      setBubble(null);
+      if (quick.needTopic) {
+        paperTopic.current = { base: text, at: Date.now() };
+        waitForAnswer("say the topic");
+      }
+      return;
+    }
+    await say(/\b(help me|with me|together|outline)\b/i.test(text) ? "On it. I'll find real sources and lay out the plan in a Google Doc." : "On it. I'll find real sources and write it in a Google Doc. You can watch it appear.");
+    const r = await first;
+    setMood(r.ok ? "happy" : "thinking");
+    if (r.ok) sfx.success();
+    await say(r.text);
+    setBubble(null);
+  };
+  useEffect(
+    () =>
+      window.milo.onPaperProgress((p) => {
+        if (p.stage === "done" || p.stage === "error") return;
+        setBubble(p.text);
+        setMood("thinking");
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
   /** "Want to start on X?" Work through it together (default), or Milo does it himself. */
   const offerStart = async (item: { title: string; course: string; due: string }) => {
     setMood("happy");
@@ -1763,7 +1801,9 @@ export default function App() {
     } catch {
       /* ignore */
     }
-    if (!asked) window.setTimeout(() => void offerFeed(p), 2500);
+    // TCU's D2L hides its Subscribe button and its Reset doesn't work outside the calendar, so the offer is off for now.
+    // Still there by voice: "set up my calendar backup" / "connect my calendar".
+    void asked;
   };
   /** "Want a backup so I can always see what's due?" Yes: open D2L's Subscribe page, they tap Reset, Milo saves the link. */
   const feedOfferRef = useRef<{ portal: string; at: number } | null>(null);
@@ -2102,6 +2142,15 @@ export default function App() {
     const text = stripFiller(raw.replace(/[’‘]/g, "'").replace(/[“”]/g, '"'));
     const dstate: DecideState = { kitOpen: (kitApp as DecideState["kitOpen"]) ?? null, researchOpen: !!researchQ, toolOpen: !!tool, lessonOpen: !!lessonRef.current, hasLastAnswer: !!lastAnswer() };
     if (offerAnswer(text)) return;
+    // "What's it about?" -> "the french revolution"
+    // (a whole new "write a paper on X" is its own request, not the topic of the last one)
+    if (paperTopic.current && parse(text, { inLesson: false, awaitingAnswer: false, pendingAsk: false }).kind === "paper") paperTopic.current = null;
+    if (paperTopic.current && Date.now() - paperTopic.current.at < 90e3 && text.trim().length > 2 && !/^(no|nope|never ?mind|cancel|stop)\b/i.test(text.trim())) {
+      const base = paperTopic.current.base;
+      endAnswer("topic");
+      void startPaper(`${base} on ${text.trim().replace(/^(it'?s |about |on )/i, "")}`);
+      return;
+    }
     if (feedAnswer(text)) return;
     if (/^(set ?up|turn on|make) (my |the )?(calendar )?(backup|calendar link|calendar feed)\b/i.test(text.replace(/[.!?]+$/, "").trim()) && portal) {
       void setUpFeed(portal);
@@ -2119,7 +2168,11 @@ export default function App() {
       const ut = text.toLowerCase().replace(/[.!?]+$/, "").trim();
       const always = /^(undo what you (just )?did|take (that|it) back|cancel what you (just )?did)$/.test(ut);
       if (always || /^undo( that| it| this| the last (thing|one))?$/.test(ut)) {
-        void window.milo.activity.list().then((list) => {
+        void (async () => {
+          // still doing the thing they want undone ("open calculator… undo that"): let it finish first
+          for (let i = 0; i < 40 && workingRef.current; i++) await new Promise((r) => setTimeout(r, 250));
+          return window.milo.activity.list();
+        })().then((list) => {
           const recent = list.find((e) => e.canUndo && Date.now() - e.at < 3 * 60e3);
           bb("undo_choice", { milo: !!(recent || always) });
           if (recent || always) runUndo();
@@ -2400,7 +2453,7 @@ export default function App() {
     const intent = parse(text, { inLesson, awaitingAnswer, pendingAsk: !!pendingTask.current });
     const nb = notebookRef.current;
     // Unmistakable commands run right away. Everything else: the router decides, knowing what's open.
-    const SURE = ["hush", "yes", "no", "resume", "undo", "activity", "feedback"];
+    const SURE = ["hush", "yes", "no", "resume", "undo", "activity", "feedback", "paper"];
     const LESSON_SURE = ["close", "goto", "mode", "answer", "show", "copy", "practice", "skip", "repeat", "fill"];
     if (!SURE.includes(intent.kind) && !(inLesson && LESSON_SURE.includes(intent.kind))) {
       setMood("thinking");
@@ -2418,6 +2471,7 @@ export default function App() {
     switch (intent.kind) {
       case "hush":
         hush();
+        void window.milo.paperStop();
         sweepStop.current = true;
         window.milo.stopTask();
         setBubble(null);
@@ -2450,6 +2504,9 @@ export default function App() {
         return;
       case "chain":
         runChain(intent.steps, spoken);
+        return;
+      case "paper":
+        void startPaper(intent.text);
         return;
       case "feedback":
         setFeedback(intent.text);
@@ -3225,7 +3282,7 @@ export default function App() {
   useEffect(() => {
     bb("app_boot", { boot: bootId.current }); // every time Milo's screen starts fresh (helps catch surprise reloads)
   }, []);
-  testSnap.current = { job: job ? { status: job.status, steps: job.steps.length, done: job.steps.filter((x) => x.status === "done").length } : null, radar: radarView ? { mode: radarView.mode, rows: radarView.rows.length } : null, plan: gp ? { title: gp.plan.title, steps: gp.plan.steps.length, done: gp.done.length } : null, speaking, bubble, heard, pending: pending?.text ?? null, chatOpen, ringOpen, kitApp, lockOn, research: !!researchQ, tool: !!tool, quiz: !!quiz, notebook: !!box, mood, pos, name, activityOpen, feedback };
+  testSnap.current = { job: job ? { status: job.status, steps: job.steps.length, done: job.steps.filter((x) => x.status === "done").length } : null, radar: radarView ? { mode: radarView.mode, rows: radarView.rows.length } : null, plan: gp ? { title: gp.plan.title, steps: gp.plan.steps.length, done: gp.done.length } : null, speaking, bubble, heard, pending: pending?.text ?? null, chatOpen, ringOpen, kitApp, lockOn, research: !!researchQ, tool: !!tool, quiz: !!quiz, notebook: !!box, mood, pos, name, activityOpen, feedback, working };
   useEffect(() => {
     if (!location.protocol.startsWith("http")) return; // dev server only, never in the packaged app
     (window as unknown as { __milo: unknown }).__milo = {

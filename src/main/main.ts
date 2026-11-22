@@ -34,6 +34,9 @@ import { usageToday } from "./usage";
 import { awayWatch } from "./away";
 import { calendarAdd, calendarDelete, calendarUpcoming, docsCreate, GoogleNotConnected, googleConnect, googleStatus, gmailDeleteDraft, gmailDraft, gmailSendDraft, gmailUnread } from "./google";
 import { activity, did, registerActivity } from "./activityLog";
+import { writePaper } from "./paper";
+import { classFor } from "./classes";
+import { parsePaperAsk } from "./paperFormat";
 import { composeEmail, parseEvent, sayCalendar, sayMail } from "./googleai";
 import { feedUrl } from "./school";
 import { checkMath, isQuantitative, type MathVerdict } from "./mathcheck";
@@ -445,6 +448,57 @@ ipcMain.handle("milo:google-draft", async (_e, request: string) => {
   }
 });
 const draftEntries = new Map<string, string>(); // draft id -> timeline entry (sending it makes it un-undoable)
+// ---------- Papers: plan, real sources, written live into a Google Doc ----------
+let paperRunning = false;
+let paperStop = false;
+ipcMain.handle("milo:paper-stop", () => (paperStop = true));
+ipcMain.handle("milo:paper", async (_e, request: string, studentName?: string) => {
+  const ask = parsePaperAsk(String(request ?? ""));
+  if (!ask) return { ok: false, text: "Tell me what to write, like “write a 3 page paper on the causes of World War 1.”" };
+  if (!ask.topic) return { ok: false, needTopic: true, text: "Sure. What's it about?" };
+  if (paperRunning) return { ok: false, text: "I'm already writing one. Give me a minute." };
+  if (!googleStatus().connected) return { ok: false, connect: true, text: "Connect your Google account first so I can write it in Google Docs. Say connect Google." };
+  paperRunning = true;
+  paperStop = false;
+  let opened = false;
+  const send = (p: unknown) => overlay?.webContents.send("milo:paper-progress", p);
+  try {
+    // the class goes in the MLA header only if they named it (classFor falls back to the active class otherwise)
+    const named = classFor(String(request));
+    const cls = named && [named.name, named.code].some((w) => w && String(request).toLowerCase().includes(w.toLowerCase().split(/\s+/)[0])) ? named : null;
+    const r = await writePaper(ask, {
+      course: cls?.name,
+      name: studentName ? String(studentName).slice(0, 60) : undefined,
+      aborted: () => paperStop,
+      emit: (p) => {
+        send(p);
+        if (p.url && !opened) {
+          opened = true;
+          void ext("new_tab", { url: p.url }, 15000).catch(() => shell.openExternal(p.url!));
+        }
+      },
+    });
+    did({ kind: "doc", title: `${r.outline ? "Outlined" : "Wrote"} a ${ask.kind}: ${r.title}`, detail: `${r.words ? `${r.words} words, ` : ""}${r.sources} sources, ${ask.style}`, link: r.url, noUndo: "Milo can't delete Google Docs. Move it to the trash in Google Docs if you don't want it." });
+    track("paper_done", { words: r.words, target: ask.words, sources: r.sources, style: ask.style, outline: r.outline });
+    const short = r.words && r.words < ask.words * 0.8;
+    return {
+      ok: true,
+      url: r.url,
+      link: r.url,
+      linkLabel: "Open paper",
+      text: r.outline
+        ? `Your outline for "${r.title}" is in Google Docs, with ${r.sources} sources. Want to start the intro together?`
+        : `Done. "${r.title}" is in your Google Docs: about ${r.words} words, ${r.sources} real sources, ${ask.style} format${short ? ". It came out a little short, so say make it longer if you need more" : ""}. Read it over and make it yours.`,
+    };
+  } catch (e) {
+    send({ stage: "error", text: (e as Error).message });
+    if (e instanceof GoogleNotConnected) return gerr(e);
+    captureError(e, "paper");
+    return { ok: false, text: `I hit a problem writing it: ${(e as Error).message.slice(0, 120)}` };
+  } finally {
+    paperRunning = false;
+  }
+});
 ipcMain.handle("milo:google-send", async (_e, draftId: string) => {
   try {
     await gmailSendDraft(String(draftId));
