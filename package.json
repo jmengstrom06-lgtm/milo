@@ -21,6 +21,8 @@
     "dist:unsigned": "cross-env MILO_UNIVERSAL=1 CSC_IDENTITY_AUTO_DISCOVERY=false npm run build && electron-builder --mac --universal -c.mac.identity=null",
     "doctor": "node scripts/log-doctor.js",
     "test:jobs": "npm run build:hands && npm run build:main && concurrently -k -s command-electron -n vite,electron \"vite\" \"wait-on tcp:127.0.0.1:5173 && cross-env MILO_DEV=1 MILO_TEST_JOBS=1 electron .\"",
+    "test:new": "npm run build:hands && npm run build:main && concurrently -k -s command-electron -n vite,electron \"vite\" \"wait-on tcp:127.0.0.1:5173 && cross-env MILO_DEV=1 MILO_TEST=1 MILO_TEST_ONLY=U,B,N,L,G0 electron .\"",
+    "test:new:computer": "npm run build:hands && npm run build:main && concurrently -k -s command-electron -n vite,electron \"vite\" \"wait-on tcp:127.0.0.1:5173 && cross-env MILO_DEV=1 MILO_TEST=1 MILO_TEST_COMPUTER=1 MILO_TEST_ONLY=U,B,N,L,G0 electron .\"",
     "test:computer": "npm run build:hands && npm run build:main && concurrently -k -s command-electron -n vite,electron \"vite\" \"wait-on tcp:127.0.0.1:5173 && cross-env MILO_DEV=1 MILO_TEST=1 MILO_TEST_COMPUTER=1 electron .\"",
     "release": "npm run dist && node scripts/publish-update.js",
     "ext:zip": "node scripts/zip-extension.js"

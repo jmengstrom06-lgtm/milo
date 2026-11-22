@@ -5,11 +5,6 @@ dist/
 *.log
 extension/config.json
 evals/results/
-<<<<<<< HEAD
 .signing/
 test-results/
 release/
-=======
-release/
-.signing/
->>>>>>> om

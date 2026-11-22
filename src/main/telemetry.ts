@@ -136,6 +136,44 @@ export function captureError(err: unknown, where: string, extra: Record<string, 
   track("error", { where, type: e.name });
 }
 
+// ---- tester feedback (Sentry User Feedback): the one thing the student chooses to send in their own words ----
+export async function sendFeedback(message: string, opts: { email?: string; kind?: string; recent?: string[] } = {}): Promise<boolean> {
+  const t = sentryTarget();
+  const msg = message.trim().slice(0, 4000);
+  if (!t || !msg) return false;
+  const id = crypto.randomUUID().replace(/-/g, "");
+  const event = {
+    event_id: id,
+    timestamp: Date.now() / 1000,
+    platform: "javascript",
+    level: "info",
+    release: release(),
+    environment: env(),
+    tags: { kind: opts.kind || "feedback" },
+    user: { id: distinctId(), ...(opts.email ? { email: opts.email } : {}) },
+    contexts: {
+      feedback: { message: msg, contact_email: opts.email || undefined, source: "milo-desktop" },
+      os: { name: os.platform(), version: os.release() },
+    },
+    extra: { recent: (opts.recent ?? []).slice(-30) }, // only event names, never what was said
+  };
+  const body = [JSON.stringify({ event_id: id, sent_at: new Date().toISOString() }), JSON.stringify({ type: "feedback" }), JSON.stringify(event)].join("\n") + "\n";
+  try {
+    const r = await fetch(`https://${t.host}/api/${t.project}/envelope/`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-sentry-envelope",
+        "x-sentry-auth": `Sentry sentry_version=7, sentry_key=${t.key}, sentry_client=milo-desktop/1.0`,
+      },
+      body,
+    });
+    track("feedback_sent", { kind: opts.kind || "feedback", ok: r.ok });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
 // ---- wiring --------------------------------------------------------------------------------
 
 // Black-box events worth counting, and the only fields of each that may leave the Mac.
@@ -154,7 +192,22 @@ const FORWARD: Record<string, { name: string; keep: string[] }> = {
   "memory:learned": { name: "memory_learned", keep: ["count"] },
   "task:plan": { name: "computer_task", keep: [] },
   "voice:play": { name: "spoke", keep: ["engine", "chars"] },
+  "app:offer_start": { name: "offer_start", keep: [] },
+  "d2l:source": { name: "d2l_source", keep: ["via"] },
+  "d2l:signin_needed": { name: "d2l_signin_needed", keep: ["chrome"] },
+  "app:d2l_fix": { name: "d2l_fix_shown", keep: ["chrome"] },
+  "app:d2l_fixed": { name: "d2l_fixed", keep: ["via", "seconds"] },
+  "app:portal_set": { name: "portal_set", keep: ["signedIn", "via", "chrome"] },
+  "app:offer_answer": { name: "offer_answer", keep: ["answer", "mode"] },
 };
+
+// The last few things Milo did, by event name only, so a feedback report shows what led up to it.
+const recent: string[] = [];
+export const recentEvents = () => [...recent];
+onLog((src, ev) => {
+  recent.push(`${new Date().toISOString().slice(11, 19)} ${src}:${ev}`);
+  if (recent.length > 40) recent.shift();
+});
 
 export function startTelemetry() {
   if (off()) return;

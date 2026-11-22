@@ -7,6 +7,7 @@
 
 import { app, BrowserWindow, session } from "electron";
 import { log as bb } from "./blackbox";
+import { bridgeConnected, call as ext } from "./bridge";
 import type { GradeSheet } from "./gradeMath";
 import type { Assignment } from "./school";
 
@@ -44,8 +45,13 @@ async function settle(w: BrowserWindow, ms = 20000): Promise<string> {
 const feedStatus = async (w: BrowserWindow) =>
   (await w.webContents.executeJavaScript(`fetch("/d2l/api/lp/${LP}/users/whoami", { headers: { Accept: "application/json" }, credentials: "include" }).then((r) => r.status).catch(() => 0)`, true)) as number;
 
-async function d2lPage(portal: string): Promise<BrowserWindow> {
-  if (page && !page.isDestroyed() && Date.now() - pageAt < 30 * 60e3) return page;
+let opening: Promise<BrowserWindow> | null = null;
+function d2lPage(portal: string): Promise<BrowserWindow> {
+  if (page && !page.isDestroyed() && Date.now() - pageAt < 30 * 60e3) return Promise.resolve(page);
+  if (!opening) opening = openD2lPage(portal).finally(() => (opening = null));
+  return opening;
+}
+async function openD2lPage(portal: string): Promise<BrowserWindow> {
   if (page && !page.isDestroyed()) page.destroy();
   const start = new URL(/^https?:\/\//.test(portal) ? portal : `https://${portal}`).origin;
   page = new BrowserWindow({ show: false, width: 1000, height: 700, webPreferences: { partition: PARTITION, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
@@ -60,15 +66,97 @@ async function d2lPage(portal: string): Promise<BrowserWindow> {
     page.destroy();
     page = null;
     // a login page (or the school's sign-in) = not signed in inside Milo; anything else = D2L is having a moment
-    if (status === 401 || status === 403 || !/\/d2l\/(home|lp\/homepage|le\/)/.test(url)) throw new SignInNeeded("Sign in to D2L in Milo first.");
+    if (status === 401 || status === 403 || !/\/d2l\/(home|lp\/homepage|le\/)/.test(url)) throw new SignInNeeded("Sign in to D2L first.");
     throw new Error(`D2L's data feed answered ${status} at ${new URL(url).host}`);
   }
   origin = new URL(url).origin;
   return page;
 }
 
+// ---------- the student's own Chrome (first choice: no Milo sign-in at all) ----------
+// Milo's Chrome extension reads D2L with the sign-in the student already has in Chrome.
+// Only if that's not possible (no Chrome / extension, or signed out there too) does Milo use his own sign-in.
+type Via = "chrome" | "milo";
+let via: Via | null = null;
+let chromeOutUntil = 0; // after Chrome says "signed out", don't ask it again for a few seconds
+let lastChrome: { status: number; type: string; where: string } | null = null;
+/** What Chrome said last time (for the self-test and the log). */
+export const lastChromeAnswer = () => lastChrome;
+export const resetChromeWait = () => (chromeOutUntil = 0);
+const originOf = (portal: string) => new URL(/^https?:\/\//.test(portal) ? portal : `https://${portal}`).origin;
+function using(v: Via) {
+  if (via !== v) bb("d2l", "source", { via: v });
+  via = v;
+}
+export const d2lVia = () => via;
+type Raw = { s: number; t: string; b: string | null; url?: string };
+/** Chrome's answer, asked twice before giving up: right after Milo starts, the first answer can be a page instead of data. */
+async function chromeFetch(portal: string, path: string, binary = false, maxBytes = 12e6, text = false): Promise<Raw | null> {
+  if (!bridgeConnected() || Date.now() < chromeOutUntil) return null; // just said "signed out": don't ask again yet
+  const first = await chromeFetchOnce(portal, path, binary, maxBytes, text);
+  if (first || !bridgeConnected()) return first;
+  await new Promise((r) => setTimeout(r, 1200));
+  chromeOutUntil = 0;
+  const second = await chromeFetchOnce(portal, path, binary, maxBytes, text);
+  if (second) bb("d2l", "chrome_retry_ok", {});
+  return second;
+}
+async function chromeFetchOnce(portal: string, path: string, binary = false, maxBytes = 12e6, text = false): Promise<Raw | null> {
+  if (!bridgeConnected() || Date.now() < chromeOutUntil) return null;
+  const url = /^https?:/.test(path) ? path : `${originOf(portal)}${path}`;
+  try {
+    const r = await ext<Raw>("d2l_fetch", { url, binary, maxBytes, text }, binary ? 30000 : 12000);
+    const signedOut = r.s === 401 || r.s === 403 || (!binary && !text && r.s === 200 && !r.t.includes("json")) || /okta|login|sso|saml|microsoftonline/i.test(r.url ?? "");
+    if (signedOut) {
+      chromeOutUntil = Date.now() + 15e3;
+      let where = "";
+      try {
+        where = r.url ? new URL(r.url).host + new URL(r.url).pathname.slice(0, 30) : "";
+      } catch {
+        /* ignore */
+      }
+      lastChrome = { status: r.s, type: r.t.slice(0, 40), where };
+      bb("d2l", "chrome_signed_out", lastChrome);
+      return null;
+    }
+    lastChrome = { status: r.s, type: r.t.slice(0, 40), where: "" };
+    return r;
+  } catch (e) {
+    lastChrome = { status: -1, type: "", where: (e as Error).message.slice(0, 80) };
+    bb("d2l", "chrome_failed", { error: lastChrome.where }); // an old extension without d2l_fetch, or Chrome busy
+    return null;
+  }
+}
+/** Signed in somewhere Milo can use? Chrome first, then Milo's own. */
+export async function signedInVia(portal: string): Promise<Via | null> {
+  const c = await chromeFetch(portal, `/d2l/api/lp/${LP}/users/whoami`);
+  if (c && c.s === 200) {
+    using("chrome");
+    return "chrome";
+  }
+  try {
+    await d2lPage(portal);
+    using("milo");
+    return "milo";
+  } catch {
+    return null;
+  }
+}
+
 async function api<T>(portal: string, path: string): Promise<T> {
-  const w = await d2lPage(portal);
+  const c = await chromeFetch(portal, path);
+  if (c) {
+    if (c.s === 200 && c.b) {
+      using("chrome");
+      return JSON.parse(c.b) as T;
+    }
+    if (c.s === 404 || c.s >= 500) throw new Error(`D2L said ${c.s} for ${path}`);
+  }
+  const w = await d2lPage(portal).catch((e) => {
+    if (e instanceof SignInNeeded) bb("d2l", "signin_needed", { chrome: bridgeConnected() });
+    throw e;
+  });
+  using("milo");
   const r = (await w.webContents.executeJavaScript(
     `fetch(${JSON.stringify(path)}, { headers: { Accept: "application/json" }, credentials: "include" }).then(async (r) => ({ s: r.status, t: r.headers.get("content-type") || "", b: await r.text() }))`,
     true
@@ -76,10 +164,40 @@ async function api<T>(portal: string, path: string): Promise<T> {
   if (r.s !== 200 || !r.t.includes("json")) bb("d2l", "api_miss", { path: path.split("?")[0], status: r.s, type: r.t.slice(0, 40) });
   if (r.s === 401 || r.s === 403 || !r.t.includes("json")) {
     pageAt = 0; // session may have expired: reopen (and re-check sign-in) next time
-    throw new SignInNeeded("Sign in to D2L in Milo first.");
+    throw new SignInNeeded("Sign in to D2L first.");
   }
   if (r.s !== 200) throw new Error(`D2L said ${r.s} for ${path}`);
   return JSON.parse(r.b) as T;
+}
+
+// ---------- calendar link (the backup that never signs out) ----------
+/** D2L's personal calendar feed link (".../feed.ics?token=..."), read from its "Subscribe" page while signed in.
+ *  Saved by the app so "what's due" keeps working even when every sign-in has run out. Null if the school turned it off. */
+/** The D2L page where the student presses Reset once to make their calendar link. */
+export async function subscribePageUrl(portal: string): Promise<string> {
+  const org = await api<{ Identifier: string }>(portal, `/d2l/api/lp/${LP}/organization/info`);
+  return `${originOf(portal)}/d2l/le/calendar/${org.Identifier}/subscribe/subscribeDialogLaunch?subscriptionOptionId=-1`;
+}
+export async function calendarFeedUrl(portal: string): Promise<string | null> {
+  const org = await api<{ Identifier: string }>(portal, `/d2l/api/lp/${LP}/organization/info`);
+  const path = `/d2l/le/calendar/${org.Identifier}/subscribe/subscribeDialogLaunch?subscriptionOptionId=-1`;
+  let html: string | null = null;
+  const c = await chromeFetch(portal, path, false, 12e6, true);
+  if (c && c.s === 200) html = c.b;
+  else {
+    const w = await d2lPage(portal);
+    html = (await w.webContents.executeJavaScript(`fetch(${JSON.stringify(path)}, { credentials: "include" }).then((r) => (r.ok ? r.text() : null)).catch(() => null)`, true)) as string | null;
+  }
+  const url = findFeedUrl(html ?? "", originOf(portal));
+  bb("d2l", "feed_link", { found: !!url });
+  return url;
+}
+/** The feed link inside the Subscribe page, plain or JSON-escaped; only with a real token. (pure) */
+export function findFeedUrl(html: string, origin: string): string | null {
+  const t = html.replace(/\\\//g, "/");
+  const m = t.match(/(https:\/\/[^"'\s<>]+)?(\/d2l\/le\/calendar\/feed\/user\/feed\.ics\?token=[A-Za-z0-9%_\-]{8,})/);
+  if (!m) return null;
+  return `${m[1] ? m[1].replace(/\/d2l.*$/, "") : origin}${m[2]}`;
 }
 
 // ---------- names ----------
@@ -235,12 +353,20 @@ export function links(origin_: string, ou: number) {
 }
 
 /** Is Milo signed in to D2L right now? (startup check + self-test) */
-export async function d2lCheck(portal: string): Promise<{ ok: boolean; signin: boolean; text: string }> {
+export async function d2lCheck(portal: string): Promise<{ ok: boolean; signin: boolean; text: string; via?: Via; chrome: boolean }> {
+  const chrome = bridgeConnected();
+  const c = await chromeFetch(portal, `/d2l/api/lp/${LP}/users/whoami`);
+  if (c && c.s === 200) {
+    using("chrome");
+    return { ok: true, signin: false, text: "", via: "chrome", chrome };
+  }
   try {
     await d2lPage(portal);
-    return { ok: true, signin: false, text: "" };
+    using("milo");
+    return { ok: true, signin: false, text: "", via: "milo", chrome };
   } catch (e) {
-    return { ok: false, signin: e instanceof SignInNeeded, text: (e as Error).message };
+    if (e instanceof SignInNeeded) bb("d2l", "signin_needed", { chrome });
+    return { ok: false, signin: e instanceof SignInNeeded, text: (e as Error).message, chrome };
   }
 }
 
@@ -290,6 +416,8 @@ export async function contentTopics(portal: string, c: Course): Promise<(Topic &
 }
 /** Download a course file through the signed-in D2L page. Base64, or null if too big / not there. */
 export async function fileBase64(portal: string, url: string, maxBytes = 12e6): Promise<string | null> {
+  const c = await chromeFetch(portal, url, true, maxBytes);
+  if (c) return c.s === 200 ? c.b : null;
   const w = await d2lPage(portal);
   const b64 = (await w.webContents.executeJavaScript(
     `fetch(${JSON.stringify(url)}, { credentials: "include" }).then(async (r) => {

@@ -45,3 +45,11 @@ describe("Jake's stats class, from D2L", () => {
     expect(forecast(sheet, targetFor("A").target)!.needed).toBe(74.5);
   });
 });
+
+import { findFeedUrl } from "../src/main/d2l";
+describe("calendar link", () => {
+  const o = "https://tcu.brightspace.com";
+  it("plain", () => expect(findFeedUrl(`<input value="https://tcu.brightspace.com/d2l/le/calendar/feed/user/feed.ics?token=abcDEF123456">`, o)).toBe(`${o}/d2l/le/calendar/feed/user/feed.ics?token=abcDEF123456`));
+  it("json-escaped, no host", () => expect(findFeedUrl(`{"url":"\\/d2l\\/le\\/calendar\\/feed\\/user\\/feed.ics?token=zz99zz99zz"}`, o)).toBe(`${o}/d2l/le/calendar/feed/user/feed.ics?token=zz99zz99zz`));
+  it("empty token = none", () => expect(findFeedUrl(`https://tcu.brightspace.com/d2l/le/calendar/feed/user/feed.ics?token="`, o)).toBeNull());
+});

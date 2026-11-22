@@ -22,6 +22,9 @@ export type Intent =
   | { kind: "brief" } // what's due (reads D2L)
   | { kind: "resume" } // pick up where Milo was interrupted
   | { kind: "chain"; steps: Intent[] } // "open chrome, find a worksheet, and complete it": do in order
+  | { kind: "activity" } // "what did you do?": open the timeline
+  | { kind: "undo" } // "undo that": take back the newest thing
+  | { kind: "feedback"; text: string } // "report a problem", "tell Jake that…"
   | { kind: "fill" } // type the lesson's answer into the blank
   | { kind: "yes" }
   | { kind: "no" }
@@ -114,6 +117,12 @@ function parseSingle(raw: string, ctx: Ctx): Intent {
   if (!t) return { kind: "chat", text };
   if (/^(keep going|continue|go on|resume|carry on|where were we|pick up where you left off|finish what you were (doing|saying)|ok(ay)? continue)$/.test(t))
     return { kind: "resume" };
+  {
+    const fb = t.match(/^(send feedback|give feedback|report (a |this )?(bug|problem|issue)|tell jake|that'?s a bug|feedback)\b[\s:,-]*(that )?/);
+    if (fb) return { kind: "feedback", text: text.slice(fb[0].length).trim() };
+  }
+  if (/^(undo( that| it| this| the last (thing|one))?|take (that|it) back|reverse that|cancel what you (just )?did)$/.test(t)) return { kind: "undo" };
+  if (/^(what (did|have) you (do|done)|what('?d| did) you (just )?do|show me what you (did|done)|what milo did|what you did|your (activity|history)|what happened while i was (gone|away|out))\b/.test(t)) return { kind: "activity" };
   if (/^(stop watching|stop checking|you can stop watching|quit watching)\b/.test(t)) return { kind: "watch", on: false };
   if (/^(watch me|watch my (work|screen)|keep an eye on (me|my work|this)|watch me work|check my work as i go|watch while i work)\b/.test(t))
     return { kind: "watch", on: true };

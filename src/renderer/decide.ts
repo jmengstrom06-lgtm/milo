@@ -301,3 +301,55 @@ export function parseGoogleMulti(text: string): GoogleAsk[] | null {
   }
   return asks.length >= 2 ? asks : null;
 }
+
+/** "Milo, remember my favorite study spot is the library common area" -> the fact to keep. */
+export function parseRemember(text: string): string | null {
+  const t = text.trim().replace(/[.!]+$/, "").replace(/^(hey |ok |okay )?(milo|mylo),?\s*/i, "");
+  const m = t.match(/^(?:please\s+)?(?:remember|don'?t forget|keep in mind|note|save)\s+(?:that\s+)?(.{4,})$/i);
+  if (!m) return null;
+  const f = m[1].trim();
+  if (/^(this|that|it|to )\b/i.test(f) && f.split(" ").length < 4) return null; // "remember this" alone = not a fact
+  if (/^to\s/i.test(f)) return null; // "remember to call mom" is a reminder, not a fact
+  // "my X is Y" -> "Their X is Y", so it reads right in Milo's notes about the student
+  return f.replace(/\bmy\b/gi, "their").replace(/\bI am\b|\bI'm\b/gi, "they're").replace(/\bI\b/g, "they").replace(/^./, (c) => c.toUpperCase());
+}
+
+/** A spoken email address: "mike dot armstrong at e a dash products dot com" -> mike.armstrong@ea-products.com */
+export function spokenEmail(text: string): string | null {
+  const direct = text.match(/[\w.+-]+@[\w-]+\.[\w.]+/);
+  if (direct) return direct[0].toLowerCase().replace(/\.$/, "");
+  let t = ` ${text.toLowerCase().replace(/[,!?]/g, " ")} `;
+  const at = t.lastIndexOf(" at ");
+  if (at < 0 || !/\b(dot|\.)\s*(com|edu|org|net|io|co|gov|us)\b/.test(t.slice(at))) return null;
+  let user = t.slice(0, at).replace(/.*\b(is|it's|its|address|email|e-mail|to)\b/, " ");
+  let host = t.slice(at + 4);
+  const clean = (s: string) =>
+    s
+      .replace(/\s+dot\s+|\s*\.\s*/g, ".")
+      .replace(/\s+(dash|hyphen)\s+/g, "-")
+      .replace(/\s+underscore\s+/g, "_")
+      .replace(/\b([a-z])\s(?=[a-z]\b)/g, "$1") // "e a" -> "ea"
+      .replace(/\s+/g, "");
+  user = clean(user.trim());
+  host = clean(host.trim()).replace(/\.$/, "");
+  return user && /^[\w.+-]+$/.test(user) && /^[\w-]+(\.[\w-]+)+$/.test(host) ? `${user}@${host}` : null;
+}
+
+// ---- The first-minute offer: "Want to start on X? Together, or I can do it myself." ------------------
+/** Pick the assignment to offer first: soonest due, urgent first, skipping things already past due. (pure) */
+export function firstOffer<T extends { title: string; due_iso?: string; urgent?: boolean }>(items: T[], now = Date.now()): T | null {
+  const t = (x: T) => (x.due_iso ? Date.parse(x.due_iso) : NaN);
+  const live = items.filter((x) => x.title && !(t(x) < now - 6 * 3600e3)); // a few hours late still counts
+  if (!live.length) return null;
+  return [...live].sort((a, b) => (Number(!!b.urgent) - Number(!!a.urgent)) || ((isNaN(t(a)) ? Infinity : t(a)) - (isNaN(t(b)) ? Infinity : t(b))))[0];
+}
+/** Their answer to the offer. "together" = work through it with Milo; "do" = Milo does it himself. (pure) */
+export function parseOfferAnswer(raw: string): "together" | "do" | "do_submit" | "no" | null {
+  const t = stripFiller(raw).toLowerCase().replace(/[.!?,]+/g, " ").replace(/\s+/g, " ").trim(); // keep "for me" / "just": they matter here
+  // "do it and turn it in": he does it AND submits, no second yes needed (they just gave it)
+  if (/\b(submit|turn (it|this|that) in|hand (it|this) in|turn in)\b/.test(t) && !/\b(don'?t|do not|not|never|without)\b.{0,20}\b(submit|turn|hand)/.test(t)) return "do_submit";
+  if (/^(no|nope|nah|not (now|yet|right now|today)|later|maybe later|never ?mind|i'?m good|no thanks?|not now thanks?)\b/.test(t)) return "no";
+  if (/\b(do it (for me|yourself|all|by yourself)|you do it|do the whole (thing|assignment)|just do it|you (can )?(do|handle|take care of) it|do it (all )?(on your own|alone)|(by|for) yourself|do (it|this|that) for me|^(just )?do it (but|without)\b|finish it for me|complete it (for me)?|i'?m (slammed|swamped|out of time))\b/.test(t)) return "do";
+  if (/^(yes|yeah|yep|yup|sure|ok(ay)?|let'?s (do it|go|start)|together|help me|work through it|with me|go( ahead)?|start|sounds good|please|do it with me)\b/.test(t)) return "together";
+  return null;
+}

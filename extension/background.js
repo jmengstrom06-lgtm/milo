@@ -108,7 +108,22 @@ function waitForLoad(tabId, ms = 8000) {
 async function run(cmd, args) {
   switch (cmd) {
     case "status":
-      return { version: chrome.runtime.getManifest().version };
+      return { version: chrome.runtime.getManifest().version, d2l: true };
+    case "d2l_fetch": {
+      // Read the student's D2L with the sign-in they already have in Chrome. Only D2L's own addresses
+      // (https, a /d2l/ or course-file /content/ path), only reading (GET). Never anything else, never sending anything.
+      const u = new URL(String(args.url || ""));
+      if (u.protocol !== "https:" || !/^\/(d2l|content)\//.test(u.pathname)) throw new Error("Only D2L pages");
+      const r = await fetch(u.href, { method: "GET", credentials: "include", headers: { Accept: args.binary || args.text ? "*/*" : "application/json" }, redirect: "follow" });
+      const type = r.headers.get("content-type") || "";
+      if (!args.binary) return { s: r.status, t: type, b: (await r.text()).slice(0, 4e6), url: r.url };
+      if (!r.ok) return { s: r.status, t: type, b: null, url: r.url };
+      const buf = new Uint8Array(await r.arrayBuffer());
+      if (buf.length > (args.maxBytes || 12e6)) return { s: 413, t: type, b: null, url: r.url };
+      let bin = "";
+      for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+      return { s: r.status, t: type, b: btoa(bin), url: r.url };
+    }
     case "tabs": {
       const tabs = await chrome.tabs.query({ lastFocusedWindow: true });
       return tabs.map((t) => ({ id: t.id, title: t.title, url: t.url, active: t.active }));

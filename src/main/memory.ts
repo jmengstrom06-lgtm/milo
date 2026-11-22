@@ -52,14 +52,27 @@ export function memoryPrompt(): string {
   return `\nWhat you remember about this student (use it naturally when it helps, never recite it):\n- ${m.join("\n- ")}`;
 }
 
-export async function remember(fact: string) {
+/** Told when Milo learns something new (the timeline logs it, with Undo). */
+let onLearn: ((fact: string, how: "asked" | "learned") => void) | null = null;
+export const onRemember = (fn: typeof onLearn) => (onLearn = fn);
+
+export async function remember(fact: string, how: "asked" | "learned" = "asked") {
   const f = fact.trim().replace(/\s+/g, " ").slice(0, 300);
   if (!f) return;
   const all = loadLocal();
   if (all.some((x) => x.toLowerCase() === f.toLowerCase())) return;
+  onLearn?.(f, how);
   facts = [f, ...all].slice(0, MAX);
   saveLocal();
   if (userId()) await rest("memories", { method: "POST", body: { fact: f }, prefer: "return=minimal" });
+}
+
+/** Forget one fact (Undo for something Milo learned). */
+export async function forget(fact: string) {
+  const f = fact.trim().toLowerCase();
+  facts = loadLocal().filter((x) => x.toLowerCase() !== f);
+  saveLocal();
+  if (userId()) await rest(`memories?fact=eq.${encodeURIComponent(fact.trim())}`, { method: "DELETE" });
 }
 
 export async function forgetAll() {
@@ -89,7 +102,7 @@ export function noteTurn(history: ChatMessage[], extract: (chat: string, known: 
     .slice(-6000);
   extract(chat, memories())
     .then(async (found) => {
-      for (const f of found.slice(0, 5)) await remember(f);
+      for (const f of found.slice(0, 5)) await remember(f, "learned");
       if (found.length) bb("memory", "learned", { count: found.length });
     })
     .catch((e) => bb("memory", "learn_failed", { error: (e as Error).message }))

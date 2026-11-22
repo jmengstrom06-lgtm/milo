@@ -32,23 +32,24 @@ import { isJob, lastJob, resumable, resumeJob, startJob, type JobDeps } from "./
 import { getProfile, setProfile, type Profile } from "./profile";
 import { usageToday } from "./usage";
 import { awayWatch } from "./away";
-import { calendarAdd, calendarUpcoming, docsCreate, GoogleNotConnected, googleConnect, googleStatus, gmailDraft, gmailSendDraft, gmailUnread } from "./google";
+import { calendarAdd, calendarDelete, calendarUpcoming, docsCreate, GoogleNotConnected, googleConnect, googleStatus, gmailDeleteDraft, gmailDraft, gmailSendDraft, gmailUnread } from "./google";
+import { activity, did, registerActivity } from "./activityLog";
 import { composeEmail, parseEvent, sayCalendar, sayMail } from "./googleai";
 import { feedUrl } from "./school";
 import { checkMath, isQuantitative, type MathVerdict } from "./mathcheck";
 import { askForecast, setFinalWeight } from "./grades";
 import { addScore, gradeNow, readSyllabus } from "./gradebook";
-import { d2lCheck, keepSignedIn, courses as d2lCourses, dueSoon as d2lDue, gradeSheet as d2lSheet, matchCourse as d2lMatch, SignInNeeded } from "./d2l";
+import { calendarFeedUrl, subscribePageUrl, d2lCheck, keepSignedIn, courses as d2lCourses, dueSoon as d2lDue, gradeSheet as d2lSheet, matchCourse as d2lMatch, SignInNeeded } from "./d2l";
 import { makeExam } from "./exam";
 import { transcribe } from "./ears";
 import { binaryPath, stopNative } from "./native";
 import { account, onAccountChange, sendCode, signOut, startCallbackServer, userId, verifyCode } from "./account";
-import { forgetAll, memories, syncMemories } from "./memory";
-import { captureError, identify, startTelemetry, track } from "./telemetry";
+import { forget, forgetAll, memories, onRemember, remember, syncMemories } from "./memory";
+import { captureError, identify, recentEvents, sendFeedback, startTelemetry, track } from "./telemetry";
 import { allowForSession, backToWork, startFocus, stopFocus } from "./focus";
 import { planBlocks } from "./focusRules";
 import { rest } from "./account";
-import { activateApp, click, ensureBrowser, frontApp, isRunning, openApp, openFolder, openLatestDownload, openUrl, pressKeys, quitApp, typeText } from "./hands";
+import { activateApp, click, ensureBrowser, resolveApp, frontApp, isRunning, openApp, openFolder, openLatestDownload, openUrl, pressKeys, quitApp, typeText } from "./hands";
 import { plan } from "./quick";
 import { research } from "./research";
 import { buildTool } from "./builder";
@@ -346,6 +347,7 @@ const jobDeps: JobDeps = {
   },
   emit: (job) => {
     overlay?.webContents.send("milo:job", job);
+    logJob(job);
     // away mode: Mac stays awake while working; a notification when it's done or needs you
     awayWatch(job, () => {
       overlay?.showInactive();
@@ -359,6 +361,17 @@ const jobDeps: JobDeps = {
     taskAbort = false;
   },
 };
+/** Jobs land in the timeline once, when they finish or stop for the student. Web steps can't be auto-undone. */
+const jobLogged = new Map<string, string>();
+function logJob(job: { id: string; goal: string; status: string; summary?: string; question?: string; steps: { do: string; status: string }[] }) {
+  const end = { done: "Did", needs_you: "Started (needs you)", stuck: "Got stuck on", stopped: "Stopped", failed: "Couldn't finish" }[job.status as "done"];
+  if (!end) return;
+  const steps = job.steps.filter((s) => s.status === "done").map((s) => `✓ ${s.do}`).join("\n");
+  const e = { kind: "job" as const, title: `${end}: ${job.goal}`, detail: [job.summary || job.question, steps].filter(Boolean).join("\n\n"), noUndo: "This happened on websites, so open them to change it." };
+  const prev = jobLogged.get(job.id);
+  if (prev) activity.update(prev, e);
+  else jobLogged.set(job.id, did(e));
+}
 /** Wait for a stopped action to really finish (its last click can still be landing) before starting again. */
 async function waitIdle(ms = 15000) {
   const t0 = Date.now();
@@ -412,6 +425,7 @@ ipcMain.handle("milo:google-doc", async (_e, title: string, text?: string) => {
   try {
     const d = await docsCreate(String(title || "Untitled"), String(text ?? ""));
     void shell.openExternal(d.url);
+    did({ kind: "doc", title: `Made a Google Doc: ${String(title || "Untitled")}`, link: d.url, noUndo: "Milo can't delete Google Docs. Open it and move it to the trash if you don't want it." });
     return { ok: true, text: `Made your Google Doc "${title}" and opened it.`, url: d.url, link: d.url, linkLabel: "Open doc" };
   } catch (e) {
     return gerr(e);
@@ -422,16 +436,21 @@ ipcMain.handle("milo:google-draft", async (_e, request: string) => {
   try {
     const r = await composeEmail(String(request));
     if (!r.ok) return { ok: false, text: r.text };
-    if (!r.data.found) return { ok: false, text: `I couldn't find ${r.data.to}'s email address in your inbox. Say it with their address, like "email jsmith@tcu.edu".` };
+    if (!r.data.found) return { ok: false, needAddress: r.data.to, text: `I couldn't find ${r.data.to}'s email. What's their address?` };
     const d = await gmailDraft(r.data);
+    draftEntries.set(d.draftId, did({ kind: "email_draft", title: `Wrote an email to ${r.data.to}: "${r.data.subject}" (in your drafts)`, link: d.link, undo: { type: "draft_delete", data: { draftId: d.draftId } } }));
     return { ok: true, draftId: d.draftId, link: d.link, linkLabel: "Open draft", to: r.data.to, subject: r.data.subject, body: r.data.body, text: `I wrote an email to ${r.data.to}, subject "${r.data.subject}". It's in your drafts. Want me to send it?` };
   } catch (e) {
     return gerr(e);
   }
 });
+const draftEntries = new Map<string, string>(); // draft id -> timeline entry (sending it makes it un-undoable)
 ipcMain.handle("milo:google-send", async (_e, draftId: string) => {
   try {
     await gmailSendDraft(String(draftId));
+    const entry = draftEntries.get(String(draftId));
+    if (entry) activity.update(entry, { kind: "email_sent", title: activity.list(300).find((x) => x.id === entry)?.title.replace(/^Wrote an email/, "Sent an email").replace(/ \(in your drafts\)$/, "") ?? "Sent an email", undo: undefined, noUndo: "Sent emails can't be unsent.", link: "https://mail.google.com/mail/u/0/#sent" });
+    else did({ kind: "email_sent", title: "Sent an email", noUndo: "Sent emails can't be unsent.", link: "https://mail.google.com/mail/u/0/#sent" });
     return { ok: true, text: "Sent!", link: "https://mail.google.com/mail/u/0/#sent", linkLabel: "View in Gmail" };
   } catch (e) {
     return gerr(e);
@@ -448,6 +467,7 @@ ipcMain.handle("milo:google-event-parse", async (_e, request: string) => {
 ipcMain.handle("milo:google-event-add", async (_e, ev: { title: string; start: string; end?: string; where?: string }) => {
   try {
     const r = await calendarAdd(ev);
+    did({ kind: "calendar", title: `Added "${ev.title}" to your calendar`, detail: ev.start, link: r.link || undefined, undo: r.id ? { type: "calendar_delete", data: { id: r.id } } : undefined });
     return { ok: true, text: "Added to your calendar.", link: r.link || "https://calendar.google.com/calendar/r", linkLabel: "View in Calendar" };
   } catch (e) {
     return gerr(e);
@@ -485,12 +505,26 @@ ipcMain.handle("milo:grade-now", async (_e, course: string, portal?: string) => 
       if (d?.sheet.current_percent != null) return { ok: true, text: `You've got a ${d.sheet.current_percent}% in ${d.sheet.course} right now.` };
     } catch (e) {
       bb("d2l", "grade_now_failed", { error: (e as Error).message, signin: e instanceof SignInNeeded });
-      if (e instanceof SignInNeeded) return { ok: false, signin: true, text: "I need you to sign in to D2L inside me once. I'll open it, then ask me again." };
+      if (e instanceof SignInNeeded) return { ok: false, signin: true, text: "Your D2L sign-in ran out." };
     }
   }
   return gradeNow(String(course));
 });
 // D2L's calendar, read directly: everything due, every class, in about a second (no AI)
+// D2L sign-in: Chrome's first (no Milo login), Milo's own second. The renderer uses these to fix a signed-out state.
+ipcMain.handle("milo:d2l-check", (_e, portal: string) => d2lCheck(String(portal ?? "")));
+ipcMain.handle("milo:d2l-feed-url", (_e, portal: string) => calendarFeedUrl(String(portal ?? "")).catch(() => null));
+ipcMain.handle("milo:d2l-subscribe-url", (_e, portal: string) => subscribePageUrl(String(portal ?? "")).catch(() => null));
+ipcMain.handle("milo:d2l-open-chrome", async (_e, url: string) => {
+  const u = /^https?:\/\//.test(String(url)) ? String(url) : `https://${url}`;
+  try {
+    await ext("new_tab", { url: u }, 15000);
+    return true;
+  } catch {
+    await openUrl(u).catch(() => {});
+    return false;
+  }
+});
 ipcMain.handle("milo:d2l-due", async (_e, portal: string) => {
   try {
     return { ok: true as const, items: await d2lDue(String(portal)) };
@@ -553,6 +587,7 @@ async function doTask(task: string) {
         history.push(`Opened the newest download: ${name}`);
         newTabJustOpened = false;
       } else if (q.kind === "app") {
+        const wasOpen = await isRunning(resolveApp(q.app)).catch(() => true); // already open = Undo must not quit it
         const real = await openApp(q.app);
         // Check it actually came to the front; if not, bring it forward once more.
         const same = (f: string) => f.toLowerCase().includes(real.toLowerCase().replace(/^(microsoft|google) /, "").split(" ")[0]);
@@ -562,6 +597,7 @@ async function doTask(task: string) {
           front = await frontApp().catch(() => "");
         }
         bb("task", "verify", { kind: "open", app: real, ok: same(front), front });
+        did({ kind: "app", title: `Opened ${real}`, ...(wasOpen ? { noUndo: `${real} was already open.` } : { undo: { type: "app_quit", data: { app: real } } }) });
         history.push(`Opened the ${q.app} app`);
         newTabJustOpened = false;
       } else if (q.kind === "url") {
@@ -951,6 +987,23 @@ ipcMain.on("milo:save-clip", (_e, wav: ArrayBuffer, note?: string) => {
 ipcMain.handle("milo:bridge-status", () => bridgeConnected());
 
 registerLibrary();
+// ---------- "What Milo did": the timeline, and how each kind of thing gets undone ----------
+registerActivity();
+// Tester feedback: one tap, their words + the last few event names (never what they said or saw).
+ipcMain.handle("milo:feedback", async (_e, message: string, kind?: string) => {
+  const ok = await sendFeedback(String(message ?? ""), { email: account().email || undefined, kind: kind ? String(kind) : "feedback", recent: recentEvents() });
+  bb("feedback", "sent", { ok, kind });
+  return { ok, text: ok ? "Thanks! Jake will see that." : "I couldn't send that. Check your internet and try again." };
+});
+activity.onUndo("calendar_delete", async (d) => calendarDelete(String(d.id)));
+activity.onUndo("draft_delete", async (d) => gmailDeleteDraft(String(d.draftId)));
+activity.onUndo("memory_forget", async (d) => forget(String(d.fact)));
+activity.onUndo("app_quit", async (d) => {
+  await quitApp(String(d.app));
+});
+onRemember((fact, how) =>
+  did({ kind: "memory", title: how === "asked" ? `Remembered: ${fact}` : `Learned about you: ${fact}`, undo: { type: "memory_forget", data: { fact } } })
+);
 registerKit({
   captureJpeg: async () => {
     const cap = await captureScreen();
@@ -1021,7 +1074,7 @@ ipcMain.handle("milo:startup-check", async (_e, portal?: string) => {
   }
   if (portal) {
     const c = await d2lCheck(String(portal)).catch(() => ({ ok: false, signin: false, text: "" }));
-    if (!c.ok && c.signin) problems.push({ kind: "d2l", text: "I'm not signed in to D2L, so I can't see your grades or what's due. I'll open it so you can sign in once." });
+    if (!c.ok && c.signin) problems.push({ kind: "d2l", text: "" }); // the renderer walks them through it (Chrome first)
   }
   bb("startup", "check", { problems: problems.map((p) => p.kind) });
   return { problems };
@@ -1121,6 +1174,11 @@ ipcMain.handle(
   }
 );
 ipcMain.handle("milo:memories", () => memories());
+ipcMain.handle("milo:remember", async (_e, fact: string) => {
+  await remember(String(fact ?? ""));
+  bb("memory", "saved", { chars: String(fact ?? "").length });
+  return true;
+});
 ipcMain.handle("milo:forget-all", async () => {
   await forgetAll();
   return true;
@@ -1223,6 +1281,14 @@ app.whenReady().then(() => {
   const tray = createTray({
     overlay: () => overlay,
     talk: () => overlay?.webContents.send("milo:talk"),
+    feedback: () => {
+      overlay?.showInactive();
+      overlay?.webContents.send("milo:open-feedback");
+    },
+    activity: () => {
+      overlay?.showInactive();
+      overlay?.webContents.send("milo:open-activity");
+    },
     say: notify,
     checkUpdates: () => checkForUpdate(true).then(notify),
     updateReady,

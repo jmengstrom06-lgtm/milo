@@ -3,7 +3,7 @@
 
 import { callTool, persona } from "./brain";
 import { models } from "./gateway";
-import { gmailSearch, type Ev, type Mail } from "./google";
+import { findAddress, gmailSearch, type Ev, type Mail } from "./google";
 import { getProfile } from "./profile";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -32,7 +32,8 @@ export async function composeEmail(request: string) {
     {
       model: models.fast(),
       max_tokens: 900,
-      system: `${persona()}\nWrite the email the student asked for. Student: ${me.name ?? "the student"}${me.school ? ` at ${me.school}` : ""}.`,
+      system: `${persona()}\nWrite the email the student asked for. Student: ${me.name ?? "the student"}${me.school ? ` at ${me.school}` : ""}.
+Rules: never use placeholders like [Subject], [Name] or [Your name]. No subject given? Write a short natural one ("Hi", "Quick question"). Sign off with the student's first name${me.name ? ` (${me.name.split(" ")[0]})` : ""}, or nothing if you don't know it. Spoken addresses become real ones ("mike dot smith at e a dash products dot com" = mike.smith@ea-products.com). Ignore filler like "no no" or "Milo".`,
       tools: [EMAIL_TOOL],
       tool_choice: { type: "auto" },
       messages: [{ role: "user", content: request }],
@@ -41,17 +42,18 @@ export async function composeEmail(request: string) {
   );
   if (!r.ok) return r;
   let to = r.data.to.trim();
+  const subject = /^\s*\[.*\]\s*$|^\s*$/.test(r.data.subject) ? "Hi" : r.data.subject.trim();
+  const body = r.data.body.replace(/\[(your name|name|student'?s? name)\]/gi, me.name?.split(" ")[0] ?? "").trim();
   // a name, not an address: find it in their email (someone they've written to or heard from)
   let found = true;
   if (!/@/.test(to)) {
     // a name, not an address: find it in emails they've gotten from that person
     const name = to.replace(/^(professor|prof\.?|dr\.?|mr\.?|ms\.?|mrs\.?)\s+/i, "").trim();
-    const hits: Mail[] = await gmailSearch(`from:(${name})`, 3).catch(() => []);
-    const addr = hits.map((h) => h.email).find(Boolean);
+    const addr = await findAddress(name).catch(() => "");
     if (addr) to = addr;
     else found = false;
   }
-  return { ok: true as const, data: { ...r.data, to, found } };
+  return { ok: true as const, data: { ...r.data, subject, body, to, found } };
 }
 
 const EVENT_TOOL = {

@@ -167,12 +167,22 @@ export async function calendarAdd(ev: { title: string; start: string; end?: stri
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   };
   const when = (v: string) => (allDay ? { date: v } : { dateTime: v.length === 16 ? `${v}:00` : v, timeZone: tz });
-  const r = await g<{ htmlLink?: string }>("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+  const r = await g<{ id?: string; htmlLink?: string }>("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
     method: "POST",
     body: JSON.stringify({ summary: ev.title, location: ev.where, start: when(ev.start), end: when(endOf()) }),
   });
   bb("google", "event_added", {});
-  return { link: r.htmlLink ?? "" };
+  return { id: r.id ?? "", link: r.htmlLink ?? "" };
+}
+/** Take an event back out (Undo in "What Milo did"). Already gone counts as done. */
+export async function calendarDelete(id: string) {
+  if (!id) throw new Error("I don't know which event that was.");
+  try {
+    await g(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(id)}`, { method: "DELETE" });
+  } catch (e) {
+    if (!/said (404|410)/.test((e as Error).message)) throw e;
+  }
+  bb("google", "event_removed", {});
 }
 
 // ---------- Gmail ----------
@@ -189,6 +199,32 @@ export async function gmailSearch(q: string, max = 8): Promise<Mail[]> {
 }
 export const gmailUnread = (max = 8) => gmailSearch("is:unread in:inbox", max);
 
+/** From "Name <a@b.com>, Other <c@d.com>" headers, the address that belongs to `name` (pure). */
+export function pickAddress(headers: string[], name: string): string {
+  const words = name.toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter((w) => w.length > 1);
+  if (!words.length) return "";
+  let best = "", bestScore = 0;
+  for (const h of headers)
+    for (const part of h.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)) {
+      const addr = (part.match(/[\w.+-]+@[\w-]+\.[\w.]+/) ?? [])[0];
+      if (!addr) continue;
+      const hay = `${part.replace(/<.*>/, "")} ${addr.split("@")[0].replace(/[._-]/g, " ")}`.toLowerCase();
+      const score = words.filter((w) => hay.includes(w)).length;
+      if (score > bestScore) [best, bestScore] = [addr.toLowerCase(), score];
+    }
+  // a last name alone is enough; a first name alone only if it's the only word they said
+  return bestScore >= Math.min(2, words.length) || (bestScore >= 1 && words.length >= 2 && best.includes(words[words.length - 1])) ? best : "";
+}
+/** Someone's email address: from mail they sent you, you sent them, or they were cc'd on. */
+export async function findAddress(name: string): Promise<string> {
+  const q = name.replace(/["()]/g, "").trim();
+  const list = await g<{ messages?: { id: string }[] }>(`https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=8&q=${encodeURIComponent(`from:(${q}) OR to:(${q}) OR cc:(${q})`)}`);
+  type M = { payload?: { headers?: { name: string; value: string }[] } };
+  const msgs = await Promise.all((list.messages ?? []).map((m) => g<M>(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc`)));
+  const headers = msgs.flatMap((m) => (m.payload?.headers ?? []).map((h) => h.value));
+  return pickAddress(headers, q);
+}
+
 const b64url = (s: string) => Buffer.from(s, "utf8").toString("base64url");
 /** Make a draft (never sends). */
 export async function gmailDraft(m: { to: string; subject: string; body: string }) {
@@ -196,6 +232,15 @@ export async function gmailDraft(m: { to: string; subject: string; body: string 
   const r = await g<{ id: string; message?: { id: string } }>("https://gmail.googleapis.com/gmail/v1/users/me/drafts", { method: "POST", body: JSON.stringify({ message: { raw } }) });
   bb("google", "draft_made", {});
   return { draftId: r.id, link: `https://mail.google.com/mail/u/0/#drafts?compose=${r.message?.id ?? ""}` };
+}
+/** Throw a draft away (Undo). Already gone counts as done. */
+export async function gmailDeleteDraft(draftId: string) {
+  try {
+    await g(`https://gmail.googleapis.com/gmail/v1/users/me/drafts/${encodeURIComponent(draftId)}`, { method: "DELETE" });
+  } catch (e) {
+    if (!/said 404/.test((e as Error).message)) throw e;
+  }
+  bb("google", "draft_removed", {});
 }
 /** Send a draft. Only ever called after the student says yes. */
 export async function gmailSendDraft(draftId: string) {

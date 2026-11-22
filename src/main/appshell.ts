@@ -84,6 +84,8 @@ let tray: Tray | null = null;
 export type TrayHooks = {
   overlay: () => BrowserWindow | null;
   talk: () => void;
+  activity?: () => void;
+  feedback?: () => void;
   say: (text: string) => void;
   checkUpdates: () => void;
   updateReady: () => string | null; // version waiting to install
@@ -106,6 +108,8 @@ export function createTray(h: TrayHooks) {
         ...(ready ? [{ label: `Restart to update (v${ready})`, click: () => h.installUpdate() }, { type: "separator" as const }] : []),
         { label: visible ? "Hide Milo" : "Show Milo", click: () => (visible ? win?.hide() : win?.showInactive()) },
         { label: "Talk to Milo", accelerator: "CommandOrControl+Shift+Space", click: () => h.talk() },
+        { label: "What Milo did…", click: () => h.activity?.() },
+        { label: "Send feedback…", click: () => h.feedback?.() },
         { type: "separator" },
         { label: "Set a key from clipboard", click: () => h.say(saveKeyFromClipboard()) },
         { label: "Open Milo's logs", click: () => shell.openPath(LOG_DIR) },

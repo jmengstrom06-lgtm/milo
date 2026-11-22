@@ -14,11 +14,13 @@ import { setSounds, sfx, soundsOn } from "./sfx";
 import ToolPanel, { SavedTool, loadTools, saveTools } from "./ToolPanel";
 import QuizPanel, { QuizHandle } from "./QuizPanel";
 import { BriefCard, BriefLoader, BriefState, SignInPanel } from "./Brief";
-import { parseAnswer, parseGoogle, parseGoogleMulti } from "./decide";
-import { fastDecide, looksLikeBackground, parseExam, parseFinalWeight, parseForecast, parseGradeNow, parseScore, parseSyllabus, parseHomework, parsePlanVoice, parseRadar, stripFiller, type DecideState } from "./decide";
+import { parseAnswer, parseGoogle, parseGoogleMulti, parseRemember, spokenEmail } from "./decide";
+import { fastDecide, looksLikeBackground, parseExam, parseFinalWeight, parseForecast, parseGradeNow, parseScore, parseSyllabus, parseHomework, parsePlanVoice, parseRadar, stripFiller, firstOffer, parseOfferAnswer, type DecideState } from "./decide";
 import { alertLine, emptyRadar, markWarned, mergeScan, pendingAlerts, upcoming, whenText, type Radar, type RadarItem, type ScanItem, type Warn } from "./radar";
 import RadarCard, { type RadarView } from "./RadarCard";
 import Onboarding, { setupDone } from "./Onboarding";
+import ActivityPanel from "./ActivityPanel";
+import FeedbackPanel from "./FeedbackPanel";
 import JobCard from "./JobCard";
 import { parseProfileFact, profileLabel } from "../main/profileFacts";
 import { detectLms, LMS, parseIcs } from "../main/school";
@@ -107,6 +109,8 @@ export default function App() {
   const [mood, setMood] = useState<Mood>("sitting");
   const [facing, setFacing] = useState<"left" | "right">("left");
   const [speaking, setSpeaking] = useState(false);
+  const speakingRef = useRef(false);
+  speakingRef.current = speaking;
   const [bubble, setBubble] = useState<string | null>(null);
 
   const [chatOpen, setChatOpen] = useState(false);
@@ -172,6 +176,11 @@ export default function App() {
   const [quiz, setQuiz] = useState<{ id: number; topic: string; questions: QuizQ[]; focus: string } | null>(null);
   const quizRef = useRef<QuizHandle>(null);
   const [brief, setBrief] = useState<BriefState | null>(null);
+  const [activityOpen, setActivityOpen] = useState(false); // "What Milo did"
+  // The first-minute offer: "Want to start on X? Together, or I can do it myself." (full = both; do_only = after a plan is up)
+  const offerRef = useRef<{ item: { title: string; course: string; due: string }; at: number; mode: "full" | "do_only" } | null>(null);
+  const firstBrief = useRef(false); // the brief right after setup ends with the offer
+  const [feedback, setFeedback] = useState<string | null>(null); // the feedback panel (null = closed), with any words they already said
   const [briefRun, setBriefRun] = useState(0); // bump to (re)load the portal
   const [signIn, setSignIn] = useState(false);
   // First run: Milo sets himself up with the student (name, account, classes, permissions, D2L).
@@ -694,11 +703,12 @@ export default function App() {
       if (startupChecked.current) return;
       startupChecked.current = true;
       const r = await window.milo.startupCheck(portal || undefined).catch(() => ({ problems: [] as { kind: string; text: string }[] }));
+      if (portal && !r.problems.some((p) => p.kind === "d2l")) void ensureFeed(); // signed in: grab the backup link if we don't have it
       if (!r.problems.length) return;
       setMood("thinking");
-      for (const p of r.problems.slice(0, 2)) await say(p.text);
+      for (const p of r.problems.filter((x) => x.text).slice(0, 2)) await say(p.text);
       setBubble(null);
-      if (r.problems.some((p) => p.kind === "d2l")) startBrief(true); // opens the D2L sign-in
+      if (r.problems.some((p) => p.kind === "d2l")) void fixD2l().then((ok) => ok && startBrief(false)); // Chrome first, then Milo's own sign-in
     }, 6000);
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -717,7 +727,8 @@ export default function App() {
   // speaking, and only yes/no style answers count. Silence = nothing happens.
   const answerUntil = useRef(0);
   const answerTimer = useRef<number | undefined>(undefined);
-  const [answering, setAnswering] = useState(false);
+  const [answering, setAnswering] = useState<string | false>(false); // the hint on the glowing tag
+  const pendingAddr = useRef<{ request: string; name: string; at: number } | null>(null);
   const ANSWER_MS = 8000;
   const answerTick = useRef(() => {});
   answerTick.current = () => {
@@ -733,10 +744,10 @@ export default function App() {
     bb("answer_window_end", { why: "no answer" });
     setMood((m) => (m === "listening" ? "idle" : m));
   };
-  const waitForAnswer = () => {
+  const waitForAnswer = (hint = "say yes or no") => {
     answerUntil.current = Date.now() + ANSWER_MS;
     followUntil.current = Math.max(followUntil.current, answerUntil.current);
-    setAnswering(true);
+    setAnswering(hint);
     setMood("listening");
     ears.current?.mute(false); // open the mic now, before the ding, so an instant "yes" is caught
     ears.current?.expect(ANSWER_MS + 4000);
@@ -763,8 +774,43 @@ export default function App() {
     setProof({ label: r.linkLabel || "Open it", url: r.link });
     proofTimer.current = window.setTimeout(() => setProof(null), 30000);
   };
+  const startDraft = (request: string) => {
+    setMood("thinking");
+    setBubble("Writing it…");
+    void window.milo.google.draft(request).then((r) => {
+      if (r.ok && r.draftId) pendingGoogle.current = { kind: "send", draftId: r.draftId, at: Date.now() };
+      if (!r.ok && r.needAddress) pendingAddr.current = { request, name: r.needAddress, at: Date.now() };
+      setMood(r.ok ? "happy" : "thinking");
+      showProof(r);
+      say(r.text).then(() => {
+        setBubble(null);
+        if (r.ok && pendingGoogle.current) waitForAnswer();
+        else if (pendingAddr.current) waitForAnswer("say their email");
+      });
+    });
+  };
   const googleVoice = (text: string): boolean => {
     const t = text.toLowerCase().replace(/[.!?,]+/g, " ").replace(/\s+/g, " ").trim();
+    const pa = pendingAddr.current;
+    if (pa && Date.now() - pa.at < 60e3) {
+      const addr = spokenEmail(text);
+      if (addr) {
+        endAnswer("address");
+        pendingAddr.current = null;
+        hush();
+        const esc = pa.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const req = new RegExp(esc, "i").test(pa.request) ? pa.request.replace(new RegExp(esc, "i"), addr) : `${pa.request} (send it to ${addr})`;
+        bb("google_voice", { do: "draft", from: "address_answer" });
+        startDraft(req);
+        return true;
+      }
+      if (parseAnswer(t) === "no") {
+        endAnswer("no");
+        pendingAddr.current = null;
+        say("Okay, never mind the email.").then(() => setBubble(null));
+        return true;
+      }
+    }
     const pg = pendingGoogle.current;
     if (pg && Date.now() - pg.at < 60e3) {
       const ans = parseAnswer(t);
@@ -834,19 +880,7 @@ export default function App() {
     } else if (ga.do === "calendar") void window.milo.google.calendar(ga.days, ga.range).then(reply);
     else if (ga.do === "mail") void window.milo.google.mail().then(reply);
     else if (ga.do === "doc") void window.milo.google.doc(ga.title).then(reply);
-    else if (ga.do === "draft") {
-      setMood("thinking");
-      setBubble("Writing it…");
-      void window.milo.google.draft(ga.request).then((r) => {
-        if (r.ok && r.draftId) pendingGoogle.current = { kind: "send", draftId: r.draftId, at: Date.now() };
-        setMood(r.ok ? "happy" : "thinking");
-        showProof(r);
-        say(r.text).then(() => {
-          setBubble(null);
-          if (r.ok && pendingGoogle.current) waitForAnswer();
-        });
-      });
-    } else if (ga.do === "event") {
+    else if (ga.do === "draft") startDraft(ga.request); else if (ga.do === "event") {
       setMood("thinking");
       void window.milo.google.eventParse(ga.request).then((r) => {
         if (r.ok && r.ev) pendingGoogle.current = { kind: "event", ev: r.ev, at: Date.now() };
@@ -911,7 +945,14 @@ export default function App() {
       void window.milo.jobStop();
       return true;
     }
-    if (j?.status === "needs_you" && /^(yes|yeah|yep|sure|go ahead|do it|ok(ay)?|submit it|send it|approved?)\b/.test(t)) {
+    // he finished but didn't turn it in: "submit it" / "turn it in" does just that
+    if (j?.status === "done" && Date.now() - j.updatedAt < 60 * 60e3 && /^(submit|turn (it|this|that) in|hand (it|this) in|go ahead and (submit|turn it in))\b/.test(t)) {
+      setBubble("Turning it in…");
+      bb("submit_after", {});
+      void window.milo.jobStart(`Submit / turn in the work you just finished (it's open on screen). It was: ${j.goal.replace(/ The last step is submitting.*$/, "")}`, { approved: true });
+      return true;
+    }
+    if (j?.status === "needs_you" && /^(yes|yeah|yep|sure|go ahead|do it|ok(ay)?|submit( it)?|turn (it|this) in|hand it in|send it|approved?)\b/.test(t)) {
       setBubble("Going!");
       void window.milo.jobResume(true);
       return true;
@@ -1072,8 +1113,62 @@ export default function App() {
     sfx.lock();
     setMood("happy");
     bb("homework_plan_shown", { title: r.data.title, steps: r.data.steps.length, minutes: r.data.total_minutes, resumed: !!old?.done.length });
-    await say(old?.done.length ? `Welcome back. ${stepLine(sp, nextStep(sp))}` : r.data.say);
+    let told = true;
+    try {
+      told = localStorage.getItem("milo.toldCanDo") === "1";
+      localStorage.setItem("milo.toldCanDo", "1");
+    } catch {
+      /* ignore */
+    }
+    const canDo = told ? "" : " And if you're ever short on time, just say “do it for me” and I'll do the whole thing myself.";
+    await say(old?.done.length ? `Welcome back. ${stepLine(sp, nextStep(sp))}` : `${r.data.say}${canDo}`);
     setBubble(null);
+    const item = preset ?? { title: r.data.title, course: r.data.course, due: r.data.due };
+    offerRef.current = { item, at: Date.now(), mode: "do_only" };
+  };
+  /** "Want to start on X?" Work through it together (default), or Milo does it himself. */
+  const offerStart = async (item: { title: string; course: string; due: string }) => {
+    setMood("happy");
+    bb("offer_start", { course: item.course });
+    await say(
+      `Want to start ${item.title}? I'll work through it with you, or if you're short on time, I can do it myself. Together?`
+    );
+    offerRef.current = { item, at: Date.now(), mode: "full" };
+    waitForAnswer("say yes, or “do it for me”");
+  };
+  /** Their answer to the offer. Returns true if it was one. */
+  const offerAnswer = (text: string): boolean => {
+    const o = offerRef.current;
+    if (!o || Date.now() - o.at > (o.mode === "full" ? 90e3 : 120e3)) return false;
+    const a = parseOfferAnswer(text);
+    if (!a || (o.mode === "do_only" && a !== "do" && a !== "do_submit")) {
+      if (o.mode === "full") offerRef.current = null; // they said something else: drop the offer, do what they said
+      return false;
+    }
+    offerRef.current = null;
+    endAnswer(a);
+    bb("offer_answer", { answer: a, mode: o.mode });
+    if (a === "no") {
+      say("No problem. Say “start my homework” whenever you're ready.").then(() => setBubble(null));
+    } else if (a === "together") {
+      void startHomework(`${o.item.title} ${o.item.course}`.trim(), true, { target: "", here: false }, o.item);
+    } else {
+      void doItForMe(o.item, a === "do_submit");
+    }
+    return true;
+  };
+  /** Milo does the assignment himself as a job. The job engine never submits without the student's yes. */
+  // submit=false: he does it, then asks "want me to turn it in?" (the job engine pauses at the submit button).
+  // submit=true: the student said "and turn it in", so that yes is already given.
+  const doItForMe = async (item: { title: string; course: string; due: string }, submit = false) => {
+    closePlan();
+    setMood("happy");
+    await say(submit ? "On it. I'll do it and turn it in when it's done." : "On it. I'll do the whole thing, then check with you before I turn it in.");
+    setBubble("Planning it out…");
+    const where = portal ? `In Chrome, go to ${portal}, open my ${item.course} course, open the assignment "${item.title}", and complete it.` : `Complete my assignment "${item.title}"${item.course ? ` for ${item.course}` : ""} on screen.`;
+    const goal = `${where} The last step is submitting / turning it in.`;
+    bb("offer_do", { submit, approved: submit, goal });
+    void window.milo.jobStart(goal, { approved: submit });
   };
   const resumeHomework = async (text: string) => {
     const sp = findPlan(text);
@@ -1262,7 +1357,7 @@ export default function App() {
     setMood("happy");
     say(alertLine(pa, now)).then(() => setBubble(null));
   };
-  const showRadarList = (days: number, speak = true) => {
+  const showRadarList = (days: number, speak = true, old = false) => {
     const now = Date.now();
     setClock(now);
     const rows = upcoming(radarRef.current, now, days)
@@ -1272,11 +1367,10 @@ export default function App() {
     setRadarView({ mode: "list", rows, title: days === 0 ? "Due today" : days === 1 ? "Due by tomorrow" : days <= 7 ? "Due this week" : "Coming up" });
     if (!speak) return;
     const x = rows[0]?.item;
-    say(
-      !x
-        ? `Nothing due ${range}. You're all caught up.`
-        : `${rows.length === 1 ? "One thing" : `${rows.length} things`} ${range}. First up: ${x.title}${x.course ? ` for ${x.course}` : ""}, due ${whenText(x.dueAt, now, x.due)}.`
-    ).then(() => setBubble(null));
+    const line = !x
+      ? `Nothing due ${range}. You're all caught up.`
+      : `${rows.length === 1 ? "One thing" : `${rows.length} things`} ${range}. First up: ${x.title}${x.course ? ` for ${x.course}` : ""}, due ${whenText(x.dueAt, now, x.due)}.`;
+    say(old ? `I couldn't reach D2L just now, so this is from my last check. ${line}` : line).then(() => setBubble(null));
   };
   /** "what's due this week": answer instantly from the radar; re-check D2L first only if it's stale. */
   const askRadar = (days: number) => {
@@ -1291,7 +1385,14 @@ export default function App() {
     scanRadar((ok) => {
       setBubble(null);
       if (!ok && radarRef.current.scans === 0) return startBrief(true); // probably needs to sign in
-      showRadarList(days);
+      if (!ok && !upcoming(radarRef.current, Date.now(), days).length) {
+        // Never say "all caught up" when he couldn't actually check.
+        bb("radar_unchecked", { days });
+        setMood("thinking");
+        void fixD2l().then((ok) => ok && askRadar(days)); // never "all caught up" when he couldn't check
+        return;
+      }
+      showRadarList(days, true, !ok);
     });
   };
   const startFromRadar = (x?: RadarItem) => {
@@ -1336,7 +1437,8 @@ export default function App() {
     setSetup(false);
     hover(false);
     moveTo(home(), "jump");
-    if (portal) window.setTimeout(() => startBrief(true), 900); // the first thing he does: tell you what's due
+    firstBrief.current = true;
+    if (portal) window.setTimeout(() => startBrief(true), 900); // the first thing he does: tell you what's due, then offer to start
   };
 
   /** "Open chrome, find a worksheet, and complete it": the computer part first, then the screen job on what's open. */
@@ -1623,8 +1725,137 @@ export default function App() {
       return;
     }
     setBrief({ phase: "loading" });
-    setBriefRun(Date.now());
     if (spoken) setMood("looking");
+    // D2L's own data first: uses the sign-in in Chrome, about a second, no AI. Reading the page only if that fails.
+    void window.milo.d2lDue(portal).then((r) => {
+      bb("brief_d2l", r.ok ? { ok: true, items: r.items.length } : { ok: false, signin: r.signin });
+      if (!r.ok) return setBriefRun(Date.now());
+      const now = Date.now();
+      const week = r.items
+        .filter((x) => {
+          const t = x.due_iso ? new Date(x.due_iso).getTime() : NaN;
+          return !isNaN(t) && t > now - 6 * 3600e3 && t < now + 7 * 86400e3;
+        })
+        .map((x) => ({ ...x, urgent: new Date(x.due_iso!).getTime() - now < 48 * 3600e3 }));
+      const first = week[0];
+      const spokenLine = first ? `You've got ${week.length === 1 ? "one thing" : `${week.length} things`} due this week. First up: ${first.title}${first.course ? ` for ${first.course}` : ""}, due ${first.due}.` : "";
+      void onBrief({ phase: "ready", items: week, spoken: spokenLine });
+    });
+  };
+  /** Save D2L's calendar link once (quietly), so "what's due" works even when every sign-in has run out. */
+  const saveFeed = (url: string) => {
+    try {
+      localStorage.setItem("milo.feed", url);
+    } catch {
+      /* ignore */
+    }
+    setFeed(url);
+  };
+  const ensureFeed = async (p = portal) => {
+    if (!p || feed) return;
+    const url = await window.milo.d2lFeedUrl(p).catch(() => null);
+    bb("feed_auto", { found: !!url });
+    if (url) return saveFeed(url);
+    // No link yet: D2L only makes one after "Reset" on its Subscribe page. Offer it once.
+    let asked = true;
+    try {
+      asked = localStorage.getItem("milo.feedOffered") === "1";
+    } catch {
+      /* ignore */
+    }
+    if (!asked) window.setTimeout(() => void offerFeed(p), 2500);
+  };
+  /** "Want a backup so I can always see what's due?" Yes: open D2L's Subscribe page, they tap Reset, Milo saves the link. */
+  const feedOfferRef = useRef<{ portal: string; at: number } | null>(null);
+  const offerFeed = async (p: string) => {
+    if (speakingRef.current || offerRef.current || feedOfferRef.current) return window.setTimeout(() => void offerFeed(p), 8000); // never talk over something else
+    try {
+      localStorage.setItem("milo.feedOffered", "1");
+    } catch {
+      /* ignore */
+    }
+    bb("feed_offer", {});
+    setMood("happy");
+    await say("Want a backup so I can always see what's due, even if you get signed out? I'll open a D2L page. Just tap Reset.");
+    feedOfferRef.current = { portal: p, at: Date.now() };
+    waitForAnswer();
+  };
+  const feedAnswer = (text: string): boolean => {
+    const o = feedOfferRef.current;
+    if (!o || Date.now() - o.at > 60e3) return false;
+    const a = parseAnswer(text);
+    feedOfferRef.current = null;
+    if (!a) return false;
+    endAnswer(a);
+    bb("feed_offer_answer", { answer: a });
+    if (a === "no") {
+      say("No problem. Say “set up my calendar backup” anytime.").then(() => setBubble(null));
+      return true;
+    }
+    void setUpFeed(o.portal);
+    return true;
+  };
+  const setUpFeed = async (p: string) => {
+    const page = await window.milo.d2lSubscribeUrl(p);
+    if (!page) {
+      say("I couldn't open D2L's calendar page. Make sure you're signed in to D2L, then try again.").then(() => setBubble(null));
+      return;
+    }
+    const chrome = await window.milo.d2lOpenChrome(page);
+    await say(chrome ? "Opened it in Chrome. Tap Reset, and I'll grab the link." : "Opened it. Tap Reset, and I'll grab the link.");
+    setBubble(null);
+    for (let i = 0; i < 40; i++) {
+      await new Promise((res) => setTimeout(res, 3000));
+      const url = await window.milo.d2lFeedUrl(p).catch(() => null);
+      if (url) {
+        saveFeed(url);
+        bb("feed_set", { seconds: (i + 1) * 3 });
+        sfx.success();
+        setMood("happy");
+        await say("Got it. Your backup is set. You can close that tab.");
+        setBubble(null);
+        return;
+      }
+    }
+    bb("feed_set_timeout", {});
+  };
+  /** Signed out of D2L: Chrome first (sign in there, Milo picks it up), else Milo's own sign-in. Never a wrong answer. */
+  const fixingD2l = useRef(false);
+  const fixD2l = async (): Promise<boolean> => {
+    if (!portal || fixingD2l.current) return false;
+    fixingD2l.current = true;
+    try {
+      const c = await window.milo.d2lCheck(portal);
+      if (c.ok) return true;
+      bb("d2l_fix", { chrome: c.chrome });
+      setMood("thinking");
+      if (!c.chrome) {
+        setBrief(null);
+        setSignIn(true); // Milo's own sign-in window
+        await say("Your D2L sign-in ran out. Sign in here once, and check “Keep me signed in” so I won't ask again.");
+        setBubble(null);
+        return false;
+      }
+      await say("Your D2L sign-in ran out. I'm opening it in Chrome. Sign in there, and check “Keep me signed in.” I'll pick it up on my own.");
+      setBubble(null);
+      await window.milo.d2lOpenChrome(portal);
+      for (let i = 0; i < 45; i++) {
+        await new Promise((res) => setTimeout(res, 4000));
+        if ((await window.milo.d2lCheck(portal)).ok) {
+          bb("d2l_fixed", { via: "chrome", seconds: (i + 1) * 4 });
+          sfx.success();
+          setMood("happy");
+          await say("Got it, you're signed in.");
+          setBubble(null);
+          void ensureFeed();
+          return true;
+        }
+      }
+      bb("d2l_fix_timeout", {});
+      return false;
+    } finally {
+      fixingD2l.current = false;
+    }
   };
   const onBrief = async (st: BriefState) => {
     setBrief(st);
@@ -1642,9 +1873,14 @@ export default function App() {
       setMood("happy");
       await say(`${greeting()} ${st.spoken || (st.items.length ? "" : "Nothing due soon. You're all caught up.")}`.trim());
       setBubble(null);
+      if (firstBrief.current) {
+        firstBrief.current = false;
+        const it = firstOffer(st.items);
+        if (it) await offerStart(it);
+      }
     } else if (st.phase === "signin") {
-      await say(`${greeting()} Sign in to D2L once and I'll keep track of what's due.`);
-      setBubble(null);
+      setBrief(null);
+      if (await fixD2l()) startBrief(false);
     }
   };
   const setPortalUrl = (url: string) => {
@@ -1655,7 +1891,16 @@ export default function App() {
     } catch {
       /* ignore */
     }
-    setBrief({ phase: "signin" });
+    // Already signed in to D2L in Chrome? Then there's nothing to sign in to.
+    void window.milo.d2lCheck(u).then((c) => {
+      bb("portal_set", { signedIn: c.ok, via: c.via ?? null, chrome: c.chrome });
+      if (c.ok) {
+        setBrief(null);
+        say("You're already signed in to D2L, so I'm connected.").then(() => setBubble(null));
+        scanRadar();
+        void ensureFeed(u);
+      } else setBrief({ phase: "signin" });
+    });
   };
   // Greet once a day when Milo starts.
   useEffect(() => {
@@ -1856,7 +2101,33 @@ export default function App() {
     // Filler ("uh", "cool", "okay") never decides anything. Curly quotes from speech-to-text become plain ones.
     const text = stripFiller(raw.replace(/[’‘]/g, "'").replace(/[“”]/g, '"'));
     const dstate: DecideState = { kitOpen: (kitApp as DecideState["kitOpen"]) ?? null, researchOpen: !!researchQ, toolOpen: !!tool, lessonOpen: !!lessonRef.current, hasLastAnswer: !!lastAnswer() };
-    if (fastDecide(text, dstate)?.do === "flag") return flagNow(text);
+    if (offerAnswer(text)) return;
+    if (feedAnswer(text)) return;
+    if (/^(set ?up|turn on|make) (my |the )?(calendar )?(backup|calendar link|calendar feed)\b/i.test(text.replace(/[.!?]+$/, "").trim()) && portal) {
+      void setUpFeed(portal);
+      return;
+    }
+    if (fastDecide(text, dstate)?.do === "flag") {
+      // Flag the log (for Jake) AND open the feedback box with their words, so they can add what happened.
+      flagNow(text);
+      setFeedback(text.replace(/^\W*(flag (that|this|it)|that was (wrong|bad|weird|a bug|broken)|log (that|this)|report (a |that |this )?bug|bug report|that'?s a bug)\b[\s:,.-]*(that )?/i, "").trim());
+      return;
+    }
+
+    // "Undo that": Milo's own undo when he just did something undoable (3 min); otherwise ⌘Z in the app in front.
+    {
+      const ut = text.toLowerCase().replace(/[.!?]+$/, "").trim();
+      const always = /^(undo what you (just )?did|take (that|it) back|cancel what you (just )?did)$/.test(ut);
+      if (always || /^undo( that| it| this| the last (thing|one))?$/.test(ut)) {
+        void window.milo.activity.list().then((list) => {
+          const recent = list.find((e) => e.canUndo && Date.now() - e.at < 3 * 60e3);
+          bb("undo_choice", { milo: !!(recent || always) });
+          if (recent || always) runUndo();
+          else runTask(text, spoken); // their own undo (⌘Z)
+        });
+        return;
+      }
+    }
 
     // Lock-in: unmistakable starts and stops, no AI call needed.
     {
@@ -1938,7 +2209,7 @@ export default function App() {
       void window.milo.gradeNow(gn.course, portal).then((r) =>
         say(r.text).then(() => {
           setBubble(null);
-          if (r.signin) startBrief(true); // opens the D2L sign-in
+          if (r.signin) void fixD2l();
         })
       );
       return;
@@ -1967,6 +2238,15 @@ export default function App() {
       bb("profile_saved", { key: fact.key });
       setMood("happy");
       say(`Got it, I'll remember your ${profileLabel(fact.key).toLowerCase()} and fill it in for you.`).then(() => setBubble(null));
+      return;
+    }
+    // "Milo, remember my favorite study spot is the common area": saved right now, not "someday"
+    const rem = parseRemember(text);
+    if (rem) {
+      void window.milo.remember(rem);
+      bb("route_instant", { text, kind: "remember" });
+      setMood("happy");
+      say("Got it, I'll remember that.").then(() => setBubble(null));
       return;
     }
     // "Update Milo" / "restart to update"
@@ -2120,7 +2400,7 @@ export default function App() {
     const intent = parse(text, { inLesson, awaitingAnswer, pendingAsk: !!pendingTask.current });
     const nb = notebookRef.current;
     // Unmistakable commands run right away. Everything else: the router decides, knowing what's open.
-    const SURE = ["hush", "yes", "no", "resume"];
+    const SURE = ["hush", "yes", "no", "resume", "undo", "activity", "feedback"];
     const LESSON_SURE = ["close", "goto", "mode", "answer", "show", "copy", "practice", "skip", "repeat", "fill"];
     if (!SURE.includes(intent.kind) && !(inLesson && LESSON_SURE.includes(intent.kind))) {
       setMood("thinking");
@@ -2170,6 +2450,17 @@ export default function App() {
         return;
       case "chain":
         runChain(intent.steps, spoken);
+        return;
+      case "feedback":
+        setFeedback(intent.text);
+        say(intent.text ? "Got it. Check it and hit send." : "What happened? Type it and I'll send it to Jake.").then(() => setBubble(null));
+        return;
+      case "activity":
+        setActivityOpen(true);
+        window.milo.activity.say().then((t) => say(t)).then(() => setBubble(null));
+        return;
+      case "undo":
+        runUndo();
         return;
       case "resume": {
         const r = resumeRef.current;
@@ -2356,9 +2647,21 @@ export default function App() {
       setTimeout(() => setBubble((b) => (b === "Flagged. I saved what just happened." ? null : b)), 2500);
     });
   };
+  const runUndo = () => {
+    setMood("thinking");
+    window.milo.activity
+      .undoLast()
+      .then((r) => {
+        setMood(r.ok ? "happy" : "idle");
+        return say(r.ok ? `Done. ${r.text}` : r.text);
+      })
+      .then(() => setBubble(null));
+  };
   const flagRef = useRef(flagNow);
   flagRef.current = flagNow;
   useEffect(() => window.milo.onFlag(() => flagRef.current("shortcut")), []);
+  useEffect(() => window.milo.activity.onOpen(() => setActivityOpen(true)), []);
+  useEffect(() => window.milo.onOpenFeedback(() => setFeedback("")), []);
 
   /** "Milo, when's my next exam?" with D2L open: read the screen and answer out loud. */
   const askAboutScreen = async (question: string, spoken: boolean) => {
@@ -2512,7 +2815,9 @@ export default function App() {
       let text = r.text.replace(/[’‘]/g, "'").replace(/[“”]/g, '"'); // "What’s" -> "What's" so every command matches
       const addressed = stripWake(r.text, true).woke;
       // Only listening because he just spoke, and it sounds like room chatter, not you: let it go.
-      if (direct && !pushToTalk && !forced && !pendingRef.current && !addressed && looksLikeBackground(text)) {
+      // Right after his ding, a short answer ("not now", "do it for me") is for him, never background.
+      const answering = !!answerUntil.current && Date.now() < answerUntil.current + 3000 && (!!parseAnswer(text) || (!!offerRef.current && !!parseOfferAnswer(text)));
+      if (direct && !pushToTalk && !forced && !pendingRef.current && !addressed && !answering && looksLikeBackground(text)) {
         bb("ignored_background", { text: text.slice(0, 120) });
         followUntil.current = 0;
         setMood((m) => (m === "thinking" || m === "listening" ? "idle" : m));
@@ -2920,7 +3225,7 @@ export default function App() {
   useEffect(() => {
     bb("app_boot", { boot: bootId.current }); // every time Milo's screen starts fresh (helps catch surprise reloads)
   }, []);
-  testSnap.current = { job: job ? { status: job.status, steps: job.steps.length, done: job.steps.filter((x) => x.status === "done").length } : null, radar: radarView ? { mode: radarView.mode, rows: radarView.rows.length } : null, plan: gp ? { title: gp.plan.title, steps: gp.plan.steps.length, done: gp.done.length } : null, speaking, bubble, heard, pending: pending?.text ?? null, chatOpen, ringOpen, kitApp, lockOn, research: !!researchQ, tool: !!tool, quiz: !!quiz, notebook: !!box, mood, pos, name };
+  testSnap.current = { job: job ? { status: job.status, steps: job.steps.length, done: job.steps.filter((x) => x.status === "done").length } : null, radar: radarView ? { mode: radarView.mode, rows: radarView.rows.length } : null, plan: gp ? { title: gp.plan.title, steps: gp.plan.steps.length, done: gp.done.length } : null, speaking, bubble, heard, pending: pending?.text ?? null, chatOpen, ringOpen, kitApp, lockOn, research: !!researchQ, tool: !!tool, quiz: !!quiz, notebook: !!box, mood, pos, name, activityOpen, feedback };
   useEffect(() => {
     if (!location.protocol.startsWith("http")) return; // dev server only, never in the packaged app
     (window as unknown as { __milo: unknown }).__milo = {
@@ -2933,6 +3238,9 @@ export default function App() {
       chat: (on: boolean) => setChatOpen(on),
       setup: (on: boolean) => setSetup(on),
       plan: (p: GamePlan) => showPlan({ key: planKey(p), plan: p, done: [], at: Date.now() }),
+      offer: (item: { title: string; course: string; due: string }) => offerStart(item),
+      offerOpen: () => !!offerRef.current,
+      offerFeed: () => offerFeed(portal),
       radarSet: (items: ScanItem[]) => setRadar(mergeScan(mergeScan(emptyRadar(), [], Date.now()), items, Date.now())),
       radarCheck: () => checkAlerts(true),
       radarLoad: (json: string | null) => {
@@ -3097,6 +3405,30 @@ export default function App() {
         </>
       )}
 
+      {feedback !== null && (
+        <FeedbackPanel
+          start={feedback}
+          style={{ right: 18, top: activityOpen ? 300 : 14, width: 340 }}
+          hover={hover}
+          onSay={(t) => void say(t).then(() => setBubble(null))}
+          onClose={() => {
+            setFeedback(null);
+            hover(false);
+          }}
+        />
+      )}
+      {activityOpen && (
+        <ActivityPanel
+          onFeedback={() => setFeedback("")}
+          style={{ right: 18, top: 14, width: 340, maxHeight: H - 40 }}
+          hover={hover}
+          onSay={(t) => void say(t).then(() => setBubble(null))}
+          onClose={() => {
+            setActivityOpen(false);
+            hover(false);
+          }}
+        />
+      )}
       {briefRun > 0 && portal && <BriefLoader key={briefRun} url={portal} onResult={onBrief} />}
       {brief && !signIn && (
         <BriefCard
@@ -3121,6 +3453,7 @@ export default function App() {
           hover={hover}
           onDone={() => {
             setSignIn(false);
+            void ensureFeed();
             if (setup) scanRadar(); // during setup: quietly fill the radar; the brief comes when setup ends
             else startBrief(true);
           }}
@@ -3282,7 +3615,7 @@ export default function App() {
             <span className="watch-eye" /> Watching · Stop
           </button>
         )}
-        {answering && !pending && <div className="ears-on ears-on--answer">Listening… say yes or no</div>}
+        {answering && !pending && <div className="ears-on ears-on--answer">Listening… {answering}</div>}
         {handsFree && !answering && !watching && !working && !pending && !sweep && <div className={`ears-on ${earState === "hearing" ? "ears-on--hot" : ""}`}>Say "Hey Milo"</div>}
       </div>
 

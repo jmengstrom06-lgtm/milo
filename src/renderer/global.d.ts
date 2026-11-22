@@ -16,6 +16,18 @@ declare global {
     summary?: string;
     actions: number;
   };
+  type MiloActivity = {
+    id: string;
+    at: number;
+    kind: "calendar" | "email_draft" | "email_sent" | "doc" | "memory" | "job" | "app" | "web";
+    title: string;
+    detail?: string;
+    link?: string;
+    noUndo?: string;
+    undone?: number;
+    undoError?: string;
+    canUndo: boolean;
+  };
   type PlanStep = { text: string; minutes: number; kind: "read" | "solve" | "write" | "research" | "review" | "submit"; detail: string };
   type GamePlan = { found: boolean; title: string; course: string; due: string; steps: PlanStep[]; total_minutes: number; say: string; missing: string };
 
@@ -172,6 +184,10 @@ declare global {
       gradeScore: (q: { course: string; name: string; earned: number; possible?: number }) => Promise<{ ok: boolean; text: string }>;
       gradeNow: (course: string, portal?: string) => Promise<{ ok: boolean; text: string; signin?: boolean }>;
       startupCheck: (portal?: string) => Promise<{ problems: { kind: string; text: string }[] }>;
+      d2lCheck: (portal: string) => Promise<{ ok: boolean; signin: boolean; text: string; via?: "chrome" | "milo"; chrome: boolean }>;
+      d2lOpenChrome: (url: string) => Promise<boolean>;
+      d2lFeedUrl: (portal: string) => Promise<string | null>;
+      d2lSubscribeUrl: (portal: string) => Promise<string | null>;
       d2lDue: (portal: string) => Promise<{ ok: true; items: { title: string; course: string; due: string; due_iso?: string; kind?: string }[] } | { ok: false; signin: boolean; text: string }>;
       syllabus: (course: string) => Promise<{ ok: boolean; text: string }>;
       exam: (q: { course: string; kind?: string; extra?: string }) => Promise<{ ok: true; topic: string; questions: { q: string; choices: string[]; correct: number; explain: string }[] } | { ok: false; text: string }>;
@@ -181,7 +197,7 @@ declare global {
         calendar: (days: number, range: string) => Promise<GoogleReply>;
         mail: () => Promise<GoogleReply>;
         doc: (title: string, text?: string) => Promise<GoogleReply>;
-        draft: (request: string) => Promise<GoogleReply & { draftId?: string; to?: string; subject?: string }>;
+        draft: (request: string) => Promise<GoogleReply & { draftId?: string; to?: string; subject?: string; needAddress?: string }>;
         send: (draftId: string) => Promise<GoogleReply>;
         eventParse: (request: string) => Promise<GoogleReply & { ev?: { title: string; start: string; end?: string; where?: string } }>;
         eventAdd: (ev: { title: string; start: string; end?: string; where?: string }) => Promise<GoogleReply>;
@@ -193,6 +209,16 @@ declare global {
       jobLast: () => Promise<MiloJob | null>;
       jobIs: (text: string) => Promise<boolean>;
       onJob: (cb: (job: MiloJob) => void) => () => void;
+      feedback: (message: string, kind?: string) => Promise<{ ok: boolean; text: string }>;
+      onOpenFeedback: (cb: () => void) => () => void;
+      activity: {
+        list: () => Promise<MiloActivity[]>;
+        undo: (id: string) => Promise<{ ok: boolean; text: string }>;
+        undoLast: () => Promise<{ ok: boolean; text: string }>;
+        say: (since?: number) => Promise<string>;
+        onChange: (cb: () => void) => () => void;
+        onOpen: (cb: () => void) => () => void;
+      };
       updateInstall: () => Promise<void>;
       onUpdateReady: (cb: (version: string) => void) => () => void;
       syncExchange: (kind: "gameplan", rows: { id: string; updated: number; deleted?: boolean; data?: unknown }[]) => Promise<{ id: string; updated: number; deleted?: boolean; data?: unknown }[] | null>;
@@ -202,6 +228,7 @@ declare global {
       accountVerify: (email: string, code: string) => Promise<{ ok: boolean; text: string }>;
       accountSignOut: () => Promise<{ signedIn: boolean; email: string }>;
       memories: () => Promise<string[]>;
+      remember: (fact: string) => Promise<boolean>;
       onAccountChange: (cb: () => void) => () => void;
       focusStart: (minutes: number) => Promise<{ focus: number; rest: number }[]>;
       focusStop: () => Promise<boolean>;

@@ -163,3 +163,38 @@ describe("deadline radar voice", () => {
     expect(parseRadar("start my stats homework", false)).toBeNull();
   });
 });
+
+import { firstOffer, parseOfferAnswer } from "../src/renderer/decide";
+describe("first-minute offer", () => {
+  const now = Date.parse("2026-11-22T12:00:00Z");
+  it("picks urgent, then soonest, skips long-past", () => {
+    const items = [
+      { title: "Essay", due_iso: "2026-11-26T05:00:00Z" },
+      { title: "Old quiz", due_iso: "2026-11-20T05:00:00Z" },
+      { title: "Problem set", due_iso: "2026-11-24T05:00:00Z" },
+      { title: "Lab", due_iso: "2026-11-27T05:00:00Z", urgent: true },
+    ];
+    expect(firstOffer(items, now)?.title).toBe("Lab");
+    expect(firstOffer(items.filter((i) => !i.urgent), now)?.title).toBe("Problem set");
+    expect(firstOffer([], now)).toBeNull();
+  });
+  it.each([
+    ["yes", "together"],
+    ["Yeah let's do it", "together"],
+    ["help me", "together"],
+    ["do it with me", "together"],
+    ["do it for me", "do"],
+    ["yes, do it for me", "do"],
+    ["just do it", "do"],
+    ["you do it", "do"],
+    ["can you do it by yourself", "do"],
+    ["do it for me and submit it", "do_submit"],
+    ["do it and turn it in", "do_submit"],
+    ["just do it and hand it in", "do_submit"],
+    ["do it but don't submit it", "do"],
+    ["no", "no"],
+    ["not now", "no"],
+    ["maybe later", "no"],
+    ["what's the weather", null],
+  ])("%s -> %s", (t, want) => expect(parseOfferAnswer(t)).toBe(want));
+});

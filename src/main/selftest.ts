@@ -6,16 +6,21 @@
 import { app, type BrowserWindow } from "electron";
 import fs from "node:fs";
 import path from "node:path";
-import { courses as d2lCourses, d2lCheck, gradeSheet as d2lSheet } from "./d2l";
+import { calendarFeedUrl, courses as d2lCourses, d2lCheck, gradeSheet as d2lSheet, lastChromeAnswer, resetChromeWait } from "./d2l";
+import { bridgeConnected } from "./bridge";
 import { log as bbLog, onLog } from "./blackbox";
 import { loadClasses, saveClasses } from "./classes";
 import { deleteItem, listItems } from "./library";
 import { frontApp, isRunning, openApp, quitApp } from "./hands";
-import { googleStatus } from "./google";
+import { calendarAdd, gmailDraft, googleStatus } from "./google";
+import { activity, did } from "./activityLog";
+import { memories, remember } from "./memory";
+import { sendFeedback } from "./telemetry";
 
-type Cat = "Speed" | "Control" | "Polish" | "Organization" | "Study power" | "Personal" | "Focus" | "Research" | "Computer" | "School" | "Google";
-const WEIGHT: Record<Cat, number> = { Speed: 20, Control: 20, Polish: 20, Organization: 15, "Study power": 10, Personal: 5, Focus: 5, Research: 5, Computer: 20, School: 15, Google: 15 };
+type Cat = "Trust" | "Speed" | "Control" | "Polish" | "Organization" | "Study power" | "Personal" | "Focus" | "Research" | "Computer" | "School" | "Google";
+const WEIGHT: Record<Cat, number> = { Trust: 20, Speed: 20, Control: 20, Polish: 20, Organization: 15, "Study power": 10, Personal: 5, Focus: 5, Research: 5, Computer: 20, School: 15, Google: 15 };
 const WHY: Record<Cat, string> = {
+  Trust: "You can see everything Milo did and take it back. Problems reach Jake in one tap.",
   Speed: "Feels instant. Slow = 'just another chatbot'.",
   Control: "Does exactly what you say, the moment you say it (stop, close, cancel).",
   Polish: "Nothing overlaps, nothing off screen, always readable.",
@@ -480,8 +485,65 @@ export async function runSelfTest(win: BrowserWindow) {
     if (!portal) {
       results.push({ id: "G0", cat: "School", name: "D2L connected", score: 0, pass: false, detail: "no school site set up (run setup)" });
     } else {
+      resetChromeWait();
       const chk = await d2lCheck(portal);
-      await test("G0", "School", "Signed in to D2L (data feed answers)", async () => ({ score: chk.ok ? 1 : 0, detail: chk.ok ? "signed in" : chk.signin ? "NOT signed in inside Milo: ask him 'what's due', sign in once" : chk.text }));
+      const ca = lastChromeAnswer();
+      const chromeSaid = ca ? (ca.status === -1 ? ` Chrome extension error: ${ca.where}.` : ` Chrome answered ${ca.status} ${ca.type}${ca.where ? ` at ${ca.where}` : ""}.`) : "";
+      await test("G0", "School", "Signed in to D2L (data feed answers)", async () => ({ score: chk.ok ? 1 : 0, detail: chk.ok ? `signed in (via ${chk.via === "chrome" ? "your Chrome" : "Milo's own sign-in"})` : chk.signin ? `NOT signed in, in Chrome or in Milo.${chromeSaid}` : chk.text + chromeSaid }));
+
+      // ---- Sign-in that never gets in the way (L): Chrome's sign-in first, Milo's own second, the calendar link as backup ----
+      await test("L1", "School", "Uses your Chrome sign-in (no Milo login)", async () => {
+        if (!bridgeConnected()) return { score: 0, detail: "Chrome extension not connected (open Chrome; reload the Milo extension)" };
+        resetChromeWait();
+        const c = await d2lCheck(portal);
+        const a = lastChromeAnswer();
+        const why = a ? (a.status === -1 ? `Chrome extension error: ${a.where}` : `Chrome answered ${a.status} ${a.type}${a.where ? ` at ${a.where}` : ""}`) : "Chrome wasn't asked";
+        return { score: c.via === "chrome" ? 1 : c.ok ? 0.5 : 0, detail: c.via === "chrome" ? "reading D2L through your Chrome sign-in" : `${c.ok ? "works through Milo's own sign-in" : "not signed in anywhere"}. ${why}` };
+      });
+      await test("L2", "School", "Finds D2L's calendar link (the backup that never signs out)", async () => {
+        const url = await calendarFeedUrl(portal).catch(() => null);
+        return { score: url ? 1 : 0, detail: url ? "found it (saved by the app, never shown)" : "no calendar link yet: D2L only makes one after you press Reset on its Subscribe page" };
+      });
+      {
+        const feedOffer = async () => {
+          await reset();
+          await js("window.__milo.offerFeed()");
+          const st = Date.now();
+          while (Date.now() - st < 15000 && !events.some((e) => e.line.startsWith("app/answer_window_open"))) await sleep(100);
+          await sleep(400);
+          return events.some((e) => e.line.startsWith("app/say") && /backup/i.test(e.line));
+        };
+        await test("L4", "School", "Offers the calendar backup once; 'no thanks' drops it", async () => {
+          if (!(await feedOffer())) return { score: 0, detail: "never offered the backup" };
+          const t0 = Date.now();
+          await js(`window.__milo.hear("No thanks.", false)`);
+          const ms = await saidMatch(/no problem/i, 6000);
+          const opened = events.some((e) => e.t >= t0 && e.line.startsWith("ipc/d2l-open-chrome"));
+          return { ms, score: opened ? 0 : ms < 0 ? 0 : 1, detail: opened ? "OPENED D2L after 'no'" : ms < 0 ? "didn't answer the no" : "offered, then dropped it" };
+        });
+        if (process.env.MILO_TEST_COMPUTER === "1") {
+          await test("L5", "School", "'Yes' opens D2L's Subscribe page in Chrome", async () => {
+            if (!(await feedOffer())) return { score: 0, detail: "never offered the backup" };
+            await js(`window.__milo.hear("Yes.", false)`);
+            const st = Date.now();
+            while (Date.now() - st < 15000 && !events.some((e) => e.line.startsWith("ipc/d2l-open-chrome"))) await sleep(150);
+            const ok = events.some((e) => e.line.startsWith("ipc/d2l-open-chrome") && /"out":true/.test(e.line));
+            const said = await saidMatch(/tap Reset/i, 8000);
+            await js("window.__milo.reset()").catch(() => {});
+            return { score: ok && said >= 0 ? 1 : ok ? 0.7 : 0, detail: ok ? "opened the Subscribe page in Chrome (close that tab; don't press Reset unless you want the backup)" : "didn't open it" };
+          });
+        }
+      }
+      await test("L3", "School", '"Brief me" reads D2L directly (fast, no page reading)', async () => {
+        await reset();
+        const t0 = Date.now();
+        await hear("Brief me");
+        const st = Date.now();
+        while (Date.now() - st < 12000 && !events.some((e) => e.line.startsWith("app/brief_d2l"))) await sleep(150);
+        const ok = events.some((e) => e.line.startsWith("app/brief_d2l") && /"ok":true/.test(e.line));
+        const ms = await saidMatch(/due this week|all caught up|Nothing due/i, 15000);
+        return { ms, score: !ok ? 0 : ms < 0 ? 0.5 : speed(Date.now() - t0, 4000, 9000), detail: !ok ? "fell back to reading the page" : ms < 0 ? "got the data, but didn't say it" : `answered in ${((Date.now() - t0) / 1000).toFixed(1)}s from D2L's data` };
+      });
       // a class that posts grades, to ask about by its everyday name
       // a class that posts grades, to ask about by its everyday name; best: one with a clear last exam left
       let graded: { short: string } | null = null;
@@ -547,6 +609,190 @@ export async function runSelfTest(win: BrowserWindow) {
         return { ms, score: ms < 0 ? 0 : speed(Date.now() - t0, 3000, 8000), detail: ms < 0 ? "no answer" : `answered in ${((Date.now() - t0) / 1000).toFixed(1)}s` };
       });
     }
+  }
+
+  // ======================= FIRST MINUTE: the offer after setup (N) =======================
+  // "Want to start on X? Together, or I can do it myself." N3/N4 really open Chrome / start a job: test:new:computer only.
+  {
+    const said = async (re: RegExp, timeout: number, after = 0) => {
+      const st = Date.now();
+      while (Date.now() - st < timeout) {
+        if (events.some((e) => e.t >= after && e.line.startsWith("app/say") && re.test(e.line))) return Date.now() - st;
+        await sleep(150);
+      }
+      return -1;
+    };
+    const has = (prefix: string) => events.some((e) => e.line.startsWith(prefix));
+    const item = { title: "Problem Set 7", course: "Statistics", due: "Thursday" };
+    /** Make the offer and wait until he's done talking and dinged (that's when a student answers). -1 = never offered. */
+    const offer = async () => {
+      await reset();
+      await js(`window.__milo.offer(${JSON.stringify(item)})`);
+      const ms = await said(/work through it with you/i, 15000);
+      if (ms < 0) return -1;
+      const st = Date.now();
+      while (Date.now() - st < 20000 && !has("app/answer_window_open")) await sleep(100);
+      await sleep(400); // the ding
+      return ms;
+    };
+
+    await test("N1", "Trust", "Offers to work through it together AND says he can do it himself", async () => {
+      const ms = await offer();
+      if (ms < 0) return { score: 0, detail: "never made the offer" };
+      const both = events.some((e) => e.line.startsWith("app/say") && /short on time|do it myself/i.test(e.line));
+      const ding = has("app/answer_window_open");
+      return { ms, score: !both ? 0.4 : ding ? 1 : 0.7, detail: !both ? "offered help, but didn't say he can do it himself" : ding ? "offered both, then dinged for an answer" : "offered both, but no ding / answer window" };
+    });
+
+    await test("N2", "Trust", '"Not now" drops it politely, nothing starts', async () => {
+      if ((await offer()) < 0) return { score: 0, detail: "never made the offer" };
+      const t0 = Date.now();
+      await js(`window.__milo.hear("Not now.", false)`);
+      const ms = await said(/no problem/i, 6000, t0);
+      const started = has("app/offer_do") || has("app/homework_plan_shown") || events.some((e) => e.line.startsWith("ipc/task"));
+      return { ms, score: started ? 0 : ms < 0 ? 0 : 1, detail: started ? "STARTED something after 'not now'" : ms < 0 ? "didn't answer the no" : "said no problem, nothing started" };
+    });
+
+    await test("N5", "Trust", "Something unrelated after the offer is handled normally (offer dropped)", async () => {
+      if ((await offer()) < 0) return { score: 0, detail: "never made the offer" };
+      await hear("What did you do?");
+      const open = await waitFor("s.activityOpen", 5000);
+      const still = await js<boolean>("window.__milo.offerOpen()").catch(() => true);
+      return { score: open >= 0 && !still ? 1 : open >= 0 ? 0.6 : 0, detail: open >= 0 ? (still ? "answered, but the offer is still waiting" : "answered it, offer dropped") : "the offer swallowed what you said" };
+    });
+
+    if (process.env.MILO_TEST_COMPUTER === "1") {
+      await test("N6", "Trust", '"Do it and turn it in" starts a job allowed to submit', async () => {
+        if ((await offer()) < 0) return { score: 0, detail: "never made the offer" };
+        await js(`window.__milo.hear("Do it and turn it in.", false)`);
+        const st = Date.now();
+        while (Date.now() - st < 10000 && !has("app/offer_do")) await sleep(150);
+        const ok = events.some((e) => e.line.startsWith("app/offer_do") && /"approved":true/.test(e.line));
+        await js("window.milo.jobStop()").catch(() => {});
+        await sleep(1500);
+        return { score: !has("app/offer_do") ? 0 : ok ? 1 : 0.3, detail: !has("app/offer_do") ? "no job started" : ok ? "job started, allowed to submit (stopped it for the test)" : "job started but will still ask" };
+      });
+      await test("N3", "Trust", '"Do it for me" starts a job that asks before submitting', async () => {
+        if ((await offer()) < 0) return { score: 0, detail: "never made the offer" };
+        await js(`window.__milo.hear("Do it for me.", false)`);
+        const st = Date.now();
+        while (Date.now() - st < 10000 && !has("app/offer_do")) await sleep(150);
+        const started = has("app/offer_do");
+        const safe = events.some((e) => e.line.startsWith("app/offer_do") && /"approved":false/.test(e.line));
+        await js("window.milo.jobStop()").catch(() => {});
+        await sleep(1500);
+        return { score: !started ? 0 : safe ? 1 : 0.3, detail: !started ? "no job started" : safe ? "job started; it will ask before turning it in (stopped it for the test)" : "job started already approved to submit, without being told to" };
+      });
+      await test("N4", "Trust", '"Yes" starts working through it together (opens it, makes a plan)', async () => {
+        if ((await offer()) < 0) return { score: 0, detail: "never made the offer" };
+        await js(`window.__milo.hear("Yes.", false)`);
+        const ms = await said(/let's go/i, 8000);
+        await js("window.__milo.reset()").catch(() => {});
+        await js("window.milo.stopTask()").catch(() => {});
+        return { ms, score: ms < 0 ? 0 : 1, detail: ms < 0 ? "didn't start" : "started the together flow (stopped it for the test)" };
+      });
+    }
+  }
+
+  // ======================= TRUST: "What Milo did" + undo (U), feedback (B) =======================
+  // Run just these: npm run test:new   (Google ones need Google connected; app ones need npm run test:new:computer)
+  {
+    const said = async (re: RegExp, timeout: number, after = 0) => {
+      const st = Date.now();
+      while (Date.now() - st < timeout) {
+        if (events.some((e) => e.t >= after && e.line.startsWith("app/say") && re.test(e.line))) return Date.now() - st;
+        await sleep(150);
+      }
+      return -1;
+    };
+    const until = async (fn: () => boolean | Promise<boolean>, timeout: number) => {
+      const st = Date.now();
+      while (Date.now() - st < timeout) {
+        if (await fn()) return Date.now() - st;
+        await sleep(150);
+      }
+      return -1;
+    };
+    const entry = (re: RegExp) => activity.list(50).find((e) => re.test(e.title));
+    const g = (() => { try { return googleStatus(); } catch { return { connected: false, email: null as string | null }; } })();
+
+    await test("U1", "Trust", `"What did you do?" opens the timeline and answers`, async () => {
+      await reset();
+      const t0 = Date.now();
+      await hear("What did you do?");
+      const open = await waitFor("s.activityOpen", 4000);
+      const ms = await said(/did (one thing|\d+ things)|haven't done anything/i, 6000);
+      return { ms, score: open < 0 ? 0 : ms < 0 ? 0.5 : speed(Date.now() - t0, 2500, 6000), detail: open < 0 ? "timeline didn't open" : ms < 0 ? "opened, but he didn't say what he did" : "opened and answered" };
+    });
+
+    await test("U2", "Trust", "Menu bar 'What Milo did…' opens the timeline", async () => {
+      await reset();
+      win.webContents.send("milo:open-activity");
+      const ms = await waitFor("s.activityOpen", 3000);
+      return { ms, score: ms < 0 ? 0 : 1, detail: ms < 0 ? "didn't open" : "opened" };
+    });
+
+    await test("U3", "Trust", 'Something he learned shows up, and "undo that" forgets it', async () => {
+      await reset();
+      const fact = `Self-test fact ${Date.now()}`;
+      await remember(fact);
+      const e = entry(new RegExp(fact));
+      if (!e) return { score: 0, detail: "remembering wasn't logged in the timeline" };
+      if (!activity.canUndo(e)) return { score: 0.3, detail: "logged, but no Undo on it" };
+      await hear("Undo that");
+      const gone = await until(() => !memories().includes(fact), 5000);
+      const spoke = await said(/undone|done\./i, 4000);
+      return { score: gone < 0 ? 0.3 : spoke < 0 ? 0.8 : 1, detail: gone < 0 ? "still remembered after undo" : spoke < 0 ? "forgot it, but didn't say so" : "logged, undone by voice, forgotten" };
+    });
+
+    if (g.connected) {
+      await test("U4", "Trust", "Calendar event: logged, and Undo deletes it from Google", async () => {
+        const t = `Milo undo test ${new Date().toLocaleTimeString()}`;
+        const d = new Date(Date.now() + 7 * 86400e3);
+        const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        const r = await calendarAdd({ title: t, start: `${day}T09:00` });
+        if (!r.id) return { score: 0, detail: "Google didn't return the event id (Undo can't work)" };
+        const id = did({ kind: "calendar", title: `Added "${t}" to your calendar`, undo: { type: "calendar_delete", data: { id: r.id } } });
+        const u = await activity.undo(id);
+        return { score: u.ok ? 1 : 0, detail: u.ok ? "added, then removed from your calendar" : `undo failed: ${u.text} (delete "${t}" by hand)` };
+      });
+      await test("U5", "Trust", "Email draft: logged, and Undo deletes the draft", async () => {
+        if (!g.email) return { score: 0, detail: "don't know your email address" };
+        const d = await gmailDraft({ to: g.email, subject: "Milo undo test", body: "Milo's self-test. This draft should delete itself." });
+        const id = did({ kind: "email_draft", title: "Wrote an email to you: Milo undo test", undo: { type: "draft_delete", data: { draftId: d.draftId } } });
+        const u = await activity.undo(id);
+        return { score: u.ok ? 1 : 0, detail: u.ok ? "drafted, then deleted from your drafts" : `undo failed: ${u.text} (delete the "Milo undo test" draft by hand)` };
+      });
+    } else {
+      results.push({ id: "U4", cat: "Trust", name: "Calendar + email undo", score: 0, pass: false, detail: "Google not connected: say 'Milo, connect Google', then rerun" });
+    }
+
+    if (process.env.MILO_TEST_COMPUTER === "1") {
+      await test("U6", "Trust", "'Open Calculator' then 'undo that' closes it", async () => {
+        await quitApp("Calculator").catch(() => {});
+        await sleep(800);
+        await reset();
+        await hear("Open Calculator");
+        if ((await until(() => isRunning("Calculator"), 8000)) < 0) return { score: 0, detail: "Calculator never opened" };
+        await sleep(800);
+        await hear("Undo that");
+        const ms = await until(async () => !(await isRunning("Calculator")), 8000);
+        return { ms, score: ms < 0 ? 0 : 1, detail: ms < 0 ? "still open after undo" : "opened, then closed by undo" };
+      });
+    }
+
+    await test("B1", "Trust", '"Report a bug, the frog froze" opens feedback with your words', async () => {
+      await reset();
+      await hear("Report a bug the frog froze");
+      const ms = await waitFor(`s.feedback !== null && s.feedback !== undefined && /frog froze/i.test(s.feedback)`, 4000);
+      const open = ms >= 0 || (await waitFor("s.feedback !== null && s.feedback !== undefined", 500)) >= 0;
+      return { ms, score: ms >= 0 ? 1 : open ? 0.5 : 0, detail: ms >= 0 ? "opened with your words filled in" : open ? "opened, but your words weren't filled in" : "didn't open" };
+    });
+
+    await test("B2", "Trust", "Feedback actually reaches Sentry", async () => {
+      const ok = await sendFeedback("Milo self-test: ignore this one.", { kind: "selftest" });
+      return { score: ok ? 1 : 0, detail: ok ? "Sentry accepted it (look under User Feedback, tagged selftest)" : "Sentry didn't accept it (offline?)" };
+    });
   }
 
   // ======================= GOOGLE: calendar + Gmail, and the yes/no follow-up =======================
@@ -703,6 +949,12 @@ export async function runSelfTest(win: BrowserWindow) {
   off();
 
   // ---------- score + report ----------
+  // MILO_TEST_ONLY: drop "not set up" rows from sections that weren't asked for
+  const only = (process.env.MILO_TEST_ONLY || "").split(",").map((x) => x.trim()).filter(Boolean);
+  if (only.length) {
+    const keep = results.filter((r) => only.some((o) => r.id === o || (o.length === 1 && r.id.startsWith(o))));
+    results.splice(0, results.length, ...keep);
+  }
   const cats = Object.keys(WEIGHT) as Cat[];
   const catScore = (c: Cat) => {
     const xs = results.filter((r) => r.cat === c);

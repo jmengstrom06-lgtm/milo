@@ -20,9 +20,15 @@ export function runMath(code: string): { ok: true; value: unknown } | { ok: fals
 /** Numbers in a text answer: "x = 3.5", "about 12,400", "1/4" -> [3.5, 12400, 0.25]. */
 export function numbersIn(text: string): number[] {
   const out: number[] = [];
-  const t = text.replace(/(\d),(?=\d{3}\b)/g, "$1");
-  for (const m of t.matchAll(/(-?\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/g)) if (+m[2]) out.push(+m[1] / +m[2]);
-  for (const m of t.matchAll(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/gi)) out.push(+m[0]);
+  const t = text
+    .replace(/(\d),(?=\d{3}\b)/g, "$1")
+    .replace(/\\d?frac\s*\{\s*(-?\d+(?:\.\d+)?)\s*\}\s*\{\s*(\d+(?:\.\d+)?)\s*\}/g, "$1/$2") // \frac{4}{3}
+    .replace(/(-?\d+(?:\.\d+)?)\s+over\s+(\d+(?:\.\d+)?)/gi, "$1/$2"); // "4 over 3"
+  // "4/3" is ONE answer (1.333), not the numbers 4 and 3
+  const fracs = [...t.matchAll(/(-?\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/g)];
+  const loose = t.replace(/(-?\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/g, " ");
+  for (const m of fracs) if (+m[2]) out.push(+m[1] / +m[2]);
+  for (const m of loose.matchAll(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/gi)) out.push(+m[0]);
   return out.filter((n) => isFinite(n));
 }
 const close = (a: number, b: number) => Math.abs(a - b) <= Math.max(1e-6, 0.005 * Math.max(Math.abs(a), Math.abs(b))); // within 0.5%

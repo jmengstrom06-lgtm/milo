@@ -183,7 +183,7 @@ export function SignInPanel({ url, style, onDone, hover }: { url: string; style:
           <span className="rp-orb" />
           <div className="rp-title">
             <div className="rp-kicker">Connect D2L</div>
-            <div className="rp-q">Sign in once. Milo will remember it.</div>
+            <div className="rp-q">Sign in once, and check “Keep me signed in” so Milo won't ask again.</div>
           </div>
           <div className="tool-bar">
             <button onClick={onDone}>I'm signed in</button>
