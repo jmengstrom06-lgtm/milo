@@ -36,7 +36,8 @@ import { calendarAdd, calendarDelete, calendarUpcoming, docsCreate, GoogleNotCon
 import { activity, did, registerActivity } from "./activityLog";
 import { writePaper } from "./paper";
 import { addChunk, fileLecture, finishLecture, finishLeftovers, forgetLectureNote, lectureNow, startLecture } from "./lecture";
-import { classFor } from "./classes";
+import { classFor, COLORS, loadClasses, saveClasses, SUBJECT_WORDS, type Klass } from "./classes";
+import { mergeD2l } from "./classSync";
 import { parsePaperAsk } from "./paperFormat";
 import { composeEmail, parseEvent, sayCalendar, sayMail } from "./googleai";
 import { feedUrl } from "./school";
@@ -1054,6 +1055,27 @@ activity.onUndo("calendar_delete", async (d) => calendarDelete(String(d.id)));
 activity.onUndo("draft_delete", async (d) => gmailDeleteDraft(String(d.draftId)));
 activity.onUndo("memory_forget", async (d) => forget(String(d.fact)));
 activity.onUndo("note_delete", async (d) => forgetLectureNote(String(d.noteId)));
+activity.onUndo("classes_restore", async (d) => {
+  const s = loadClasses();
+  saveClasses({ classes: d.classes as Klass[], active: s.active });
+});
+// ---------- Classes follow D2L: same ids and colors (filed work stays put), D2L's real names ----------
+ipcMain.handle("milo:classes-sync", async (_e, portal: string) => {
+  try {
+    const list = await d2lCourses(String(portal));
+    if (!list.length) return { ok: false, changed: false };
+    const before = loadClasses();
+    const r = mergeD2l(before.classes, list, SUBJECT_WORDS, COLORS, (i) => `d2l${Date.now().toString(36)}${i}`);
+    const changed = JSON.stringify(r.classes) !== JSON.stringify(before.classes);
+    if (!changed) return { ok: true, changed: false, added: [], renamed: [] };
+    saveClasses({ classes: r.classes, active: before.active });
+    did({ kind: "classes", title: `Matched your classes to D2L${r.added.length ? ` (added ${r.added.join(", ")})` : ""}`, detail: r.renamed.map((x) => `${x.from} → ${x.to}`).join("\n"), undo: { type: "classes_restore", data: { classes: before.classes } } });
+    bb("classes", "d2l_sync", { added: r.added.length, renamed: r.renamed.length });
+    return { ok: true, changed: true, added: r.added, renamed: r.renamed, names: r.classes.map((c) => c.name) };
+  } catch (e) {
+    return { ok: false, changed: false, text: (e as Error).message };
+  }
+});
 // ---------- Lecture listener: saved to disk every 2 minutes, transcribed with retries, notes after class ----------
 ipcMain.handle("milo:lecture-file", (_e, lectureId: string, said: string) => fileLecture(String(lectureId), String(said ?? "")));
 ipcMain.handle("milo:lecture-start", async (_e, said: string) => {

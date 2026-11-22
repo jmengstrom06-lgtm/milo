@@ -19,7 +19,7 @@ declare global {
   type MiloActivity = {
     id: string;
     at: number;
-    kind: "calendar" | "email_draft" | "email_sent" | "doc" | "memory" | "job" | "app" | "web";
+    kind: "calendar" | "email_draft" | "email_sent" | "doc" | "memory" | "job" | "app" | "web" | "classes";
     title: string;
     detail?: string;
     link?: string;
@@ -186,6 +186,7 @@ declare global {
       startupCheck: (portal?: string) => Promise<{ problems: { kind: string; text: string }[] }>;
       d2lCheck: (portal: string) => Promise<{ ok: boolean; signin: boolean; text: string; via?: "chrome" | "milo"; chrome: boolean }>;
       d2lOpenChrome: (url: string) => Promise<boolean>;
+      classesSync: (portal: string) => Promise<{ ok: boolean; changed: boolean; added?: string[]; renamed?: { from: string; to: string }[]; names?: string[]; text?: string }>;
       lecture: {
         start: (said: string) => Promise<{ id: string; course: string; startedAt: number }>;
         chunk: (id: string, n: number, wav: ArrayBuffer) => Promise<boolean>;

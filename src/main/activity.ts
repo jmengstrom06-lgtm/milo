@@ -2,7 +2,7 @@
 // This is the trust layer: testers only let Milo work alone if they can see (and take back) what he did.
 // The core (makeActivity) is pure: storage and undo handlers are passed in, so it's easy to unit test.
 
-export type ActKind = "calendar" | "email_draft" | "email_sent" | "doc" | "memory" | "job" | "app" | "web";
+export type ActKind = "calendar" | "email_draft" | "email_sent" | "doc" | "memory" | "job" | "app" | "web" | "classes";
 export type UndoSpec = { type: string; data: Record<string, unknown> };
 export type ActEntry = {
   id: string;

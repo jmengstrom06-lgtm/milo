@@ -1,7 +1,7 @@
 // "What Milo did": everything Milo actually did for you, newest first, with Undo where it can be undone.
 import { useEffect, useState } from "react";
 
-const ICON: Record<MiloActivity["kind"], string> = { calendar: "📅", email_draft: "✉️", email_sent: "📤", doc: "📄", memory: "🧠", job: "🛠️", app: "🪟", web: "🌐" };
+const ICON: Record<MiloActivity["kind"], string> = { calendar: "📅", email_draft: "✉️", email_sent: "📤", doc: "📄", memory: "🧠", job: "🛠️", app: "🪟", web: "🌐", classes: "🎒" };
 
 function when(t: number) {
   const d = new Date(t);

@@ -14,7 +14,7 @@ const listeners: (() => void)[] = [];
 export const onClassesChange = (fn: () => void) => listeners.push(fn);
 
 export const SUBJECTS: Subject[] = ["math", "stats", "science", "english", "history", "language", "cs", "business", "arts", "other"];
-const COLORS = ["#a78bfa", "#38bdf8", "#34d399", "#f472b6", "#fbbf24", "#fb923c", "#60a5fa"];
+export const COLORS = ["#a78bfa", "#38bdf8", "#34d399", "#f472b6", "#fbbf24", "#fb923c", "#60a5fa"];
 
 const file = () => path.join(app.getPath("userData"), "classes.json");
 export function loadClasses(): Store {
@@ -51,7 +51,7 @@ export function saveClasses(s: Store, fromSync?: number) {
   return clean;
 }
 
-const SUBJECT_WORDS: Record<Subject, RegExp> = {
+export const SUBJECT_WORDS: Record<Subject, RegExp> = {
   stats: /\b(stats?|statistics|probability|biostat)/i,
   math: /\b(math|calc(ulus)?|algebra|trig|geometry|precalc|linear algebra|differential)/i,
   science: /\b(bio(logy)?|chem(istry)?|physics|anatomy|science|geology|astronomy|neuro|lab)\b/i,

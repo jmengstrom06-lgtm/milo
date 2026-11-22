@@ -133,6 +133,7 @@ contextBridge.exposeInMainWorld("milo", {
   gradeNow: (course: string, portal?: string) => ipcRenderer.invoke("milo:grade-now", course, portal),
   d2lDue: (portal: string) => ipcRenderer.invoke("milo:d2l-due", portal),
   d2lCheck: (portal: string) => ipcRenderer.invoke("milo:d2l-check", portal),
+  classesSync: (portal: string) => ipcRenderer.invoke("milo:classes-sync", portal),
   lecture: {
     start: (said: string) => ipcRenderer.invoke("milo:lecture-start", said),
     chunk: (id: string, n: number, wav: ArrayBuffer) => ipcRenderer.invoke("milo:lecture-chunk", id, n, wav),

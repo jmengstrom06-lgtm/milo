@@ -519,6 +519,14 @@ export async function runSelfTest(win: BrowserWindow) {
         };
         void feedOffer; // the calendar-backup offer is off (TCU's D2L doesn't allow the link)
       }
+      await test("Y1", "Organization", "Milo's classes match your D2L courses (same folders, real names)", async () => {
+        const r = await js<{ ok: boolean; changed: boolean; names?: string[]; text?: string }>(`window.milo.classesSync(${JSON.stringify(portal)})`);
+        if (!r.ok) return { score: 0, detail: `couldn't read D2L courses${r.text ? `: ${r.text}` : ""}` };
+        const real = (await d2lCourses(portal)).filter((c) => !/ Lab$/.test(c.short)).map((c) => c.short);
+        const mine = loadClasses().classes.map((c) => c.name);
+        const missing = real.filter((n) => !mine.includes(n));
+        return { score: missing.length ? 0.3 : 1, detail: missing.length ? `missing: ${missing.join(", ")}` : `${r.changed ? "updated" : "already matched"}: ${mine.join(", ")}` };
+      });
       await test("L3", "School", '"Brief me" reads D2L directly (fast, no page reading)', async () => {
         await reset();
         const t0 = Date.now();

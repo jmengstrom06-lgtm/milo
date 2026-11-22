@@ -720,7 +720,10 @@ export default function App() {
       if (startupChecked.current) return;
       startupChecked.current = true;
       const r = await window.milo.startupCheck(portal || undefined).catch(() => ({ problems: [] as { kind: string; text: string }[] }));
-      if (portal && !r.problems.some((p) => p.kind === "d2l")) void ensureFeed(); // signed in: grab the backup link if we don't have it
+      if (portal && !r.problems.some((p) => p.kind === "d2l")) {
+        void ensureFeed(); // signed in: grab the backup link if we don't have it
+        void syncClasses();
+      }
       if (!r.problems.length) return;
       setMood("thinking");
       for (const p of r.problems.filter((x) => x.text).slice(0, 2)) await say(p.text);
@@ -1884,6 +1887,19 @@ export default function App() {
     });
   };
   /** Save D2L's calendar link once (quietly), so "what's due" works even when every sign-in has run out. */
+  /** Keep Milo's classes lined up with D2L (once a day, and right after D2L is connected). */
+  const syncClasses = async (p = portal, force = false) => {
+    if (!p) return;
+    try {
+      if (!force && localStorage.getItem("milo.classesSynced") === new Date().toDateString()) return;
+      localStorage.setItem("milo.classesSynced", new Date().toDateString());
+    } catch {
+      /* ignore */
+    }
+    const r = await window.milo.classesSync(p).catch(() => null);
+    bb("classes_sync", { changed: !!r?.changed, added: r?.added?.length ?? 0 });
+    if (r?.changed && r.names?.length) say(`I lined up your classes with D2L: ${r.names.join(", ")}.`).then(() => setBubble(null));
+  };
   const saveFeed = (url: string) => {
     try {
       localStorage.setItem("milo.feed", url);
@@ -1991,6 +2007,7 @@ export default function App() {
           await say("Got it, you're signed in.");
           setBubble(null);
           void ensureFeed();
+          void syncClasses(portal, true);
           return true;
         }
       }
@@ -2042,6 +2059,7 @@ export default function App() {
         say("You're already signed in to D2L, so I'm connected.").then(() => setBubble(null));
         scanRadar();
         void ensureFeed(u);
+        void syncClasses(u, true);
       } else setBrief({ phase: "signin" });
     });
   };
