@@ -23,23 +23,16 @@ describe("quiet hours", () => {
 });
 
 import { recordDecision } from "../src/main/prefs";
-describe("lecture recording is off until the student confirms the class allows it", () => {
-  const p = { noRecord: ["engl"], okRecord: ["stat"] };
-  it("asks first in a class it hasn't been told about", () => expect(recordDecision("bio", p, false)).toBe("ask"));
-  it("asks when it doesn't know the class", () => expect(recordDecision(null, p, false)).toBe("ask"));
-  it("records in a class the student allowed", () => expect(recordDecision("stat", p, false)).toBe("record"));
-  it("never records a class the student turned off, even if confirmed", () => expect(recordDecision("engl", p, true)).toBe("never"));
-  it("records once the student just confirmed", () => expect(recordDecision("bio", p, true)).toBe("record"));
-  it("allowing a class removes it from the never list, and the reverse", () => {
-    setPrefs({ noRecord: ["x"], okRecord: [] });
-    expect(setPrefs({ okRecord: ["x"] }).noRecord).not.toContain("x");
-    expect(setPrefs({ noRecord: ["x"] }).okRecord).not.toContain("x");
-  });
+describe("lecture recording: whenever the student asks, except classes they switched off", () => {
+  const p = { noRecord: ["engl"], okRecord: [] };
+  it("records in any class", () => expect(recordDecision("bio", p, false)).toBe("record"));
+  it("records when it doesn't know the class", () => expect(recordDecision(null, p, false)).toBe("record"));
+  it("never records a class the student turned off", () => expect(recordDecision("engl", p, true)).toBe("never"));
 });
 
+
 describe("worksheet autofill", () => {
-  it("is off unless the student turns it on", () => {
-    expect(setPrefs({}).autofill).toBe(false);
+  it("can be switched", () => {
     expect(setPrefs({ autofill: true }).autofill).toBe(true);
     expect(setPrefs({ autofill: "yes" as unknown as boolean }).autofill).toBe(true);
     expect(setPrefs({ autofill: false }).autofill).toBe(false);

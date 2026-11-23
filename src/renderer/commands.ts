@@ -15,7 +15,7 @@ export type Intent =
   | { kind: "look"; mode: MiloMode; request: string } // start helping with something on screen
   | { kind: "task"; task: string } // do something on the computer: open, click, type…
   | { kind: "research"; question: string } // look something up live (research panel)
-  | { kind: "sweep" } // do every question on the page
+  | { kind: "sweep"; show?: boolean; fill?: boolean } // do every question on the page (show = just show me, fill = type them in)
   | { kind: "build"; request: string } // make a small working app
   | { kind: "watch"; on: boolean } // watch me work (spot mistakes as I go)
   | { kind: "checkwork" } // one-time look for mistakes
@@ -72,6 +72,12 @@ const TASK =
 
 /** Vague "do something with this" asks: Milo looks and offers choices instead of guessing. */
 export const HANDLE = /^(?:milo,?\s*)?(handle (this|that|it)|help( me)? (with )?(this|that)|what can you do (here|with (this|that))|do something with (this|that)|deal with (this|that)|take care of (this|that)|help me (here|out here)|what (do|should) i do (here|with (this|that)))[\s.!?]*$/;
+
+/** Worksheet, but the student wants to type the answers themselves. */
+export const SHOW_ONLY =
+  /\b(show me (the|all the|each) answers?|tell me (the|all the) answers?|just show me|walk me through (this|the|my) (worksheet|assignment|homework|page|problems)|i'?ll type (them|it|the answers)( in)?|don'?t (fill|type) (it|them|anything)( in)?)\b/;
+/** Worksheet, and type the answers in (overrides a show-only default). */
+export const FILL_IN = /\b(fill (it|them|this|everything) in|type (them|it|the answers) in|put the answers in)\b/;
 
 const SWEEP =
   /\b(do|finish|complete|answer|solve|fill (out|in))\b.*\b(whole|entire|all|every|everything)\b.*\b(worksheet|assignment|homework|page|quiz|questions|problems|them|these|it)?|\b(do|finish|complete|fill out) (this|the|my) (worksheet|assignment|homework|problem set)\b|\bworksheet sweep\b/;
@@ -144,7 +150,8 @@ function parseSingle(raw: string, ctx: Ctx): Intent {
   if (/^(?:milo,?\s*)?(check (this|it)( (before|so) i (submit|turn (it|this) in))?|check (this|it|my work|my paper|my essay) against the rubric|preflight( this)?|does this meet the rubric)$/.test(t)) return { kind: "checkwork" };
   if (/^(what'?s due|what is due|what do i have (due|to do|today|tomorrow|this week)|daily brief|morning brief|my brief|brief me|what'?s on my plate|anything due)\b/.test(t)) return { kind: "brief" };
   if (/^(quiz me|test me|give me a (quiz|test|practice test)|make (me )?a (quiz|practice test)|study mode|quiz mode)\b/.test(t)) return { kind: "quiz", focus: text };
-  if (SWEEP.test(t)) return { kind: "sweep" };
+  if (!ctx.inLesson && SHOW_ONLY.test(t)) return { kind: "sweep", show: true };
+  if (SWEEP.test(t)) return { kind: "sweep", ...(FILL_IN.test(t) ? { fill: true } : {}) };
   if (BUILD.test(t) && !/\b(google (doc|sheet|slide)s?|new (tab|window|doc|sheet)|folder|spreadsheet in|document)\b/.test(t)) return { kind: "build", request: text };
 
   if (ctx.pendingAsk) {

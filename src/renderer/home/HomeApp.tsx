@@ -1281,8 +1281,8 @@ export default function HomeApp() {
                     <b>Type worksheet answers in for me</b>
                     <span>
                       {prefs?.autofill
-                        ? "On. When you say “do this worksheet”, I type the answers in. Use it for practice, and follow each class's AI rules."
-                        : "Off. I show each answer and how I got it, and you type it in."}
+                        ? "On. “Do this worksheet” fills in the answers. Say “show me the answers” anytime and I'll just show them."
+                        : "Off. I show each answer and how I got it, and you type it in. Say “fill it in” and I will."}
                     </span>
                   </div>
                   <button
@@ -1370,8 +1370,7 @@ export default function HomeApp() {
                   <span className="hb-muted">say “Milo, listen to class”</span>
                 </div>
                 {classes.map((c) => {
-                  const on = (prefs?.okRecord ?? []).includes(c.id);
-                  const never = (prefs?.noRecord ?? []).includes(c.id);
+                  const on = !(prefs?.noRecord ?? []).includes(c.id);
                   return (
                     <div className="hb-set" key={c.id}>
                       <div>
@@ -1379,14 +1378,14 @@ export default function HomeApp() {
                           <i className="hb-dot" style={{ background: dotFor(c) }} aria-hidden="true" />
                           {c.name}
                         </b>
-                        <span>{on ? "Allowed here. Milo can take notes" : never ? "Milo never listens in this class" : "Off until you confirm this class allows recording"}</span>
+                        <span>{on ? "Milo takes notes when you ask" : "Milo never listens in this class"}</span>
                       </div>
                       <button
                         role="switch"
                         aria-checked={on}
                         aria-label={`Lecture notes in ${c.name}`}
                         className={`hb-switch ${on ? "on" : ""}`}
-                        onClick={() => setPref(on ? { noRecord: [...(prefs?.noRecord ?? []), c.id] } : { okRecord: [...(prefs?.okRecord ?? []), c.id] })}
+                        onClick={() => setPref({ noRecord: on ? [...(prefs?.noRecord ?? []), c.id] : (prefs?.noRecord ?? []).filter((x) => x !== c.id) })}
                       >
                         <i aria-hidden="true" />
                       </button>
@@ -1395,7 +1394,7 @@ export default function HomeApp() {
                 })}
                 {!classes.length && <p className="hb-muted">Your classes show up here once D2L is connected.</p>}
                 <p className="hb-muted hb-promiseline">
-                  Off by default. Only turn a class on if your professor allows recording or you have an accommodation. In class, tap “Not in this class” on the listening badge to delete the recording on the spot. Audio is deleted once your notes are made.
+                  Say “Milo, listen to class” to start. Turn off any class you never want recorded. In class, tap “Not in this class” on the listening badge to delete the recording on the spot. Audio is deleted once your notes are made.
                 </p>
               </section>
 

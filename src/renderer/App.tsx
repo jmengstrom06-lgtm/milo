@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Milo, { Character, CHARACTERS, Mood } from "./Milo";
 import Notebook, { NotebookHandle } from "./Notebook";
 import { Ears, EarState } from "./ears";
-import { Intent, isBareGo, parse, soundsUnfinished, stripGo, stripWake } from "./commands";
+import { Intent, isBareGo, parse, soundsUnfinished, stripGo, stripWake, FILL_IN, SHOW_ONLY } from "./commands";
 import { Bubble, Confetti, Highlight } from "./Effects";
 import * as tts from "./voice";
 import ResearchPanel, { PanelSize } from "./ResearchPanel";
@@ -1782,7 +1782,9 @@ export default function App() {
   );
 
   // ---- Worksheet Sweep: every question, solved and filled in --------------------------
-  const runSweep = async () => {
+  /** Fill in or just show, switchable mid-worksheet from the progress bar. */
+  const sweepFill = useRef(true);
+  const runSweep = async (fillOverride?: boolean) => {
     runId.current++;
     hush();
     setChatOpen(false);
@@ -1794,17 +1796,20 @@ export default function App() {
     const results: SweepState["results"] = [];
     let state: SweepState = { items: [], index: -1, status: "scanning", results };
     const show = (patch: Partial<SweepState>) => {
-      state = { ...state, ...patch, results: [...results] };
+      state = { ...state, ...patch, results: [...results], fill: sweepFill.current };
       setSweep(state);
     };
     show({});
     setMood("looking");
-    // safe default: show the worked answers; only type them in if the student turned that on (practice work)
-    const autofill = await window.milo.prefs
-      .get()
-      .then((p) => !!p.autofill)
-      .catch(() => false);
-    say(autofill ? "Reading the whole page." : "Reading the whole page. I'll show you each answer and how I got it, you type it in.").then(() => setBubble(null));
+    // fill in by default (Settings can change that); "show me the answers" or the progress-bar button = just show
+    sweepFill.current =
+      fillOverride ??
+      (await window.milo.prefs
+        .get()
+        .then((p) => p.autofill !== false)
+        .catch(() => true));
+    show({ fill: sweepFill.current });
+    say(sweepFill.current ? "Reading the whole page." : "Reading the whole page. I'll show you each answer and how I got it, you type it in.").then(() => setBubble(null));
 
     for (let page = 0; page < 3; page++) {
       const plan = await window.milo.sweepPlan(results.map((r) => r.label));
@@ -1834,7 +1839,7 @@ export default function App() {
         if (sweepStop.current) return show({ status: "stopped" });
         // 2) put the answer in
         let filled = false;
-        if (autofill && it.kind !== "none" && it.screen) {
+        if (sweepFill.current && it.kind !== "none" && it.screen) {
           setMood("pointing");
           const r = await window.milo.sweepFill(it);
           filled = r.ok;
@@ -2760,7 +2765,8 @@ export default function App() {
     // Unmistakable commands run right away. Everything else: the router decides, knowing what's open.
     const SURE = ["hush", "yes", "no", "resume", "undo", "activity", "feedback", "paper", "week", "home", "handle"];
     const LESSON_SURE = ["close", "goto", "mode", "answer", "show", "copy", "practice", "skip", "repeat", "fill"];
-    if (!SURE.includes(intent.kind) && !(inLesson && LESSON_SURE.includes(intent.kind))) {
+    const sureSweep = intent.kind === "sweep" && (!!intent.show || !!intent.fill); // "show me the answers" / "fill it in": no doubt
+    if (!SURE.includes(intent.kind) && !sureSweep && !(inLesson && LESSON_SURE.includes(intent.kind))) {
       setMood("thinking");
       const r0 = Date.now();
       getRoute(text).then((rt) => {
@@ -2788,7 +2794,7 @@ export default function App() {
         startResearch(intent.question, spoken);
         return;
       case "sweep":
-        runSweep();
+        runSweep(intent.show ? false : intent.fill ? true : undefined);
         return;
       case "build":
         startBuild(intent.request);
@@ -2977,7 +2983,7 @@ export default function App() {
         } else runTask(text, spoken);
         return;
       case "sweep":
-        runSweep();
+        runSweep(SHOW_ONLY.test(text.toLowerCase()) ? false : FILL_IN.test(text.toLowerCase()) ? true : undefined);
         return;
       case "build":
         startBuild(text);
@@ -3871,7 +3877,16 @@ export default function App() {
     <>
       {sweep && (
         <>
-          <SweepHUD s={sweep} onStop={stopSweep} hover={hover} />
+          <SweepHUD
+            s={sweep}
+            onStop={stopSweep}
+            hover={hover}
+            onFill={(f) => {
+              sweepFill.current = f;
+              setSweep((x) => (x ? { ...x, fill: f } : x));
+              bb("sweep_mode", { fill: f });
+            }}
+          />
           {sweep.items.slice(0, sweep.status === "working" ? sweep.index : sweep.items.length).map((it, i) => {
             const r = sweep.results.find((x) => x.label === it.label);
             return r ? <Pin key={`${it.label}-${i}`} item={it} filled={r.filled} /> : null;
