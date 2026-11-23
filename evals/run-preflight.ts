@@ -14,10 +14,12 @@ async function main() {
   let falseWarn = 0;
   let shouldCatch = 0;
   let caught = 0;
+  let errors = 0;
   for (const c of CASES) {
     const r = await preflightCheck({ work: c.work, rubric: c.rubric || undefined });
     if (!r.ok) {
       console.log(`✗ ${c.name}: ${r.text}`);
+      errors++;
       continue;
     }
     const conf = r.data.items.filter((i) => i.status === "confirmed");
@@ -33,6 +35,7 @@ async function main() {
   const fwRate = confirmed ? falseWarn / confirmed : 0;
   const recall = shouldCatch ? caught / shouldCatch : 1;
   console.log(`\nFalse warnings: ${(fwRate * 100).toFixed(1)}% of ${confirmed} 'fix' items (bar: under 5%)\nCaught: ${(recall * 100).toFixed(0)}% of ${shouldCatch} real problems (bar: 70%)`);
-  if (fwRate >= 0.05 || recall < 0.7) process.exit(1);
+  if (errors) console.log(`${errors} case(s) errored: that's a fail.`);
+  if (errors || fwRate >= 0.05 || recall < 0.7) process.exit(1);
 }
 void main();
