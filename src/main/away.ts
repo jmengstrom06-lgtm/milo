@@ -2,6 +2,7 @@
 // (or needs you), a notification says so, so you can walk away from a long job and come back to it.
 // (Texting your phone comes with the phone app.)
 
+import { inQuiet, prefs } from "./prefs";
 import { Notification, powerMonitor, powerSaveBlocker } from "electron";
 import { log as bb } from "./blackbox";
 import type { Job } from "./jobs";
@@ -26,6 +27,9 @@ export function awayWatch(job: Job, onClick: () => void) {
   seen.set(job.id, job.status);
   const msg = notice(job);
   if (!msg) return;
+  const pf = prefs();
+  if (!pf.notifyAway && !forceNotify) return; // turned off in Home base > Settings
+  if (pf.quiet && !forceNotify && inQuiet(new Date().getHours(), pf.quietFrom, pf.quietTo)) return; // quiet hours
   const idle = powerMonitor.getSystemIdleTime(); // seconds since you last touched the Mac
   if (idle < 45 && !forceNotify) return; // you're here: Milo tells you out loud instead
   if (!Notification.isSupported()) return;

@@ -137,6 +137,12 @@ export default function HomeApp() {
   const [perms, setPerms] = useState<{ mic: boolean; screen: boolean; hands: boolean } | null>(null);
   const [mems, setMems] = useState<string[] | null>(null);
   const [teach, setTeach] = useState("");
+  const [prefs, setPrefsState] = useState<MiloPrefs | null>(null);
+  const [acct, setAcct] = useState<{ signedIn: boolean; email: string } | null>(null);
+  const [acctEmail, setAcctEmail] = useState("");
+  const [acctCode, setAcctCode] = useState("");
+  const [acctStep, setAcctStep] = useState<"email" | "code">("email");
+  const [acctMsg, setAcctMsg] = useState("");
   const [showAll, setShowAll] = useState(false);
   const [examNotes, setExamNotes] = useState<{ id: string; title: string; course: string; body: string; created: number }[]>([]);
   const [examSets, setExamSets] = useState(0);
@@ -229,7 +235,11 @@ export default function HomeApp() {
     if (view !== "settings") return;
     void window.milo.perms().then(setPerms);
     void window.milo.memories().then(setMems);
+    void window.milo.prefs.get().then(setPrefsState);
+    void window.milo.account().then(setAcct);
   }, [view]);
+  useEffect(() => window.milo.onAccountChange(() => void window.milo.account().then(setAcct)), []);
+  const setPref = (p: Partial<MiloPrefs>) => void window.milo.prefs.set(p).then(setPrefsState);
   useEffect(() => {
     if (!toast) return;
     const t = window.setTimeout(() => setToast(null), 7000);
@@ -1200,16 +1210,34 @@ export default function HomeApp() {
                     </b>
                     <span>{d2l?.ok ? `Due dates, grades and syllabi, through ${d2l.via === "chrome" ? "your Chrome sign-in" : "Milo's own sign-in"}. Checks every 10 minutes while Home is open.` : portal ? "Signed out. Sign in to D2L in Chrome and I'll pick it up." : "Not set up yet."}</span>
                   </div>
-                  <button
-                    className="hb-ghost hb-sm"
-                    onClick={() => {
-                      if (!portal) return send("Help me connect my school's D2L");
-                      void window.milo.d2lCheck(portal).then((c) => setD2l({ ok: c.ok, via: c.via }));
-                      void loadDue();
-                    }}
-                  >
-                    {portal ? "Recheck" : "Set up"}
-                  </button>
+                  <div className="hb-row">
+                    <button
+                      className="hb-ghost hb-sm"
+                      onClick={() => {
+                        if (!portal) return send("Help me connect my school's D2L");
+                        void window.milo.d2lCheck(portal).then((c) => setD2l({ ok: c.ok, via: c.via }));
+                        void loadDue();
+                      }}
+                    >
+                      {portal ? "Recheck" : "Set up"}
+                    </button>
+                    {portal && (
+                      <button
+                        className="hb-ghost hb-sm"
+                        onClick={() => {
+                          if (!window.confirm("Turn off D2L? Milo stops reading your due dates and grades until you set it up again.")) return;
+                          try {
+                            localStorage.removeItem("milo.portal");
+                          } catch {
+                            /* ignore */
+                          }
+                          location.reload();
+                        }}
+                      >
+                        Turn off
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="hb-set">
                   <div>
@@ -1219,11 +1247,144 @@ export default function HomeApp() {
                     </b>
                     <span>{google?.connected ? `Calendar, Gmail drafts and Docs as ${google.email}. Sending and adding always wait for your yes.` : "Calendar, Gmail drafts and Docs."}</span>
                   </div>
-                  {!google?.connected && (
+                  {google?.connected ? (
+                    <button
+                      className="hb-ghost hb-sm"
+                      onClick={() => {
+                        if (window.confirm("Disconnect Google? Milo won't see your calendar, Gmail or Docs until you connect again.")) void window.milo.googleDisconnect().then(setGoogle);
+                      }}
+                    >
+                      Disconnect
+                    </button>
+                  ) : (
                     <button className="hb-ghost hb-sm" onClick={() => void window.milo.google.connect().then(() => window.milo.google.status().then(setGoogle))}>
                       Connect
                     </button>
                   )}
+                </div>
+              </section>
+
+              <section className="hb-card" aria-label="Notifications">
+                <div className="hb-cardhead">
+                  <span className="hb-kicker">NOTIFICATIONS</span>
+                  <span className="hb-muted">when you're at the Mac, Milo just tells you out loud</span>
+                </div>
+                <div className="hb-set">
+                  <div>
+                    <b>When a job finishes or needs you</b>
+                    <span>A Mac notification if you've walked away, so you can come back to it.</span>
+                  </div>
+                  <button role="switch" aria-checked={!!prefs?.notifyAway} aria-label="Job notifications" className={`hb-switch ${prefs?.notifyAway ? "on" : ""}`} onClick={() => setPref({ notifyAway: !prefs?.notifyAway })}>
+                    <i aria-hidden="true" />
+                  </button>
+                </div>
+                <div className="hb-set">
+                  <div>
+                    <b>Quiet hours</b>
+                    <span>
+                      No notifications from{" "}
+                      <select aria-label="Quiet hours start" className="hb-select" value={prefs?.quietFrom ?? 23} disabled={!prefs?.quiet} onChange={(e) => setPref({ quietFrom: Number(e.target.value) })}>
+                        {Array.from({ length: 24 }, (_, h) => (
+                          <option key={h} value={h}>
+                            {new Date(2026, 0, 1, h).toLocaleTimeString("en-US", { hour: "numeric" })}
+                          </option>
+                        ))}
+                      </select>{" "}
+                      to{" "}
+                      <select aria-label="Quiet hours end" className="hb-select" value={prefs?.quietTo ?? 8} disabled={!prefs?.quiet} onChange={(e) => setPref({ quietTo: Number(e.target.value) })}>
+                        {Array.from({ length: 24 }, (_, h) => (
+                          <option key={h} value={h}>
+                            {new Date(2026, 0, 1, h).toLocaleTimeString("en-US", { hour: "numeric" })}
+                          </option>
+                        ))}
+                      </select>
+                    </span>
+                  </div>
+                  <button role="switch" aria-checked={!!prefs?.quiet} aria-label="Quiet hours" className={`hb-switch ${prefs?.quiet ? "on" : ""}`} onClick={() => setPref({ quiet: !prefs?.quiet })}>
+                    <i aria-hidden="true" />
+                  </button>
+                </div>
+              </section>
+
+              <section className="hb-card" aria-label="Account">
+                <div className="hb-cardhead">
+                  <span className="hb-kicker">ACCOUNT</span>
+                </div>
+                {acct?.signedIn ? (
+                  <div className="hb-set">
+                    <div>
+                      <b>
+                        <i className="hb-dot ok" aria-hidden="true" />
+                        {acct.email}
+                      </b>
+                      <span>Signed in. Your memory, classes and plans sync across your Macs.</span>
+                    </div>
+                    <button className="hb-ghost hb-sm" onClick={() => void window.milo.accountSignOut().then(setAcct)}>
+                      Sign out
+                    </button>
+                  </div>
+                ) : (
+                  <form
+                    className="hb-signin"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      setAcctMsg("");
+                      if (acctStep === "email") {
+                        const em = acctEmail.trim();
+                        if (!/^\S+@\S+\.\S+$/.test(em)) return setAcctMsg("That doesn't look like an email.");
+                        void window.milo.accountSend(em).then((r) => (r.ok ? (setAcctStep("code"), setAcctMsg(`Code sent to ${em}.`)) : setAcctMsg(r.text)));
+                      } else {
+                        void window.milo.accountVerify(acctEmail.trim(), acctCode.trim()).then((r) => {
+                          if (!r.ok) return setAcctMsg(r.text);
+                          setAcctStep("email");
+                          setAcctCode("");
+                          void window.milo.account().then(setAcct);
+                        });
+                      }
+                    }}
+                  >
+                    <div>
+                      <b>Sign in to sync</b>
+                      <span>Your memory, classes and plans follow you to any Mac.</span>
+                    </div>
+                    <div className="hb-teach">
+                      {acctStep === "email" ? (
+                        <>
+                          <label htmlFor="hb-email" className="hb-sr">
+                            Email
+                          </label>
+                          <input id="hb-email" type="email" autoComplete="email" value={acctEmail} onChange={(e) => setAcctEmail(e.target.value)} placeholder="you@tcu.edu" />
+                          <button className="hb-primary hb-sm" type="submit">
+                            Send code
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <label htmlFor="hb-code" className="hb-sr">
+                            6-digit code
+                          </label>
+                          <input id="hb-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={acctCode} onChange={(e) => setAcctCode(e.target.value.replace(/\D/g, ""))} placeholder="6-digit code" />
+                          <button className="hb-primary hb-sm" type="submit">
+                            Sign in
+                          </button>
+                          <button className="hb-ghost hb-sm" type="button" onClick={() => (setAcctStep("email"), setAcctMsg(""))}>
+                            Back
+                          </button>
+                        </>
+                      )}
+                    </div>
+                    {acctMsg && (
+                      <p className="hb-muted" role="status">
+                        {acctMsg}
+                      </p>
+                    )}
+                  </form>
+                )}
+                <div className="hb-set">
+                  <div>
+                    <b>Plan</b>
+                    <span>Milo beta. Billing and plans turn on at launch.</span>
+                  </div>
                 </div>
               </section>
 

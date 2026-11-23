@@ -28,6 +28,7 @@ describe("yes/no only when that's the whole answer", () => {
 describe("what Milo did + undo", () => {
   const ctx = { inLesson: false, awaitingAnswer: false, pendingAsk: false };
   it.each(["undo", "undo that", "Undo that.", "take that back", "undo the last thing"])("%s = undo", (t) => expect(parse(t, ctx).kind).toBe("undo"));
+  it.each(["open home", "open my home base", "show me the dashboard", "pull up home base", "home base"])("%s = home", (t) => expect(parse(t, ctx).kind).toBe("home"));
   it.each(["what did you do", "what did you do while I was gone", "show me what you did", "what happened while I was away"])("%s = activity", (t) =>
     expect(parse(t, ctx).kind).toBe("activity")
   );
