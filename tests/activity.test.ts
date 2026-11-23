@@ -74,3 +74,22 @@ describe("What Milo did", () => {
     expect(sayActivity([e("a"), e("b"), e("c"), e("d")])).toMatch(/did 4 things: a; b; c, and 1 more/);
   });
 });
+
+import { proofOf } from "../src/main/activity";
+describe("proofOf: never claims more than it knows", () => {
+  it("services that answered are confirmed", () => {
+    expect(proofOf({ kind: "calendar", title: "Added x" }).level).toBe("confirmed");
+    expect(proofOf({ kind: "email_sent", title: "Sent" }).level).toBe("confirmed");
+  });
+  it("finished jobs were checked on screen; unfinished ones are only tried", () => {
+    expect(proofOf({ kind: "job", title: "Did: submit the form" }).level).toBe("checked");
+    expect(proofOf({ kind: "job", title: "Got stuck on: submit the form" }).level).toBe("tried");
+    expect(proofOf({ kind: "job", title: "Started (needs you): x" }).level).toBe("tried");
+  });
+  it("web actions with no proof are not verified", () => {
+    expect(proofOf({ kind: "web", title: "Clicked" }).level).toBe("tried");
+  });
+  it("an explicit proof wins", () => {
+    expect(proofOf({ kind: "doc", title: "Notes", proof: { level: "confirmed", how: "On this Mac." } }).how).toBe("On this Mac.");
+  });
+});

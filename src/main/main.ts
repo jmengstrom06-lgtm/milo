@@ -1146,7 +1146,7 @@ ipcMain.handle("milo:lecture-now", () => lectureNow());
 ipcMain.handle("milo:lecture-stop", async () => {
   const r = await finishLecture();
   if (r.ok && r.noteId) {
-    did({ kind: "doc", title: `Took notes on a lecture: ${r.title} (${r.minutes})`, detail: `${r.flashcards} flashcards${r.alerts ? `, ${r.alerts} things the professor flagged` : ""}`, undo: { type: "note_delete", data: { noteId: r.noteId } } });
+    did({ kind: "doc", title: `Took notes on a lecture: ${r.title} (${r.minutes})`, detail: `${r.flashcards} flashcards${r.alerts ? `, ${r.alerts} things the professor flagged` : ""}`, undo: { type: "note_delete", data: { noteId: r.noteId } }, proof: { level: "confirmed", how: "Saved your notes and flashcards on this Mac." } });
     track("lecture_done", { cards: r.flashcards, alerts: r.alerts });
   } else track("lecture_failed", {});
   return r;

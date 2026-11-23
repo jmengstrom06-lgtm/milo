@@ -29,6 +29,8 @@ declare global {
     undone?: number;
     undoError?: string;
     canUndo: boolean;
+    proof?: { level: "confirmed" | "checked" | "tried"; how: string };
+    source?: { label: string; url?: string };
   };
   type PlanStep = { text: string; minutes: number; kind: "read" | "solve" | "write" | "research" | "review" | "submit"; detail: string };
   type GamePlan = { found: boolean; title: string; course: string; due: string; steps: PlanStep[]; total_minutes: number; say: string; missing: string };
