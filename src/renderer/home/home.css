@@ -344,3 +344,28 @@ kbd { font-family: var(--mono); font-weight: 600; font-size: 11px; color: var(--
 .hb-diddetail p { margin: 0; color: var(--text2); }
 .hb-undobox { border: 1px solid #33294a; border-radius: 16px; background: #15121d; padding: 14px; display: flex; flex-direction: column; gap: 6px; }
 .hb-err { color: #f08a8a !important; font-size: 13px; }
+
+/* ---------- needs your yes ---------- */
+.hb-approve-wrap { position: absolute; inset: 0; z-index: 55; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(8, 6, 12, 0.6); animation: hbRise 0.25s ease-out; }
+.hb-approve { width: 600px; max-width: 100%; border: 1px solid #4a3a1c; border-radius: 24px; background: #121009; box-shadow: 0 40px 100px rgba(0, 0, 0, 0.6); overflow: hidden; }
+.hb-approve-head { display: flex; align-items: center; gap: 10px; padding: 10px 20px; border-bottom: 1px solid #2a2314; font-size: 11px; font-weight: 800; letter-spacing: 0.1em; color: var(--warn); }
+.hb-approve-body { padding: 22px; display: flex; flex-direction: column; gap: 14px; }
+.hb-approve-body h2 { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.25; }
+.hb-approve-what { border: 1px solid var(--line2); border-radius: 14px; background: var(--card); padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
+.hb-approve-what p { margin: 0; }
+.hb-approve-note { margin: 0; padding: 10px 12px; border-radius: 12px; background: #17140d; color: var(--text2); font-size: 13px; }
+.hb-big { height: 46px; padding: 0 20px; font-size: 15px; border-radius: 12px; }
+.hb-primary:disabled { opacity: 0.6; cursor: default; }
+
+/* ---------- share ---------- */
+.hb-share { width: 1000px; max-width: 100%; max-height: calc(100% - 20px); overflow: auto; display: flex; flex-wrap: wrap; gap: 24px; padding: 24px; border: 1px solid var(--line2); border-radius: 26px; background: var(--card); box-shadow: 0 40px 100px rgba(0, 0, 0, 0.6); }
+.hb-share-cards { flex: 999 1 560px; display: flex; flex-wrap: wrap; gap: 14px; }
+.hb-share-card { flex: 1 1 170px; max-width: 220px; aspect-ratio: 9 / 16; border: 3px solid transparent; border-radius: 22px; padding: 18px 12px 14px; display: flex; flex-direction: column; align-items: center; justify-content: space-between; text-align: center; color: #fff; }
+.hb-share-card.on { border-color: #ede7fb; }
+.hb-share-card b { font-size: 21px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
+.hb-share-kick { font-size: 10.5px; font-weight: 800; letter-spacing: 0.08em; opacity: 0.8; }
+.hb-share-small { font-size: 12px; font-weight: 600; opacity: 0.85; }
+.hb-share-brand { font-size: 11px; font-weight: 800; opacity: 0.9; }
+.hb-share-side { flex: 1 1 260px; display: flex; flex-direction: column; gap: 10px; }
+.hb-share-side h2 { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
+.hb-share-note { margin: 0; color: var(--ok); font-size: 13px; }
