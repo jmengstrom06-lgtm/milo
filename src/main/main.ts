@@ -10,6 +10,7 @@ import {
   screen,
   systemPreferences,
   shell,
+  powerMonitor,
   Notification,
 } from "electron";
 import path from "node:path";
@@ -552,6 +553,25 @@ ipcMain.handle("milo:google-event-add", async (_e, ev: { title: string; start: s
     return gerr(e);
   }
 });
+// ---------- Welcome back: notice when the student returns after a while away (class, a nap, dinner) ----------
+// The frog decides if there's anything worth saying ("While you were in class: I took your notes…").
+let awayFrom: number | null = null;
+function watchBack() {
+  const back = () => {
+    if (awayFrom == null) return;
+    const ms = Date.now() - awayFrom;
+    awayFrom = null;
+    if (ms >= 30 * 60e3 && !isPaused()) overlay?.webContents.send("milo:back", ms);
+  };
+  setInterval(() => {
+    const idle = powerMonitor.getSystemIdleTime();
+    if (idle >= 30 * 60) awayFrom ??= Date.now() - idle * 1000;
+    else if (idle < 15) back();
+  }, 20e3);
+  for (const ev of ["lock-screen", "suspend"] as const) powerMonitor.on(ev as "suspend", () => (awayFrom ??= Date.now()));
+  for (const ev of ["unlock-screen", "resume"] as const) powerMonitor.on(ev as "resume", () => setTimeout(back, 3000));
+}
+
 // ---------- "Milo, what's next?": the week planner's calendar side ----------
 ipcMain.handle("milo:week-busy", async () => {
   try {
@@ -1459,6 +1479,7 @@ app.on("web-contents-created", (_e, contents) => {
 });
 
 app.whenReady().then(() => {
+  watchBack();
   startBridge(extensionFolder());
   registerNativeHost(binaryPath()); // so the Chrome Web Store version of the extension can find Milo
   if (process.platform === "darwin") app.dock?.hide();
