@@ -14,7 +14,7 @@
     "test:milo": "npm run build:hands && npm run build:main && concurrently -k -s command-electron -n vite,electron \"vite\" \"wait-on tcp:127.0.0.1:5173 && cross-env MILO_DEV=1 MILO_TEST=1 electron .\"",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "eval": "tsx evals/run-router.ts",
+    "eval": "vite-node --config vitest.config.ts evals/run-router.ts",
     "check": "npm run typecheck && npm test",
     "build:hands": "node scripts/build-hands.js",
     "dist": "cross-env MILO_UNIVERSAL=1 npm run build && electron-builder --mac --universal",
