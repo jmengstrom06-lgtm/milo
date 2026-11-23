@@ -3360,6 +3360,7 @@ export default function App() {
     }
     if (!wanted) return;
     (async () => {
+      if ((await window.milo.pause.get().catch(() => null))?.on) return; // paused: stay deaf until turned back on
       if (!(await window.milo.micAccess())) return;
       try {
         await ears.current!.setMode("always");
@@ -3369,6 +3370,39 @@ export default function App() {
       }
     })();
   }, []);
+
+  // Pause Milo (from Home base): stop listening and recording right away; listen again when resumed.
+  useEffect(
+    () =>
+      window.milo.pause.onChange((p) => {
+        if (p.on) {
+          void ears.current?.setMode("off").catch(() => {});
+          setHandsFree(false);
+          if (recRef.current) void stopLecture();
+          window.milo.stopTask();
+          setBubble(null);
+        } else {
+          let wanted = true;
+          try {
+            wanted = localStorage.getItem("milo.handsFree") !== "off";
+          } catch {
+            /* ignore */
+          }
+          if (!wanted) return;
+          void (async () => {
+            if (!(await window.milo.micAccess())) return;
+            try {
+              await ears.current!.setMode("always");
+              setHandsFree(true);
+            } catch {
+              /* mic unavailable */
+            }
+          })();
+        }
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
 
   const toggleHandsFree = async () => {
     const on = !handsFree;

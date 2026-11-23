@@ -5,7 +5,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { firstOffer } from "../decide";
 import MiloFrog, { type FrogMood, type FrogOutfit } from "./MiloFrog";
-import { OUTFITS, readGrowth, setOutfit, unlocked, XP } from "./growth";
+import { levelSeen, markLevelSeen, OUTFITS, readGrowth, readMoments, setOutfit, unlocked, XP } from "./growth";
+import ExamNight from "./ExamNight";
 import ShareSheet, { type Moment } from "./Share";
 
 type Due = { title: string; course: string; due: string; due_iso?: string; kind?: string; url?: string };
@@ -131,6 +132,16 @@ export default function HomeApp() {
   const [didFilter, setDidFilter] = useState<"all" | "undo" | MiloActivity["kind"]>("all");
   const [didSel, setDidSel] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
+  const [shareFirst, setShareFirst] = useState<string | null>(null);
+  const [paused, setPaused] = useState<MiloPause | null>(null);
+  const [perms, setPerms] = useState<{ mic: boolean; screen: boolean; hands: boolean } | null>(null);
+  const [mems, setMems] = useState<string[] | null>(null);
+  const [teach, setTeach] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const [examNotes, setExamNotes] = useState<{ id: string; title: string; course: string; body: string; created: number }[]>([]);
+  const [examSets, setExamSets] = useState(0);
+  const [levelUp, setLevelUp] = useState<number | null>(null);
+  const [levelFrom, setLevelFrom] = useState(1);
   const seenActs = useRef<string>("");
   const endRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -211,6 +222,15 @@ export default function HomeApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
+    void window.milo.pause.get().then(setPaused);
+    return window.milo.pause.onChange(setPaused);
+  }, []);
+  useEffect(() => {
+    if (view !== "settings") return;
+    void window.milo.perms().then(setPerms);
+    void window.milo.memories().then(setMems);
+  }, [view]);
+  useEffect(() => {
     if (!toast) return;
     const t = window.setTimeout(() => setToast(null), 7000);
     return () => window.clearTimeout(t);
@@ -256,6 +276,13 @@ export default function HomeApp() {
   const send = (raw: string) => {
     const text = raw.trim();
     if (!text) return;
+    if (paused?.on) {
+      setDraft("");
+      setView("chat");
+      appendToChat({ role: "user", text, at: Date.now() });
+      appendToChat({ role: "milo", text: "I'm paused right now, so I'm not looking at your screen, listening, or doing anything. Turn me back on (top of Today or in Settings) and ask again.", at: Date.now() + 1 });
+      return;
+    }
     setDraft("");
     setView("chat");
     setOverlay(null);
@@ -321,7 +348,26 @@ export default function HomeApp() {
   const lastDone = acts.find((a) => now - a.at < 6 * 3600e3);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const growth = useMemo(() => readGrowth(new Date(now)), [now, view]);
-  const heroMood: FrogMood = !online
+  const moments = useMemo(() => readMoments(), [view, now]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const seen = levelSeen(growth.level);
+    if (growth.level > seen) {
+      setLevelFrom(seen);
+      setLevelUp(growth.level);
+    }
+  }, [growth.level]);
+  const examCls = exam ? classOf(exam.course) : null;
+  useEffect(() => {
+    if (!exam) return;
+    const first = exam.course.split(" ")[0];
+    void window.milo.kit.notes().then((n) => setExamNotes(n.filter((x) => x.course === exam.course || x.course.startsWith(first))));
+    if (examCls) void window.milo.lib.list({ classId: examCls.id, app: "study" }).then((l) => setExamSets(l.length));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exam?.title, examCls?.id]);
+  const laterDue = (due ?? []).filter((d) => d.due_iso && new Date(d.due_iso).getTime() >= now + 7 * DAY).sort((a, b) => (a.due_iso ?? "").localeCompare(b.due_iso ?? "")).slice(0, 3);
+  const heroMood: FrogMood = paused?.on
+    ? "sleep"
+    : !online
     ? "sleep"
     : dueErr
       ? "worried"
@@ -332,7 +378,7 @@ export default function HomeApp() {
           : due && !thisWeek.length
             ? "happy"
             : "wave";
-  const moments: Moment[] = [
+  const shareMoments: Moment[] = [
     ...(growth.streak
       ? [{ id: "streak", kicker: "STUDY STREAK", big: `${growth.streak} day${growth.streak === 1 ? "" : "s"} in a row.`, small: "Locked in every single day", mood: "celebrate" as FrogMood, from: "#5B2FB0", to: "#2A1452" }]
       : []),
@@ -397,7 +443,7 @@ export default function HomeApp() {
       {working && <div className="hb-edge" aria-hidden="true" />}
       <aside className="hb-side">
         <div className="hb-brand">
-          <MiloFrog size={30} outfit={outfit} mood={working ? "think" : "idle"} />
+          <MiloFrog size={30} outfit={outfit} mood={paused?.on ? "sleep" : working ? "think" : "idle"} />
           <span className="hb-word">milo</span>
         </div>
         <button className="hb-new" onClick={newChat}>
@@ -506,7 +552,21 @@ export default function HomeApp() {
 
         <div className="hb-scroll">
           {/* ================= TODAY ================= */}
-          {view === "today" && (
+          {view === "today" && exam && !showAll && !paused?.on && (
+            <div className="hb-page">
+              <ExamNight
+                exam={exam}
+                color={dotFor(examCls)}
+                notes={examNotes}
+                sets={examSets}
+                hidden={Math.max(0, thisWeek.length - 1)}
+                outfit={outfit}
+                onSend={send}
+                onShowAll={() => setShowAll(true)}
+              />
+            </div>
+          )}
+          {view === "today" && !(exam && !showAll && !paused?.on) && (
             <div className="hb-page hb-rise">
               {exam && (
                 <section className="hb-exam" aria-label="Exam coming up">
@@ -530,6 +590,18 @@ export default function HomeApp() {
                 </section>
               )}
 
+              {paused?.on && (
+                <section className="hb-state hb-state-paused" role="status">
+                  <MiloFrog size={64} mood="sleep" outfit={outfit} />
+                  <div>
+                    <b>Milo is paused{paused.until ? ` until ${new Date(paused.until).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}` : ""}</b>
+                    <span>He isn't looking at your screen, listening, or running anything. Your stuff below is just what D2L already said.</span>
+                  </div>
+                  <button className="hb-primary hb-sm" onClick={() => void window.milo.pause.set(false).then(setPaused)}>
+                    Turn Milo back on
+                  </button>
+                </section>
+              )}
               {!online && (
                 <section className="hb-state hb-state-off" role="status">
                   <MiloFrog size={64} mood="sleep" outfit={outfit} />
@@ -618,11 +690,37 @@ export default function HomeApp() {
                 </div>
               </div>
 
+              {online && welcomed && !dueErr && due && !thisWeek.length && (
+                <section className="hb-clear" aria-label="Nothing due this week">
+                  <MiloFrog size={96} mood="happy" outfit={outfit} />
+                  <div className="hb-cleartext">
+                    <h2>You're clear for the next 7 days.</h2>
+                    <p>{growth.streak ? `Want to get ahead while it's quiet? A 10-minute lock-in keeps your ${growth.streak}-day streak alive.` : "Want to get ahead while it's quiet?"}</p>
+                    <div className="hb-clearlist">
+                      {laterDue.map((d) => (
+                        <button key={d.title + d.due} onClick={() => send(`Start ${d.title} for ${d.course}`)}>
+                          <span>Get ahead on {d.title}</span>
+                          <em>{new Date(d.due_iso!).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</em>
+                        </button>
+                      ))}
+                      <button onClick={() => send("Quiz me on my last lecture")}>
+                        <span>Quiz me on my last lecture</span>
+                        <em>6 questions</em>
+                      </button>
+                      <button onClick={() => send("Lock in for 25 minutes")}>
+                        <span>Lock in for 25 minutes</span>
+                        <em>+{XP.focusDay} XP</em>
+                      </button>
+                    </div>
+                  </div>
+                </section>
+              )}
+
               <section className="hb-card hb-live-card" aria-label="Milo, live">
                 <div className="hb-cardhead">
                   <span className="hb-kicker hb-purple">
                     <i className={working ? "hb-live" : "hb-idle"} aria-hidden="true" />
-                    MILO · {working ? "LIVE" : "READY"}
+                    MILO · {paused?.on ? "PAUSED" : working ? "LIVE" : "READY"}
                   </span>
                   <span className="hb-muted">{running.length ? `${running.length} running` : "Say or type anything"}</span>
                 </div>
@@ -992,34 +1090,134 @@ export default function HomeApp() {
                 </div>
                 <p className="hb-muted">Opening the app doesn't count, and neither does “Do it for me.”</p>
               </section>
+
+              <section className="hb-card" aria-label="Moments Milo remembers">
+                <div className="hb-cardhead">
+                  <span className="hb-kicker">MOMENTS MILO REMEMBERS</span>
+                  <span className="hb-muted">tap one to share it</span>
+                </div>
+                {moments.map((m) => (
+                  <div key={m.id} className="hb-moment">
+                    <MiloFrog size={48} mood={m.mood} outfit={outfit} />
+                    <div>
+                      <b>{m.what}</b>
+                      <span>{m.when}</span>
+                    </div>
+                    <button className="hb-mini" onClick={() => (setShareFirst(m.id), setSharing(true))}>
+                      Share
+                    </button>
+                  </div>
+                ))}
+                {!moments.length && <p className="hb-muted">Your first finished game plan or lock-in shows up here.</p>}
+              </section>
             </div>
           )}
 
           {/* ================= SETTINGS ================= */}
           {view === "settings" && (
-            <div className="hb-page hb-rise">
+            <div className="hb-page hb-rise hb-settings">
               <h1 className="hb-h1">Settings</h1>
-              <section className="hb-card hb-promise" aria-label="Privacy and safety">
-                <MiloFrog size={60} mood="happy" outfit={outfit} />
-                <div>
-                  <b>My promises</b>
-                  <span>I ask before anything gets submitted, sent, bought or deleted. Everything I do shows up in What Milo did, with Undo where it's possible.</span>
+
+              <section className={`hb-pause ${paused?.on ? "on" : ""}`} aria-label="Pause Milo">
+                <MiloFrog size={84} mood={paused?.on ? "sleep" : "happy"} outfit={outfit} />
+                <div className="hb-pausetext">
+                  <b>{paused?.on ? `Milo is paused${paused.until ? ` until ${new Date(paused.until).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}` : ""}` : "Milo is on"}</b>
+                  <span>
+                    {paused?.on
+                      ? "He isn't looking at your screen, listening, or running anything. Jobs that were going stopped where they were."
+                      : "He only looks at your screen when you ask or while a job you started runs, and only listens after “Milo…”."}
+                  </span>
+                  {!paused?.on && (
+                    <div className="hb-row">
+                      <button className="hb-ghost hb-sm" onClick={() => void window.milo.pause.set(true, 60).then(setPaused)}>
+                        Pause 1 hour
+                      </button>
+                      <button
+                        className="hb-ghost hb-sm"
+                        onClick={() => {
+                          const t = new Date();
+                          t.setDate(t.getDate() + 1);
+                          t.setHours(8, 0, 0, 0);
+                          void window.milo.pause.set(true, Math.round((t.getTime() - Date.now()) / 60e3)).then(setPaused);
+                        }}
+                      >
+                        Until tomorrow 8 AM
+                      </button>
+                    </div>
+                  )}
                 </div>
+                <button
+                  role="switch"
+                  aria-checked={!!paused?.on}
+                  aria-label="Pause Milo"
+                  className={`hb-switch hb-switch-warn ${paused?.on ? "on" : ""}`}
+                  onClick={() => void window.milo.pause.set(!paused?.on).then(setPaused)}
+                >
+                  <i aria-hidden="true" />
+                </button>
               </section>
-              <section className="hb-card">
+
+              <section className="hb-card" aria-label="What Milo can see and do">
+                <div className="hb-cardhead">
+                  <span className="hb-kicker">WHAT MILO CAN SEE AND DO</span>
+                  <span className="hb-muted">your Mac asks for each one once</span>
+                </div>
+                {(
+                  [
+                    ["screen", "Screen", "So he can see the question you're stuck on. Only when you ask, or while a job you started runs.", perms?.screen],
+                    ["mic", "Microphone", "For “Milo, …” and lecture notes. He ignores everything that doesn't start with his name.", perms?.mic],
+                    ["hands", "Clicking and typing", "So he can do things for you. Anything that submits, sends, buys or deletes waits for your yes.", perms?.hands],
+                  ] as const
+                ).map(([kind, label, why, on]) => (
+                  <div className="hb-set" key={kind}>
+                    <div>
+                      <b>
+                        <i className={`hb-dot ${paused?.on ? "" : on ? "ok" : "off"}`} aria-hidden="true" />
+                        {label}
+                        <em className="hb-setstate">{paused?.on ? "paused" : on == null ? "" : on ? "allowed" : "off"}</em>
+                      </b>
+                      <span>{why}</span>
+                    </div>
+                    {on === false && (
+                      <button className="hb-ghost hb-sm" onClick={() => void window.milo.permAsk(kind).then(() => window.milo.perms().then(setPerms))}>
+                        Turn on
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <p className="hb-muted hb-promiseline">I ask before anything gets turned in, sent, bought or deleted. Everything I do shows up in What Milo did, with Undo where it's possible. Crash reports never include what's on your screen or what you say.</p>
+              </section>
+
+              <section className="hb-card" aria-label="Connections">
+                <div className="hb-cardhead">
+                  <span className="hb-kicker">CONNECTIONS</span>
+                </div>
                 <div className="hb-set">
                   <div>
-                    <b>D2L</b>
-                    <span>{d2l?.ok ? `Connected through ${d2l.via === "chrome" ? "your Chrome sign-in" : "Milo's own sign-in"}` : "Not signed in"}</span>
+                    <b>
+                      <i className={`hb-dot ${d2l?.ok ? "ok" : "off"}`} aria-hidden="true" />
+                      D2L Brightspace
+                    </b>
+                    <span>{d2l?.ok ? `Due dates, grades and syllabi, through ${d2l.via === "chrome" ? "your Chrome sign-in" : "Milo's own sign-in"}. Checks every 10 minutes while Home is open.` : portal ? "Signed out. Sign in to D2L in Chrome and I'll pick it up." : "Not set up yet."}</span>
                   </div>
-                  <button className="hb-ghost hb-sm" onClick={() => send("What's due this week?")}>
-                    Check
+                  <button
+                    className="hb-ghost hb-sm"
+                    onClick={() => {
+                      if (!portal) return send("Help me connect my school's D2L");
+                      void window.milo.d2lCheck(portal).then((c) => setD2l({ ok: c.ok, via: c.via }));
+                      void loadDue();
+                    }}
+                  >
+                    {portal ? "Recheck" : "Set up"}
                   </button>
                 </div>
                 <div className="hb-set">
                   <div>
-                    <b>Google</b>
-                    <span>{google?.connected ? `Connected as ${google.email}` : "Not connected"}</span>
+                    <b>
+                      <i className={`hb-dot ${google?.connected ? "ok" : "off"}`} aria-hidden="true" />
+                      Google
+                    </b>
+                    <span>{google?.connected ? `Calendar, Gmail drafts and Docs as ${google.email}. Sending and adding always wait for your yes.` : "Calendar, Gmail drafts and Docs."}</span>
                   </div>
                   {!google?.connected && (
                     <button className="hb-ghost hb-sm" onClick={() => void window.milo.google.connect().then(() => window.milo.google.status().then(setGoogle))}>
@@ -1027,19 +1225,53 @@ export default function HomeApp() {
                     </button>
                   )}
                 </div>
-                <div className="hb-set">
-                  <div>
-                    <b>Memory</b>
-                    <span>What Milo has learned about you</span>
-                  </div>
-                  <button className="hb-ghost hb-sm" onClick={() => send("What do you remember about me?")}>
-                    Review
+              </section>
+
+              <section className="hb-card" aria-label="What Milo knows about you">
+                <div className="hb-cardhead">
+                  <span className="hb-kicker">WHAT MILO KNOWS ABOUT YOU</span>
+                  <button
+                    className="hb-link hb-danger"
+                    onClick={() => {
+                      if (window.confirm("Make Milo forget everything he's learned about you? Your classes and files stay. This can't be undone.")) void window.milo.forgetAll().then(() => setMems([]));
+                    }}
+                  >
+                    Forget everything
                   </button>
                 </div>
+                {(mems ?? []).slice(0, 12).map((m, i) => (
+                  <div className="hb-set" key={i}>
+                    <div>
+                      <span className="hb-memline">{m}</span>
+                    </div>
+                  </div>
+                ))}
+                {mems && !mems.length && <p className="hb-muted">Nothing yet. I learn as we talk, like your classes, your exams and what you find hard.</p>}
+                <form
+                  className="hb-teach"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const f = teach.trim();
+                    if (!f) return;
+                    void window.milo.remember(f).then(() => window.milo.memories().then(setMems));
+                    setTeach("");
+                  }}
+                >
+                  <label htmlFor="hb-teach" className="hb-sr">
+                    Teach Milo something about you
+                  </label>
+                  <input id="hb-teach" value={teach} onChange={(e) => setTeach(e.target.value)} placeholder="Teach Milo something, like “I study best after 9 PM”" />
+                  <button className="hb-ghost hb-sm" type="submit">
+                    Remember
+                  </button>
+                </form>
+              </section>
+
+              <section className="hb-card" aria-label="More">
                 <div className="hb-set">
                   <div>
                     <b>Milo's look</b>
-                    <span>Unlock more outfits by studying</span>
+                    <span>Unlock outfits by studying</span>
                   </div>
                   <button className="hb-ghost hb-sm" onClick={() => setView("milo")}>
                     Wardrobe
@@ -1047,17 +1279,9 @@ export default function HomeApp() {
                 </div>
                 <div className="hb-set">
                   <div>
-                    <b>Forget everything</b>
-                    <span>Clears what Milo has learned about you. Your classes and files stay.</span>
+                    <b>Shortcuts</b>
+                    <span>Talk to Milo: ⌘⇧Space · Look at my screen: ⌘⇧Y · Open Home base: ⌘⇧H · Search: ⌘K</span>
                   </div>
-                  <button
-                    className="hb-ghost hb-sm hb-danger"
-                    onClick={() => {
-                      if (window.confirm("Make Milo forget everything he's learned about you? This can't be undone.")) void window.milo.forgetAll();
-                    }}
-                  >
-                    Forget
-                  </button>
                 </div>
                 <div className="hb-set">
                   <div>
@@ -1130,7 +1354,48 @@ export default function HomeApp() {
         )}
       </main>
 
-      {sharing && <ShareSheet moments={moments} outfit={outfit} onClose={() => setSharing(false)} />}
+      {sharing && (
+        <ShareSheet
+          moments={(() => {
+            const extra: Moment[] = moments.map((x) => ({ id: x.id, kicker: x.kicker, big: x.big, small: x.small, mood: x.mood, from: "#5B2FB0", to: "#2A1452" }));
+            const all = [...shareMoments, ...extra];
+            const first = all.find((x) => x.id === shareFirst);
+            return (first ? [first, ...all.filter((x) => x !== first)] : all).slice(0, 4);
+          })()}
+          outfit={outfit}
+          onClose={() => (setSharing(false), setShareFirst(null))}
+        />
+      )}
+
+      {/* ================= LEVEL UP ================= */}
+      {levelUp && (
+        <div className="hb-approve-wrap" onClick={() => (markLevelSeen(levelUp), setLevelUp(null))}>
+          <section className="hb-levelup" role="dialog" aria-label={`Milo reached level ${levelUp}`} onClick={(e) => e.stopPropagation()}>
+            <MiloFrog size={170} mood="celebrate" outfit={outfit} />
+            <span className="hb-kicker hb-purple">LEVEL UP</span>
+            <h2>Milo hit level {levelUp}!</h2>
+            <p>
+              {growth.name}.{" "}
+              {OUTFITS.filter((o) => o.level > levelFrom && o.level <= levelUp).length
+                ? `New outfit unlocked: ${OUTFITS.filter((o) => o.level > levelFrom && o.level <= levelUp).map((o) => o.label).join(", ")}.`
+                : "All from real studying. Keep going."}
+            </p>
+            <div className="hb-row">
+              {OUTFITS.filter((o) => o.level > levelFrom && o.level <= levelUp).slice(0, 1).map((o) => (
+                <button key={o.id} className="hb-primary" onClick={() => (pickOutfit(o.id), markLevelSeen(levelUp), setLevelUp(null))}>
+                  Put on the {o.label.toLowerCase()}
+                </button>
+              ))}
+              <button className="hb-ghost" onClick={() => (markLevelSeen(levelUp), setLevelUp(null), setShareFirst("level"), setSharing(true))}>
+                Share it
+              </button>
+              <button className="hb-ghost" onClick={() => (markLevelSeen(levelUp), setLevelUp(null))}>
+                Nice
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {/* ================= NEEDS YOUR YES ================= */}
       {job?.status === "needs_you" && job.question && (

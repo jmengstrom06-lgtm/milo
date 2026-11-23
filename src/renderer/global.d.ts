@@ -16,6 +16,7 @@ declare global {
     summary?: string;
     actions: number;
   };
+  type MiloPause = { on: boolean; since: number | null; until: number | null };
   type MiloActivity = {
     id: string;
     at: number;
@@ -250,6 +251,11 @@ declare global {
       accountVerify: (email: string, code: string) => Promise<{ ok: boolean; text: string }>;
       accountSignOut: () => Promise<{ signedIn: boolean; email: string }>;
       memories: () => Promise<string[]>;
+      pause: {
+        get: () => Promise<MiloPause>;
+        set: (on: boolean, minutes?: number) => Promise<MiloPause>;
+        onChange: (cb: (s: MiloPause) => void) => () => void;
+      };
       remember: (fact: string) => Promise<boolean>;
       onAccountChange: (cb: () => void) => () => void;
       focusStart: (minutes: number) => Promise<{ focus: number; rest: number }[]>;
