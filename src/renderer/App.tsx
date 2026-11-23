@@ -109,6 +109,20 @@ const wantsScreen = (text: string) =>
 
 export default function App() {
   const [pos, setPos] = useState<Pos>(home);
+  // a file dropped anywhere else on the see-through window must never replace the window with the file
+  useEffect(() => {
+    const stop = (e: DragEvent) => e.preventDefault();
+    window.addEventListener("dragover", stop);
+    window.addEventListener("drop", stop);
+    return () => {
+      window.removeEventListener("dragover", stop);
+      window.removeEventListener("drop", stop);
+    };
+  }, []);
+  // tell main where the frog is, so a file dragged onto him is caught (see milo:frog-rect)
+  useEffect(() => {
+    window.milo.frogRect({ x: pos.x, y: pos.y, width: MILO_W, height: MILO_H });
+  }, [pos.x, pos.y]);
   const [mood, setMood] = useState<Mood>("sitting");
   const [facing, setFacing] = useState<"left" | "right">("left");
   const [speaking, setSpeaking] = useState(false);

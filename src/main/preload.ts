@@ -71,6 +71,7 @@ contextBridge.exposeInMainWorld("milo", {
     return () => ipcRenderer.removeListener("milo:flag", l);
   },
   setClickable: (clickable: boolean) => ipcRenderer.send("milo:set-clickable", clickable),
+  frogRect: (r: { x: number; y: number; width: number; height: number }) => ipcRenderer.send("milo:frog-rect", r),
   ask: (history: unknown) => ipcRenderer.invoke("milo:ask", history),
   route: (text: string, ctx?: Record<string, unknown>) => ipcRenderer.invoke("milo:route", text, ctx ?? {}),
   look: (mode: string, request: string, focus?: unknown) => ipcRenderer.invoke("milo:look", mode, request, focus ?? null),

@@ -213,11 +213,37 @@ function toJpeg(img: Electron.NativeImage, max: number) {
 
 // ---------- IPC -------------------------------------------------------------
 
-ipcMain.on("milo:set-clickable", (_e, clickable: boolean) => {
-  if (!overlay) return;
-  if (clickable) overlay.setIgnoreMouseEvents(false);
+// The overlay lets clicks pass through except where Milo is. The page says when the mouse is over him
+// (hover), but while a file is being DRAGGED macOS sends the page no mouse moves, so a drop on the frog
+// would fall through to whatever is behind him. So main also watches the cursor itself: over the frog = catchable.
+let pageClickable = false;
+let overFrog = false;
+let frogRect: { x: number; y: number; width: number; height: number } | null = null;
+function applyClickable() {
+  if (!overlay || overlay.isDestroyed()) return;
+  if (pageClickable || overFrog) overlay.setIgnoreMouseEvents(false);
   else overlay.setIgnoreMouseEvents(true, { forward: true });
+}
+ipcMain.on("milo:set-clickable", (_e, clickable: boolean) => {
+  pageClickable = !!clickable;
+  applyClickable();
 });
+ipcMain.on("milo:frog-rect", (_e, r: { x: number; y: number; width: number; height: number }) => {
+  if (r && [r.x, r.y, r.width, r.height].every((n) => Number.isFinite(n))) frogRect = r;
+});
+setInterval(() => {
+  if (!overlay || overlay.isDestroyed() || !frogRect || !overlay.isVisible()) return;
+  const p = screen.getCursorScreenPoint();
+  const b = overlay.getBounds();
+  const x = p.x - b.x;
+  const y = p.y - b.y;
+  const pad = 8;
+  const over = x >= frogRect.x - pad && x <= frogRect.x + frogRect.width + pad && y >= frogRect.y - pad && y <= frogRect.y + frogRect.height + pad;
+  if (over !== overFrog) {
+    overFrog = over;
+    applyClickable();
+  }
+}, 120);
 
 ipcMain.handle("milo:ask", (_e, history: ChatMessage[]) => askMilo(history));
 ipcMain.handle("milo:route", (_e, text: string, ctx?: RouteCtx) => classify(String(text ?? ""), ctx && typeof ctx === "object" ? ctx : {}));

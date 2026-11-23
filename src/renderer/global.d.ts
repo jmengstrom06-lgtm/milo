@@ -164,6 +164,7 @@ declare global {
       macSay: (text: string) => Promise<{ ok: true; audio: string } | { ok: false; text: string }>;
       onFlag: (fn: () => void) => () => void;
       setClickable: (clickable: boolean) => void;
+      frogRect: (r: { x: number; y: number; width: number; height: number }) => void;
       ask: (history: { role: "user" | "assistant"; content: string }[]) => Promise<{ ok: boolean; text: string }>;
       route: (
         text: string,
