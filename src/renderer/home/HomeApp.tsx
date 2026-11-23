@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { firstOffer } from "../decide";
 import MiloFrog, { type FrogMood, type FrogOutfit } from "./MiloFrog";
 import { OUTFITS, readGrowth, setOutfit, unlocked, XP } from "./growth";
+import ShareSheet, { type Moment } from "./Share";
 
 type Due = { title: string; course: string; due: string; due_iso?: string; kind?: string; url?: string };
 type Klass = { id: string; name: string; code: string; subject: string; color: string };
@@ -129,6 +130,7 @@ export default function HomeApp() {
   const [outfit, setOutfitState] = useState<FrogOutfit>(() => readGrowth().outfit);
   const [didFilter, setDidFilter] = useState<"all" | "undo" | MiloActivity["kind"]>("all");
   const [didSel, setDidSel] = useState<string | null>(null);
+  const [sharing, setSharing] = useState(false);
   const seenActs = useRef<string>("");
   const endRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -330,6 +332,15 @@ export default function HomeApp() {
           : due && !thisWeek.length
             ? "happy"
             : "wave";
+  const moments: Moment[] = [
+    ...(growth.streak
+      ? [{ id: "streak", kicker: "STUDY STREAK", big: `${growth.streak} day${growth.streak === 1 ? "" : "s"} in a row.`, small: "Locked in every single day", mood: "celebrate" as FrogMood, from: "#5B2FB0", to: "#2A1452" }]
+      : []),
+    { id: "level", kicker: "LEVEL UP", big: `Milo hit level ${growth.level}.`, small: `${growth.name} · ${growth.xp} XP from real studying`, mood: "happy", from: "#2F8F6A", to: "#123826" },
+    ...(growth.stepsDone
+      ? [{ id: "steps", kicker: "GETTING IT DONE", big: `${growth.stepsDone} step${growth.stepsDone === 1 ? "" : "s"} finished.`, small: "One small step at a time", mood: "write" as FrogMood, from: "#C4652F", to: "#4A2112" }]
+      : []),
+  ];
   const pickOutfit = (id: FrogOutfit) => {
     if (!unlocked(growth.level, id)) return;
     setOutfit(id);
@@ -915,6 +926,9 @@ export default function HomeApp() {
                         Start {next.title}
                       </button>
                     )}
+                    <button className="hb-ghost" onClick={() => setSharing(true)}>
+                      Share Milo
+                    </button>
                   </div>
                 </div>
               </section>
@@ -1116,6 +1130,20 @@ export default function HomeApp() {
         )}
       </main>
 
+      {sharing && <ShareSheet moments={moments} outfit={outfit} onClose={() => setSharing(false)} />}
+
+      {/* ================= NEEDS YOUR YES ================= */}
+      {job?.status === "needs_you" && job.question && (
+        <ApprovalCard
+          key={`${job.id}:${job.question}`}
+          job={job}
+          outfit={outfit}
+          onYes={() => void window.milo.jobResume(true).then((j) => j && setJob(j))}
+          onLook={() => setView("chat")}
+          onNo={() => void window.milo.jobStop().then(() => setJob((j) => (j ? { ...j, status: "stopped" } : j)))}
+        />
+      )}
+
       {/* ================= UNDO BAR ================= */}
       {toast && (
         <div className="hb-toast" role="status">
@@ -1180,6 +1208,54 @@ export default function HomeApp() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Milo stopped right before something that can't be taken back (submit, send, buy, post, delete). */
+function ApprovalCard({ job, outfit, onYes, onLook, onNo }: { job: MiloJob; outfit: FrogOutfit; onYes: () => void; onLook: () => void; onNo: () => void }) {
+  const done = job.steps.filter((s) => s.status === "done").length;
+  const nextStep = job.steps.find((s) => s.status !== "done" && s.status !== "skipped");
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="hb-approve-wrap">
+      <section className="hb-approve" role="alertdialog" aria-labelledby="hb-approve-q" aria-describedby="hb-approve-what">
+        <div className="hb-approve-head">
+          <MiloFrog size={36} mood="think" outfit={outfit} />
+          MILO NEEDS YOUR YES
+        </div>
+        <div className="hb-approve-body">
+          <h2 id="hb-approve-q">{job.question}</h2>
+          <p className="hb-muted">
+            {job.goal.replace(/^In Chrome, /, "").slice(0, 140)} · {done} of {job.steps.length} steps done
+          </p>
+          {nextStep && (
+            <div className="hb-approve-what" id="hb-approve-what">
+              <span className="hb-kicker">WHAT I'LL DO IF YOU SAY YES</span>
+              <p>{nextStep.do.split("\n")[0]}</p>
+            </div>
+          )}
+          <p className="hb-approve-note">Things that get turned in, sent or bought usually can't be taken back. That's why I stopped to ask.</p>
+          <div className="hb-row">
+            <button
+              className="hb-primary hb-big"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                onYes();
+              }}
+            >
+              {busy ? "Going…" : "Yes, go ahead"}
+            </button>
+            <button className="hb-ghost" onClick={onLook}>
+              Show me first
+            </button>
+            <button className="hb-ghost" onClick={onNo}>
+              Not now
+            </button>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
