@@ -9,7 +9,7 @@ import { app, powerSaveBlocker } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { isPaused } from "./pause";
-import { prefs, setPrefs } from "./prefs";
+import { prefs, setPrefs, recordDecision } from "./prefs";
 import { account, backend } from "./account";
 import { log as bb } from "./blackbox";
 import { callTool, persona } from "./brain";
@@ -66,16 +66,18 @@ async function whichClass(said: string): Promise<{ cls: ReturnType<typeof classN
   return { cls: null, how: "unknown" };
 }
 
-export type LectureStart = Meta | { blocked: "class" | "paused"; course: string };
+export type LectureStart = Meta | { blocked: "class" | "paused" | "ask"; course: string; classId?: string | null };
 
-export async function startLecture(said: string): Promise<LectureStart> {
+export async function startLecture(said: string, confirmed = false): Promise<LectureStart> {
   if (current) return current;
   if (isPaused()) return { blocked: "paused", course: "" };
   const { cls, how } = await whichClass(said).catch(() => ({ cls: null, how: "unknown" }));
-  if (cls && prefs().noRecord.includes(cls.id)) {
+  const d = recordDecision(cls?.id ?? null, prefs(), confirmed);
+  if (d === "never") {
     bb("lecture", "blocked", { how });
-    return { blocked: "class", course: cls.name };
+    return { blocked: "class", course: cls!.name };
   }
+  if (d === "ask") return { blocked: "ask", course: cls?.name ?? "", classId: cls?.id ?? null };
   const id = `lec-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}`;
   fs.mkdirSync(dirOf(id), { recursive: true });
   current = { id, course: cls?.name ?? "", classId: cls?.id ?? null, startedAt: Date.now(), chunks: 0, how };

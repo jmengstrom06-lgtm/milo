@@ -165,6 +165,8 @@ export default function App() {
   const [lecture, setLecture] = useState<{ id: string; course: string; startedAt: number } | null>(null);
   const [lectureLevel, setLectureLevel] = useState(0);
   const [lectureWarn, setLectureWarn] = useState<string | null>(null);
+  // safe default: before the first recording in a class, ask if recording is allowed there
+  const [lecAsk, setLecAsk] = useState<{ said: string; course: string; classId: string | null } | null>(null);
   const recRef = useRef<LectureRecorder | null>(null);
   const lectureClassAsk = useRef<{ id: string; at: number } | null>(null); // "Which class was that?"
   const earsBeforeClass = useRef<"always" | "off" | "once">("off");
@@ -1193,7 +1195,7 @@ export default function App() {
     []
   );
   /** "Listen to my stats lecture": record quietly (saved every 2 minutes), notes after class. */
-  const startLecture = async (said: string) => {
+  const startLecture = async (said: string, confirmed = false) => {
     if (recRef.current) {
       say("I'm already listening to class.", { loud: true }).then(() => setBubble(null));
       return;
@@ -1205,7 +1207,12 @@ export default function App() {
     } catch {
       /* ignore */
     }
-    const m = await window.milo.lecture.start(said);
+    const m = await window.milo.lecture.start(said, confirmed);
+    if (m.blocked === "ask") {
+      setLecAsk({ said, course: m.course, classId: m.classId ?? null });
+      say(`Quick check before I listen${m.course ? ` to ${m.course}` : ""}: does this class allow recording?`).then(() => setBubble(null));
+      return;
+    }
     if (m.blocked) {
       say(
         m.blocked === "paused"
@@ -1243,6 +1250,15 @@ export default function App() {
     if (ears.current?.mode === "always") await ears.current.setMode("off");
   };
   // "Not in this class": stop now and delete everything recorded. No notes. Milo remembers the class.
+  /** The student's answer to "does this class allow recording?" */
+  const answerLecAsk = async (allowed: boolean) => {
+    const a = lecAsk;
+    setLecAsk(null);
+    if (!a) return;
+    await window.milo.lecture.allow(a.classId, allowed);
+    if (allowed) return void startLecture(a.said, true);
+    say(`Got it. I won't record${a.course ? ` ${a.course}` : " this class"}. You can change that in Home base, Settings.`).then(() => setBubble(null));
+  };
   const notInThisClass = async () => {
     const rec = recRef.current;
     if (!rec) return;
@@ -1710,7 +1726,12 @@ export default function App() {
     };
     show({});
     setMood("looking");
-    say("Reading the whole page.").then(() => setBubble(null));
+    // safe default: show the worked answers; only type them in if the student turned that on (practice work)
+    const autofill = await window.milo.prefs
+      .get()
+      .then((p) => !!p.autofill)
+      .catch(() => false);
+    say(autofill ? "Reading the whole page." : "Reading the whole page. I'll show you each answer and how I got it, you type it in.").then(() => setBubble(null));
 
     for (let page = 0; page < 3; page++) {
       const plan = await window.milo.sweepPlan(results.map((r) => r.label));
@@ -1740,7 +1761,7 @@ export default function App() {
         if (sweepStop.current) return show({ status: "stopped" });
         // 2) put the answer in
         let filled = false;
-        if (it.kind !== "none" && it.screen) {
+        if (autofill && it.kind !== "none" && it.screen) {
           setMood("pointing");
           const r = await window.milo.sweepFill(it);
           filled = r.ok;
@@ -3712,6 +3733,22 @@ export default function App() {
         </>
       )}
 
+      {lecAsk && !lecture && (
+        <div className="lec lec-ask" role="dialog" aria-label="Recording check" onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)}>
+          <span className="lec-text">
+            Does {lecAsk.course || "this class"} allow recording? I only listen where it's allowed.
+          </span>
+          <button className="kit-btn kit-btn--sm" onClick={() => void answerLecAsk(true)}>
+            Yes, my professor allows it
+          </button>
+          <button className="kit-btn kit-btn--sm" onClick={() => void answerLecAsk(true)}>
+            I have an accommodation
+          </button>
+          <button className="kit-btn kit-btn--sm" onClick={() => void answerLecAsk(false)}>
+            No, don't record
+          </button>
+        </div>
+      )}
       {lecture && (
         <div className="lec" onMouseEnter={() => hover(true)} onMouseLeave={() => hover(false)}>
           <span className="lec-dot" />

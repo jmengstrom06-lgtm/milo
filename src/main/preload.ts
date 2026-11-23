@@ -173,7 +173,8 @@ contextBridge.exposeInMainWorld("milo", {
     },
   },
   lecture: {
-    start: (said: string) => ipcRenderer.invoke("milo:lecture-start", said),
+    start: (said: string, confirmed?: boolean) => ipcRenderer.invoke("milo:lecture-start", said, confirmed),
+    allow: (classId: string | null, allowed: boolean) => ipcRenderer.invoke("milo:lecture-allow", classId, allowed),
     chunk: (id: string, n: number, wav: ArrayBuffer) => ipcRenderer.invoke("milo:lecture-chunk", id, n, wav),
     stop: () => ipcRenderer.invoke("milo:lecture-stop"),
     discard: () => ipcRenderer.invoke("milo:lecture-discard"),

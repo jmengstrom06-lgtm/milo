@@ -1127,14 +1127,23 @@ ipcMain.handle("milo:classes-sync", async (_e, portal: string) => {
 });
 // ---------- Lecture listener: saved to disk every 2 minutes, transcribed with retries, notes after class ----------
 ipcMain.handle("milo:lecture-file", (_e, lectureId: string, said: string) => fileLecture(String(lectureId), String(said ?? "")));
-ipcMain.handle("milo:lecture-start", async (_e, said: string) => {
-  const m = await startLecture(String(said ?? ""));
+ipcMain.handle("milo:lecture-start", async (_e, said: string, confirmed?: boolean) => {
+  const m = await startLecture(String(said ?? ""), confirmed === true);
   if ("blocked" in m) {
     track("lecture_blocked", { why: m.blocked });
-    return { id: "", course: m.course, startedAt: 0, blocked: m.blocked };
+    return { id: "", course: m.course, startedAt: 0, blocked: m.blocked, classId: m.classId ?? null };
   }
   track("lecture_start", { course: !!m.course });
   return { id: m.id, course: m.course, startedAt: m.startedAt };
+});
+/** The student answered "does this class allow recording?". Remembered per class so Milo asks once. */
+ipcMain.handle("milo:lecture-allow", (_e, classId: string | null, allowed: boolean) => {
+  track("lecture_allow", { allowed: !!allowed, known: !!classId });
+  if (!classId) return true;
+  const p = prefs();
+  if (allowed) setPrefs({ okRecord: [...p.okRecord, String(classId)] });
+  else setPrefs({ noRecord: [...p.noRecord, String(classId)] });
+  return true;
 });
 ipcMain.handle("milo:lecture-discard", () => {
   const r = discardLecture();
