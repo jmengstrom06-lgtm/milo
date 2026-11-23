@@ -1041,7 +1041,7 @@ Use ONLY these command phrasings for "say" (fill in the brackets):
 - "research [topic]"
 Never offer to do graded work for them, submit anything, or buy anything. Match the screen: an essay draft -> check my work; lecture slides -> quiz me / flashcards; an email -> reply.`,
       tools: [SUGGEST_TOOL],
-      tool_choice: { type: "tool", name: SUGGEST_TOOL.name },
+      tool_choice: { type: "auto" },
       messages: [
         {
           role: "user",
@@ -1124,7 +1124,7 @@ Rules, strictly:
 - Max 6 items, most important first. Don't list things that are fine. If everything checks out, return no items.
 - Talk like a friendly TA: specific and calm. Never "you will lose points".`,
       tools: [PREFLIGHT_TOOL],
-      tool_choice: { type: "tool", name: PREFLIGHT_TOOL.name },
+      tool_choice: { type: "auto" },
       messages: [{ role: "user", content }],
     },
     PREFLIGHT_TOOL.name
