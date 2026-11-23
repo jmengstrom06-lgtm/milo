@@ -1879,3 +1879,4 @@ body,
 .offer__chip--best { background: var(--accent); border-color: var(--accent); color: #fff; }
 .offer__chip--best:hover { background: var(--accent); filter: brightness(1.08); }
 .offer__x { margin-left: auto; border: 0; background: transparent; color: #9ca3af; font-size: 14px; cursor: pointer; padding: 4px; }
+.nudge .offer__seen { font-size: 19px; }

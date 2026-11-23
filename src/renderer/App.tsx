@@ -18,6 +18,7 @@ import { parseAnswer, parseGoogle, parseGoogleMulti, parseRemember, spokenEmail 
 import { fastDecide, looksLikeBackground, parseExam, parseFinalWeight, parseForecast, parseGradeNow, parseScore, parseSyllabus, parseHomework, parsePlanVoice, parseRadar, stripFiller, firstOffer, parseOfferAnswer, type DecideState } from "./decide";
 import { alertLine, emptyRadar, markWarned, mergeScan, pendingAlerts, upcoming, whenText, type Radar, type RadarItem, type ScanItem, type Warn } from "./radar";
 import RadarCard, { type RadarView } from "./RadarCard";
+import { backNudge, weekNudge, type Nudge } from "./nudges";
 import Onboarding, { setupDone } from "./Onboarding";
 import ActivityPanel from "./ActivityPanel";
 import FeedbackPanel from "./FeedbackPanel";
@@ -118,6 +119,8 @@ export default function App() {
   const [offer, setOffer] = useState<{ seen: string; options: { label: string; say: string }[] } | null>(null);
   // click the frog: the quick menu with the three moves
   const [menu, setMenu] = useState(false);
+  // Milo speaks first: a heads-up card by the frog ("Thursday's stacked", "While you were in class…")
+  const [nudge, setNudge] = useState<Nudge | null>(null);
 
   const [chatOpen, setChatOpen] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -3783,6 +3786,59 @@ export default function App() {
       : { left: pos.x + MILO_W + 10, top: pos.y + 8, maxWidth: w };
   };
   const short = (t: string) => (t.length > 170 ? t.slice(0, 167).trimEnd() + "…" : t);
+  // ---- Milo speaks first ----
+  const showNudge = (n: Nudge) => {
+    setNudge(n);
+    bb("nudge", { id: n.id.split("-")[0] });
+    sfx.chime();
+    setMood("happy");
+    say(n.text).then(() => setBubble(null));
+  };
+  // welcome back after class / time away
+  useEffect(
+    () =>
+      window.milo.onBack((awayMs) => {
+        void window.milo.activity.list().then((acts) => {
+          const n = backNudge(awayMs, Date.now(), acts, radarRef.current.items);
+          if (!n || radarBusy.current) return;
+          showNudge(n);
+        });
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+  // once a day: a pile-up coming → offer to fix the week
+  useEffect(() => {
+    const tick = async () => {
+      if (radarBusy.current || (await window.milo.pause.get().catch(() => null))?.on) return;
+      const last = Number(localStorage.getItem("milo.weekNudge") || 0);
+      const items = radarRef.current.items.filter((x) => x.dueAt != null).map((x) => ({ id: x.id, title: x.title, course: x.course, dueAt: x.dueAt!, kind: x.kind === "exam" ? ("exam" as const) : undefined }));
+      const n = weekNudge(items, Date.now(), last);
+      if (!n) return;
+      localStorage.setItem("milo.weekNudge", String(Date.now()));
+      showNudge(n);
+    };
+    const first = window.setTimeout(() => void tick(), 4 * 60e3);
+    const t = window.setInterval(() => void tick(), 30 * 60e3);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const nudgeAct = (a: Nudge["actions"][number]) => {
+    const n = nudge;
+    setNudge(null);
+    hover(false);
+    hush();
+    setBubble(null);
+    bb("nudge_act", { a });
+    if (a === "week") routeRef.current("what's next", false);
+    else if (a === "did") setActivityOpen(true);
+    else if (a === "start" && n?.start) routeRef.current(`start ${n.start}`, false);
+  };
+  const NUDGE_LABEL: Record<Nudge["actions"][number], string> = { week: "Fix my week", did: "See what you did", start: "Start it", dismiss: "Later" };
+
   const bStyle = bubblePos();
 
   return (
@@ -4070,7 +4126,7 @@ export default function App() {
       </div>
 
       {bubble && <Bubble text={short(bubble)} style={bStyle} />}
-      {menu && !pending && (
+      {menu && !bubble && !pending && (
         <div className="qmenu" style={bStyle} role="menu" aria-label="Milo" onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)} onMouseLeave={() => hover(false)}>
           {(
             [
@@ -4103,7 +4159,19 @@ export default function App() {
           <div className="qmenu__hint">Or just say “Milo, …”. Drop a file on me too.</div>
         </div>
       )}
-      {offer && !menu && !pending && (
+      {nudge && !bubble && !menu && !offer && !pending && (
+        <div className="offer nudge" style={bStyle} role="status" onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)} onMouseLeave={() => hover(false)}>
+          <div className="offer__seen">{nudge.text}</div>
+          <div className="offer__row">
+            {nudge.actions.map((a, i) => (
+              <button key={a} className={`offer__chip ${i === 0 && a !== "dismiss" ? "offer__chip--best" : ""}`} onClick={() => nudgeAct(a)}>
+                {a === "start" && nudge.start ? `Start ${nudge.start.slice(0, 24)}` : NUDGE_LABEL[a]}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {offer && !bubble && !menu && !pending && (
         <div className="offer" style={bStyle} role="dialog" aria-label="What Milo can do" onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)} onMouseLeave={() => hover(false)}>
           {offer.seen && <div className="offer__seen">{offer.seen}</div>}
           <div className="offer__row">
