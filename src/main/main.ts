@@ -60,10 +60,10 @@ import { activateApp, click, ensureBrowser, resolveApp, frontApp, isRunning, ope
 import { plan } from "./quick";
 import { research } from "./research";
 import { buildTool } from "./builder";
-import { askScreen , suggestActions } from "./brain";
+import { askScreen , suggestActions, preflightCheck } from "./brain";
 import { createTray, extensionDirs, firstRunDefaults, loadKeys } from "./appshell";
 import { isPaused, PAUSED_TEXT, pauseState, setPause } from "./pause";
-import { prefs, setPrefs, type Prefs } from "./prefs";
+import { looksLikeRubric, prefs, setPrefs, type Prefs } from "./prefs";
 import { checkForUpdate, installUpdate, startUpdater, startUpdates, updateReady } from "./updater";
 import { Action, askMilo, classify, RouteCtx, makeQuiz, readBrief, setUserName, sweepPlan, watchCheck, ChatMessage, checkAnswer, locateInCrop, nextActions, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
@@ -1056,6 +1056,17 @@ ipcMain.handle("milo:suggest", async (_e, said: string) => {
   const r = await suggestActions(small.b64, small.size, String(said ?? "").slice(0, 200));
   track("suggest", { ok: r.ok, n: r.ok ? r.data.options.length : 0 });
   return r.ok ? { ok: true, seen: r.data.seen, options: r.data.options } : r;
+});
+/** "Milo, check this" (Preflight beta): the work on screen against the rubric they copied (if any). */
+ipcMain.handle("milo:preflight", async () => {
+  const clip = clipboard.readText().trim();
+  const rubric = looksLikeRubric(clip) ? clip : "";
+  const cap = await captureScreen();
+  if (!cap.ok) return cap;
+  const small = toJpeg(cap.shot.full, 1568);
+  const r = await preflightCheck({ jpeg: small.b64, size: small.size, rubric: rubric || undefined });
+  track("preflight", { ok: r.ok, rubric: !!rubric, n: r.ok ? r.data.items.length : 0, confirmed: r.ok ? r.data.items.filter((i) => i.status === "confirmed").length : 0 });
+  return r.ok ? { ok: true, ...r.data, rubricFrom: rubric ? "clipboard" : null } : r;
 });
 /** Something dropped on the frog: open it so Milo can see it (files from Finder, links). */
 ipcMain.handle("milo:open-dropped", async (_e, what: { path?: string; url?: string }) => {

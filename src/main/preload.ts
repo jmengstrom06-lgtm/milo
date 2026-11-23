@@ -149,6 +149,7 @@ contextBridge.exposeInMainWorld("milo", {
   d2lCheck: (portal: string) => ipcRenderer.invoke("milo:d2l-check", portal),
   classesSync: (portal: string) => ipcRenderer.invoke("milo:classes-sync", portal),
   suggest: (said: string) => ipcRenderer.invoke("milo:suggest", said),
+  preflight: () => ipcRenderer.invoke("milo:preflight"),
   onBack: (fn: (awayMs: number) => void) => {
     const l = (_e: unknown, ms: number) => fn(ms);
     ipcRenderer.on("milo:back", l);

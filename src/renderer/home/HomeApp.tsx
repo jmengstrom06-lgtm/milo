@@ -1219,6 +1219,24 @@ export default function HomeApp() {
                 </button>
               </section>
 
+              <section className="hb-card" aria-label="Check this beta">
+                <div className="hb-set">
+                  <div>
+                    <b>
+                      Check this <em className="hb-setstate">beta</em>
+                    </b>
+                    <span>
+                      {prefs?.preflight
+                        ? "On. “Milo, check this” checks your work against the rubric you copied (or instructions on screen) and labels each thing Fix, Check, or Can't tell."
+                        : "Off. “Check my work” just looks for mistakes. Turn on to also check against the rubric."}
+                    </span>
+                  </div>
+                  <button role="switch" aria-checked={!!prefs?.preflight} aria-label="Check this beta" className={`hb-switch ${prefs?.preflight ? "on" : ""}`} onClick={() => setPref({ preflight: !prefs?.preflight })}>
+                    <i aria-hidden="true" />
+                  </button>
+                </div>
+              </section>
+
               <section className="hb-card" aria-label="Demo mode">
                 <div className="hb-set">
                   <div>

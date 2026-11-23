@@ -121,6 +121,9 @@ export default function App() {
   const [menu, setMenu] = useState(false);
   // Milo speaks first: a heads-up card by the frog ("Thursday's stacked", "While you were in class…")
   const [nudge, setNudge] = useState<Nudge | null>(null);
+  // "Check this" (Preflight beta): findings, each labeled Confirmed / Possible / Unknown with its source
+  type PF = Extract<Awaited<ReturnType<typeof window.milo.preflight>>, { ok: true }>;
+  const [preflight, setPreflight] = useState<PF | null>(null);
 
   const [chatOpen, setChatOpen] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -1971,9 +1974,32 @@ export default function App() {
     if (!on) setFlag(null);
     say(on ? "Okay, I'll watch quietly and only speak up if something's off." : "Okay, I stopped watching.").then(() => setBubble(null));
   };
+  /** "Milo, check this": the work on screen vs. the rubric they copied / instructions on screen. Never blocks Submit. */
+  const runPreflight = async () => {
+    setPreflight(null);
+    setMood("looking");
+    setBubble("Checking your work against the requirements…");
+    const r = await window.milo.preflight();
+    setBubble(null);
+    if (!r.ok) return say(r.text || "I couldn't check right now.").then(() => setBubble(null));
+    const fix = r.items.filter((i) => i.status === "confirmed").length;
+    const look = r.items.filter((i) => i.status === "possible").length;
+    bb("preflight_done", { items: r.items.length, fix, look, rubric: !!r.rubricFrom });
+    setPreflight(r);
+    setMood(fix ? "pointing" : "happy");
+    if (!fix && !look) sfx.success();
+    const line = !r.items.length
+      ? r.requirements_seen
+        ? "Everything I can check looks good. Nice."
+        : "I didn't see a rubric, but nothing looks wrong. Copy the rubric and ask again for a real check."
+      : `${fix ? `${fix} thing${fix > 1 ? "s" : ""} to fix` : ""}${fix && look ? ", " : ""}${look ? `${look} to double-check` : ""}.`;
+    say(line).then(() => setBubble(null));
+  };
   const checkWorkNow = async () => {
     setChatOpen(false);
     hover(false);
+    // beta: the rubric-aware check, if the student turned it on
+    if ((await window.milo.prefs.get().catch(() => null))?.preflight) return runPreflight();
     setMood("looking");
     setBubble("Checking your work…");
     const r = await checkOnce(true);
@@ -4157,6 +4183,29 @@ export default function App() {
             </button>
           ))}
           <div className="qmenu__hint">Or just say “Milo, …”. Drop a file on me too.</div>
+        </div>
+      )}
+      {preflight && !bubble && !menu && !pending && (
+        <div className="pf" style={bStyle} role="dialog" aria-label="Check this" onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)} onMouseLeave={() => hover(false)}>
+          <div className="pf__head">
+            <b>Check this</b>
+            <span className="pf__beta">BETA</span>
+            <button className="offer__x" aria-label="Close" onClick={() => (setPreflight(null), hover(false))}>
+              ✕
+            </button>
+          </div>
+          <div className="pf__src">{preflight.rubricFrom ? "Checked against the rubric you copied" : preflight.requirements_seen ? "Checked against the instructions on screen" : "No rubric found. Copy it and ask again for a full check."}</div>
+          {preflight.items.length === 0 && <div className="pf__ok">✓ Nothing to fix that I can see.</div>}
+          {preflight.items.map((it) => (
+            <div key={it.text} className={`pf__item pf__item--${it.status}`}>
+              <span className="pf__tag">{it.status === "confirmed" ? "FIX" : it.status === "possible" ? "CHECK" : "CAN'T TELL"}</span>
+              <div>
+                <div>{it.text}</div>
+                {it.quote && <em>“{it.quote}” · {it.source === "rubric" ? "rubric" : "instructions"}</em>}
+              </div>
+            </div>
+          ))}
+          <div className="pf__foot">I can be wrong. You decide what to change.</div>
         </div>
       )}
       {nudge && !bubble && !menu && !offer && !pending && (

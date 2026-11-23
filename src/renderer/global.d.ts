@@ -16,7 +16,7 @@ declare global {
     summary?: string;
     actions: number;
   };
-  type MiloPrefs = { notifyAway: boolean; quiet: boolean; quietFrom: number; quietTo: number; noRecord: string[]; okRecord: string[]; autofill: boolean };
+  type MiloPrefs = { notifyAway: boolean; quiet: boolean; quietFrom: number; quietTo: number; noRecord: string[]; okRecord: string[]; autofill: boolean; preflight: boolean };
   type MiloPause = { on: boolean; since: number | null; until: number | null };
   type MiloActivity = {
     id: string;
@@ -214,6 +214,10 @@ declare global {
       paper: (request: string, name?: string) => Promise<{ ok: boolean; text: string; url?: string; link?: string; linkLabel?: string; needTopic?: boolean; connect?: boolean }>;
       paperStop: () => Promise<boolean>;
       suggest: (said: string) => Promise<{ ok: true; seen: string; options: { label: string; say: string }[] } | { ok: false; text: string }>;
+      preflight: () => Promise<
+        | { ok: true; requirements_seen: boolean; items: { status: "confirmed" | "possible" | "unknown"; text: string; quote: string; source: "rubric" | "screen" | "none" }[]; summary: string; rubricFrom: "clipboard" | null }
+        | { ok: false; text: string }
+      >;
       onBack: (fn: (awayMs: number) => void) => () => void;
       openDropped: (what: { path?: string; url?: string }) => Promise<{ ok: boolean; text?: string }>;
       pathForFile: (f: File) => string;
