@@ -1058,7 +1058,8 @@ Never offer to do graded work for them, submit anything, or buy anything. Match 
   return { ok: true, data: { seen: String(r.data.seen ?? "").slice(0, 120), options: cleanOptions(r.data.options) } };
 }
 /** Keep 1-3 options with real text; drop anything that would do graded work or submit/buy. (pure) */
-export function cleanOptions(opts: unknown): { label: string; say: string }[] {
+export function cleanOptions(raw: unknown): { label: string; say: string }[] {
+  const opts = asArray(raw);
   if (!Array.isArray(opts)) return [];
   return opts
     .filter((o): o is { label: string; say: string } => !!o && typeof o.label === "string" && typeof o.say === "string" && !!o.label.trim() && !!o.say.trim())
@@ -1133,7 +1134,8 @@ Rules, strictly:
   return { ok: true, data: { requirements_seen: !!r.data.requirements_seen, items: honestItems(r.data.items, !!src.rubric), summary: String(r.data.summary ?? "").slice(0, 200) } };
 }
 /** Never claim more than Milo can back up: "confirmed" needs a quoted requirement from a real source. (pure) */
-export function honestItems(items: unknown, hadRubric: boolean): PreflightItem[] {
+export function honestItems(raw: unknown, hadRubric: boolean): PreflightItem[] {
+  const items = asArray(raw);
   if (!Array.isArray(items)) return [];
   const order = { confirmed: 0, possible: 1, unknown: 2 } as const;
   const seen = new Set<string>();
@@ -1149,4 +1151,15 @@ export function honestItems(items: unknown, hadRubric: boolean): PreflightItem[]
     .filter((x) => (seen.has(x.text) ? false : (seen.add(x.text), true)))
     .sort((a, b) => order[a.status] - order[b.status])
     .slice(0, 6);
+}
+
+/** Models sometimes send an array as a JSON string ("[{...}]"). Accept both. (pure) */
+export function asArray(v: unknown): unknown {
+  if (typeof v !== "string") return v;
+  try {
+    const p = JSON.parse(v);
+    return Array.isArray(p) ? p : v;
+  } catch {
+    return v;
+  }
 }

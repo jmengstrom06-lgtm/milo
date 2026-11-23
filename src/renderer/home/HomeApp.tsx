@@ -645,6 +645,7 @@ export default function HomeApp() {
                   due={due}
                   demo={DEMO}
                   googleOn={!!google?.connected}
+                  dueErr={dueErr}
                   outfit={outfit}
                   onClose={() => setWeek(false)}
                   onConnect={() => void M.google.connect().then(() => M.google.status().then(setGoogle))}
