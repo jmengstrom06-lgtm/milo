@@ -148,6 +148,10 @@ contextBridge.exposeInMainWorld("milo", {
   d2lDue: (portal: string) => ipcRenderer.invoke("milo:d2l-due", portal),
   d2lCheck: (portal: string) => ipcRenderer.invoke("milo:d2l-check", portal),
   classesSync: (portal: string) => ipcRenderer.invoke("milo:classes-sync", portal),
+  week: {
+    busy: () => ipcRenderer.invoke("milo:week-busy"),
+    apply: (blocks: unknown[]) => ipcRenderer.invoke("milo:week-apply", blocks),
+  },
   home: {
     open: () => ipcRenderer.invoke("milo:open-home"),
     route: (text: string) => ipcRenderer.send("milo:home-route", text),

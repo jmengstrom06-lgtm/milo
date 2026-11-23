@@ -1,3 +1,4 @@
+import { WEEK_ASK } from "./home/weekFix";
 // Turns what the student says into something Milo does. Fast, local, no AI call needed.
 
 export type Intent =
@@ -23,6 +24,7 @@ export type Intent =
   | { kind: "resume" } // pick up where Milo was interrupted
   | { kind: "chain"; steps: Intent[] } // "open chrome, find a worksheet, and complete it": do in order
   | { kind: "activity" } // "what did you do?": open the timeline
+  | { kind: "week" } // "what's next?", "fix my week": the week planner in Home base
   | { kind: "home" } // "open home", "show my home base": open the Home base window
   | { kind: "undo" } // "undo that": take back the newest thing
   | { kind: "feedback"; text: string } // "report a problem", "tell Jake that…"
@@ -132,6 +134,7 @@ function parseSingle(raw: string, ctx: Ctx): Intent {
   if (/^(stop watching|stop checking|you can stop watching|quit watching)\b/.test(t)) return { kind: "watch", on: false };
   if (/^(watch me|watch my (work|screen)|keep an eye on (me|my work|this)|watch me work|check my work as i go|watch while i work)\b/.test(t))
     return { kind: "watch", on: true };
+  if (WEEK_ASK.test(t)) return { kind: "week" };
   if (/^(check (my|this) work|is (this|my work) right|did i (do this|get this) right|any mistakes)\b/.test(t)) return { kind: "checkwork" };
   if (/^(what'?s due|what is due|what do i have (due|to do|today|tomorrow|this week)|daily brief|morning brief|my brief|brief me|what'?s on my plate|anything due)\b/.test(t)) return { kind: "brief" };
   if (/^(quiz me|test me|give me a (quiz|test|practice test)|make (me )?a (quiz|practice test)|study mode|quiz mode)\b/.test(t)) return { kind: "quiz", focus: text };

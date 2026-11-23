@@ -32,7 +32,7 @@ import { isJob, lastJob, resumable, resumeJob, startJob, type JobDeps } from "./
 import { getProfile, setProfile, type Profile } from "./profile";
 import { usageToday } from "./usage";
 import { awayWatch } from "./away";
-import { calendarAdd, calendarDelete, calendarUpcoming, docsCreate, GoogleNotConnected, googleConnect, googleDisconnect, googleStatus, gmailDeleteDraft, gmailDraft, gmailSendDraft, gmailUnread } from "./google";
+import { calendarAdd, calendarBusy, calendarDelete, calendarUpcoming, docsCreate, GoogleNotConnected, googleConnect, googleDisconnect, googleStatus, gmailDeleteDraft, gmailDraft, gmailSendDraft, gmailUnread } from "./google";
 import { activity, did, registerActivity } from "./activityLog";
 import { writePaper } from "./paper";
 import { homeWin, openHome, toHome } from "./home";
@@ -551,6 +551,49 @@ ipcMain.handle("milo:google-event-add", async (_e, ev: { title: string; start: s
   } catch (e) {
     return gerr(e);
   }
+});
+// ---------- "Milo, what's next?": the week planner's calendar side ----------
+ipcMain.handle("milo:week-busy", async () => {
+  try {
+    return { ok: true, events: await calendarBusy(8) };
+  } catch (e) {
+    return { ok: false, events: [], text: (e as Error).message.slice(0, 160) };
+  }
+});
+/** Add the approved study blocks in one go. One timeline entry, one Undo for all of them. */
+ipcMain.handle("milo:week-apply", async (_e, blocks: { title: string; course: string; start: number; end: number }[]) => {
+  const list = (Array.isArray(blocks) ? blocks : []).slice(0, 40);
+  const local = (t: number) => {
+    const d = new Date(t);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  const ids: string[] = [];
+  let failed = 0;
+  let firstError = "";
+  for (const b of list) {
+    try {
+      const r = await calendarAdd({ title: `📚 ${String(b.title).slice(0, 120)}`, start: local(Number(b.start)), end: local(Number(b.end)), where: b.course ? String(b.course).slice(0, 80) : undefined });
+      if (r.id) ids.push(r.id);
+      else failed++;
+    } catch (e) {
+      failed++;
+      firstError ||= (e as Error).message.slice(0, 160);
+      if (/not connected|sign in|401|403/i.test(firstError)) break;
+    }
+  }
+  track("week_apply", { asked: list.length, added: ids.length, failed });
+  if (ids.length) {
+    did({
+      kind: "calendar",
+      title: `Planned your week: added ${ids.length} study block${ids.length > 1 ? "s" : ""} to your calendar`,
+      detail: list.slice(0, 12).map((b) => `${new Date(b.start).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" })}  ${b.title}`).join("\n"),
+      link: "https://calendar.google.com/calendar/r/week",
+      undo: { type: "calendar_delete_many", data: { ids } },
+      proof: { level: "confirmed", how: `Google Calendar saved ${ids.length} of ${list.length} and gave each one an ID.${failed ? ` ${failed} didn't save.` : ""}` },
+    });
+  }
+  return { ok: ids.length > 0, added: ids.length, failed, text: firstError };
 });
 // Calendar feeds (any LMS): fetched here, not in the page, so no browser blocks it.
 async function fetchFeed(url: string) {
@@ -1101,6 +1144,9 @@ ipcMain.handle("milo:feedback", async (_e, message: string, kind?: string) => {
   return { ok, text: ok ? "Thanks! Jake will see that." : "I couldn't send that. Check your internet and try again." };
 });
 activity.onUndo("calendar_delete", async (d) => calendarDelete(String(d.id)));
+activity.onUndo("calendar_delete_many", async (d) => {
+  for (const id of (Array.isArray(d.ids) ? d.ids : []) as string[]) await calendarDelete(String(id));
+});
 activity.onUndo("draft_delete", async (d) => gmailDeleteDraft(String(d.draftId)));
 activity.onUndo("memory_forget", async (d) => forget(String(d.fact)));
 activity.onUndo("note_delete", async (d) => forgetLectureNote(String(d.noteId)));
