@@ -61,6 +61,7 @@ import { research } from "./research";
 import { buildTool } from "./builder";
 import { askScreen } from "./brain";
 import { createTray, extensionDirs, firstRunDefaults, loadKeys } from "./appshell";
+import { isPaused, PAUSED_TEXT, pauseState, setPause } from "./pause";
 import { checkForUpdate, installUpdate, startUpdater, startUpdates, updateReady } from "./updater";
 import { Action, askMilo, classify, RouteCtx, makeQuiz, readBrief, setUserName, sweepPlan, watchCheck, ChatMessage, checkAnswer, locateInCrop, nextActions, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
@@ -166,6 +167,7 @@ type Shot = {
 let lastShot: Shot | null = null;
 
 async function captureScreen(): Promise<{ ok: true; shot: Shot } | { ok: false; text: string }> {
+  if (isPaused()) return { ok: false, text: PAUSED_TEXT };
   const display = screen.getPrimaryDisplay();
   const { bounds, workArea, scaleFactor } = display;
 
@@ -402,6 +404,14 @@ export const jobs = {
 ipcMain.handle("milo:job-start", (_e, goal: string, opts?: { approved?: boolean }) => jobs.start(String(goal ?? ""), { approved: !!opts?.approved }));
 ipcMain.handle("milo:job-resume", (_e, approve?: boolean) => jobs.resume(!!approve));
 ipcMain.handle("milo:job-stop", () => jobs.stop());
+// Pause Milo: really stops him (no screen, no listening, nothing running) until it's turned back on.
+ipcMain.handle("milo:pause-get", () => pauseState());
+ipcMain.handle("milo:pause-set", (_e, on: boolean, minutes?: number) =>
+  setPause(!!on, Number(minutes) || 0, () => {
+    jobs.stop();
+    paperStop = true;
+  })
+);
 ipcMain.handle("milo:job-last", () => resumable() ?? lastJob());
 ipcMain.handle("milo:job-is", (_e, text: string) => isJob(String(text ?? "")));
 // The student's saved details (filled into forms for them) and today's AI spend.
@@ -1056,7 +1066,7 @@ ipcMain.handle("milo:open-home", () => void openHome(isDev));
 // typed in Home base -> the frog's command router (one agent); Milo's words come back as echoes
 ipcMain.on("milo:home-route", (_e, text: string) => overlay?.webContents.send("milo:route-text", String(text ?? "").slice(0, 4000)));
 ipcMain.on("milo:home-action", (_e, a: unknown) => overlay?.webContents.send("milo:home-action", a));
-ipcMain.on("milo:home-talk", () => overlay?.webContents.send("milo:talk"));
+ipcMain.on("milo:home-talk", () => !isPaused() && overlay?.webContents.send("milo:talk"));
 ipcMain.on("milo:echo", (_e, kind: string, payload: unknown) => toHome("milo:echo", { kind: String(kind), payload }));
 let gradeCache: { at: number; portal: string; list: { name: string; grade: number | null }[] } | null = null;
 ipcMain.handle("milo:home-grades", async (_e, portal: string, fresh?: boolean) => {
@@ -1398,6 +1408,7 @@ app.whenReady().then(() => {
   // Talk to Milo from anywhere.
   globalShortcut.register("CommandOrControl+Shift+H", () => void openHome(isDev));
   globalShortcut.register("CommandOrControl+Shift+Space", () => {
+    if (isPaused()) return void openHome(isDev);
     overlay?.webContents.send("milo:talk");
   });
   // The magic button: Milo looks at your screen and teaches whatever you're stuck on.

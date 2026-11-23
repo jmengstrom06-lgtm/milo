@@ -113,6 +113,15 @@ contextBridge.exposeInMainWorld("milo", {
   stopTask: () => ipcRenderer.send("milo:task-stop"),
   handsAccess: () => ipcRenderer.invoke("milo:hands-access"),
   perms: () => ipcRenderer.invoke("milo:perms"),
+  pause: {
+    get: () => ipcRenderer.invoke("milo:pause-get"),
+    set: (on: boolean, minutes?: number) => ipcRenderer.invoke("milo:pause-set", on, minutes),
+    onChange: (cb: (s: { on: boolean; since: number | null; until: number | null }) => void) => {
+      const h = (_e: unknown, s: { on: boolean; since: number | null; until: number | null }) => cb(s);
+      ipcRenderer.on("milo:pause", h);
+      return () => ipcRenderer.removeListener("milo:pause", h);
+    },
+  },
   profileGet: () => ipcRenderer.invoke("milo:profile-get"),
   profileSet: (patch: Record<string, string>) => ipcRenderer.invoke("milo:profile-set", patch),
   usage: () => ipcRenderer.invoke("milo:usage"),

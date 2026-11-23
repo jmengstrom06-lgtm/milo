@@ -102,3 +102,70 @@ export function setOutfit(id: FrogOutfit) {
     /* full */
   }
 }
+
+/** Longest run of consecutive days in the list. (pure) */
+export function longestStreak(days: string[]): number {
+  const sorted = Array.from(new Set(days)).sort();
+  let best = 0;
+  let run = 0;
+  let prev: number | null = null;
+  for (const d of sorted) {
+    const t = Date.parse(`${d}T00:00:00Z`);
+    run = prev != null && t - prev === 86400e3 ? run + 1 : 1;
+    best = Math.max(best, run);
+    prev = t;
+  }
+  return best;
+}
+
+export type MomentRow = { id: string; what: string; when: string; at: number; mood: "celebrate" | "happy" | "focus" | "wave" | "write"; kicker: string; big: string; small: string };
+type SavedPlanLike = { key: string; done: number[]; at: number; plan?: { title?: string; course?: string; steps?: unknown[] } };
+
+/** Real moments from this Mac's history, newest first. Nothing made up: if it didn't happen, it isn't here. */
+export function readMoments(): MomentRow[] {
+  const out: MomentRow[] = [];
+  const fmt = (t: number) => new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const plans = read<SavedPlanLike[]>("milo.gameplans", []);
+  for (const p of Array.isArray(plans) ? plans : []) {
+    const n = p.plan?.steps?.length ?? 0;
+    if (n && (p.done?.length ?? 0) >= n) {
+      const title = (p.plan?.title || "an assignment").slice(0, 60);
+      out.push({ id: `plan:${p.key}`, what: `Finished every step of ${title}`, when: `${p.plan?.course ? `${p.plan.course} · ` : ""}${fmt(p.at)}`, at: p.at, mood: "celebrate", kicker: "DONE AND DUSTED", big: `${n} steps. All done.`, small: "Started small, finished strong" });
+    }
+  }
+  const days = read<string[]>("milo.focusDays", []);
+  if (Array.isArray(days) && days.length) {
+    const first = [...days].sort()[0];
+    const at = Date.parse(`${first}T12:00:00Z`);
+    out.push({ id: "first-lockin", what: "Your first lock-in with Milo", when: fmt(at), at, mood: "focus", kicker: "LOCKED IN", big: "First lock-in done.", small: "Phone down, Milo up" });
+    const best = longestStreak(days);
+    if (best >= 3) {
+      const last = Date.parse(`${[...days].sort().slice(-1)[0]}T12:00:00Z`);
+      out.push({ id: "best-streak", what: `Longest streak: ${best} days in a row`, when: "Personal best", at: last, mood: "celebrate", kicker: "STUDY STREAK", big: `${best} days in a row.`, small: "Locked in every single day" });
+    }
+  }
+  const met = Number(localStorage.getItem("milo.home.welcomed") || 0);
+  if (met) out.push({ id: "met", what: "The day you met Milo", when: fmt(met), at: met, mood: "wave", kicker: "DAY ONE", big: "Met my study buddy.", small: "He reads D2L so I don't have to" });
+  return out.sort((a, b) => b.at - a.at);
+}
+
+/** The level Milo has already celebrated. First run: no party for levels you already had. */
+export function levelSeen(current: number): number {
+  const raw = localStorage.getItem("milo.levelSeen");
+  if (raw == null) {
+    try {
+      localStorage.setItem("milo.levelSeen", String(current));
+    } catch {
+      /* full */
+    }
+    return current;
+  }
+  return Number(raw) || 1;
+}
+export function markLevelSeen(level: number) {
+  try {
+    localStorage.setItem("milo.levelSeen", String(level));
+  } catch {
+    /* full */
+  }
+}

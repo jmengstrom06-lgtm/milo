@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { levelOf, streakOf, syncLedger, totalXp, unlocked, XP } from "../src/renderer/home/growth";
+import { levelOf, longestStreak, streakOf, syncLedger, totalXp, unlocked, XP } from "../src/renderer/home/growth";
 
 describe("Milo growth", () => {
   it("counts real studying only, and never loses XP when plans are pruned", () => {
@@ -31,5 +31,11 @@ describe("Milo growth", () => {
     expect(unlocked(1, "beanie")).toBe(false);
     expect(unlocked(3, "headphones")).toBe(true);
     expect(unlocked(4, "scarf")).toBe(false);
+  });
+
+  it("finds the longest streak anywhere in history", () => {
+    expect(longestStreak([])).toBe(0);
+    expect(longestStreak(["2026-11-01", "2026-11-02", "2026-11-05", "2026-11-06", "2026-11-07", "2026-11-07"])).toBe(3);
+    expect(longestStreak(["2026-10-31", "2026-11-01"])).toBe(2);
   });
 });
