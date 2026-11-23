@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 export type Prefs = { notifyAway: boolean; quiet: boolean; quietFrom: number; quietTo: number; noRecord: string[]; okRecord: string[]; autofill: boolean; preflight: boolean }; // preflight: "check this" uses the rubric check (beta); autofill: type answers into worksheets (off = show them, the student types) // noRecord: class ids Milo never listens to; okRecord: classes the student said allow recording
-const DEFAULTS: Prefs = { notifyAway: true, quiet: true, quietFrom: 23, quietTo: 8, noRecord: [], okRecord: [], autofill: false, preflight: true };
+const DEFAULTS: Prefs = { notifyAway: true, quiet: true, quietFrom: 23, quietTo: 8, noRecord: [], okRecord: [], autofill: true, preflight: true };
 const file = () => path.join(app.getPath("userData"), "prefs.json");
 let cache: Prefs | null = null;
 
@@ -48,11 +48,11 @@ export function looksLikeRubric(t: string): boolean {
   return hits >= 3;
 }
 
-/** Safe default: Milo only records a class after the student says it's allowed there. (pure) */
-export function recordDecision(classId: string | null, p: Pick<Prefs, "noRecord" | "okRecord">, confirmed: boolean): "record" | "never" | "ask" {
+/** Milo records whenever the student asks, except in classes they switched off. (pure)
+ *  ("ask" stays in the type for older callers; it's no longer returned.) */
+export function recordDecision(classId: string | null, p: Pick<Prefs, "noRecord" | "okRecord">, _confirmed: boolean): "record" | "never" | "ask" {
   if (classId && p.noRecord.includes(classId)) return "never";
-  if (confirmed || (classId && p.okRecord.includes(classId))) return "record";
-  return "ask";
+  return "record";
 }
 
 /** Is this hour inside quiet hours? Handles ranges that cross midnight (23 to 8). (pure) */

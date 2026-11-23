@@ -60,3 +60,15 @@ describe("check this", () => {
   const c = { inLesson: false, awaitingAnswer: false, pendingAsk: false };
   it.each(["check this", "Milo, check this", "check this before I submit", "check my essay against the rubric", "preflight", "does this meet the rubric"])("%s = checkwork", (t) => expect(parse(t, c).kind).toBe("checkwork"));
 });
+
+describe("worksheets: fill in by default, easy to say 'just show me'", () => {
+  const c = { inLesson: false, awaitingAnswer: false, pendingAsk: false };
+  it.each(["show me the answers", "walk me through this worksheet", "I'll type them in", "don't fill it in, just show me", "tell me all the answers"])("%s = show only", (t) => {
+    const r = parse(t, c);
+    expect(r.kind).toBe("sweep");
+    expect(r).toMatchObject({ show: true });
+  });
+  it("'do this worksheet and fill it in' fills", () => expect(parse("do this whole worksheet and fill it in", c)).toMatchObject({ kind: "sweep", fill: true }));
+  it("plain 'do this worksheet' uses the default", () => expect(parse("do this worksheet", c)).toEqual({ kind: "sweep" }));
+  it("inside a lesson, 'show me the answer' is still the lesson's answer", () => expect(parse("show me the answer", { ...c, inLesson: true }).kind).toBe("show"));
+});

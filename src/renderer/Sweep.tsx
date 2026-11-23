@@ -6,10 +6,11 @@ export type SweepState = {
   status: "scanning" | "working" | "scrolling" | "done" | "stopped" | "error";
   results: { label: string; answer: string; filled: boolean }[];
   message?: string;
+  fill?: boolean; // typing answers in (true) or just showing them (false)
 };
 
 /** Top-center progress bar: what Milo is doing and how far along he is. */
-export function SweepHUD({ s, onStop, hover }: { s: SweepState; onStop: () => void; hover: (on: boolean) => void }) {
+export function SweepHUD({ s, onStop, hover, onFill }: { s: SweepState; onStop: () => void; hover: (on: boolean) => void; onFill?: (fill: boolean) => void }) {
   const total = s.results.length + (s.status === "working" ? s.items.length - s.index : 0);
   const doneCount = s.results.length;
   const cur = s.items[s.index];
@@ -38,6 +39,11 @@ export function SweepHUD({ s, onStop, hover }: { s: SweepState; onStop: () => vo
             <span key={i} className={i < doneCount ? "seg--done" : i === doneCount && s.status === "working" ? "seg--now" : ""} />
           ))}
         </div>
+      )}
+      {onFill && (s.status === "scanning" || s.status === "working" || s.status === "scrolling") && (
+        <button className="hud-stop hud-mode" title={s.fill ? "I'll show each answer and you type it" : "I'll type the answers in for you"} onClick={() => onFill(!s.fill)}>
+          {s.fill ? "Just show me" : "Fill it in"}
+        </button>
       )}
       {(s.status === "scanning" || s.status === "working" || s.status === "scrolling") && (
         <button className="hud-stop" onClick={onStop}>
