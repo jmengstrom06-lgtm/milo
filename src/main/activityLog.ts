@@ -2,7 +2,7 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import fs from "node:fs";
 import path from "node:path";
-import { makeActivity, sayActivity, type ActEntry } from "./activity";
+import { makeActivity, proofOf, sayActivity, type ActEntry } from "./activity";
 import { log as bb } from "./blackbox";
 import { track } from "./telemetry";
 
@@ -39,7 +39,7 @@ export function did(e: Parameters<typeof activity.record>[0]): string {
 }
 
 export function registerActivity() {
-  ipcMain.handle("milo:activity-list", () => activity.list(100).map((e) => ({ ...e, canUndo: activity.canUndo(e) })));
+  ipcMain.handle("milo:activity-list", () => activity.list(100).map((e) => ({ ...e, proof: proofOf(e), canUndo: activity.canUndo(e) })));
   ipcMain.handle("milo:activity-undo", async (_e, id: string) => {
     const r = await activity.undo(String(id));
     bb("activity", "undo", { ok: r.ok });

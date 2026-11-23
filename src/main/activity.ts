@@ -3,6 +3,10 @@
 // The core (makeActivity) is pure: storage and undo handlers are passed in, so it's easy to unit test.
 
 export type ActKind = "calendar" | "email_draft" | "email_sent" | "doc" | "memory" | "job" | "app" | "web" | "classes";
+/** How sure Milo is that it really happened. "confirmed" = the service (Google, macOS) said it worked;
+ *  "checked" = Milo looked at the finished result on screen; "tried" = Milo started but it isn't verified done. */
+export type ProofLevel = "confirmed" | "checked" | "tried";
+export type Proof = { level: ProofLevel; how: string };
 export type UndoSpec = { type: string; data: Record<string, unknown> };
 export type ActEntry = {
   id: string;
@@ -15,6 +19,8 @@ export type ActEntry = {
   noUndo?: string; // why it can't be undone, in plain words
   undone?: number; // when it was undone
   undoError?: string;
+  proof?: Proof; // set it when you know better; otherwise proofOf() works it out from the kind
+  source?: { label: string; url?: string }; // where a fact came from ("Syllabus, p.2")
 };
 export type UndoHandler = (data: Record<string, unknown>) => Promise<void>;
 export type ActStore = { load: () => ActEntry[]; save: (all: ActEntry[]) => void };
@@ -93,6 +99,28 @@ export function makeActivity(store: ActStore, opts: { now?: () => number; onChan
   };
 }
 export type Activity = ReturnType<typeof makeActivity>;
+
+const SERVICE: Partial<Record<ActKind, string>> = {
+  calendar: "Google Calendar saved it and gave it an ID.",
+  email_draft: "Gmail saved the draft.",
+  email_sent: "Gmail accepted and sent it.",
+  doc: "Google Docs created the file.",
+  memory: "Saved on this Mac.",
+  app: "macOS opened it.",
+  classes: "Saved to your class list.",
+};
+
+/** Proof for an entry: what was given, else worked out from what kind of thing it is (pure). Never claims more than it knows. */
+export function proofOf(e: Pick<ActEntry, "kind" | "title" | "proof">): Proof {
+  if (e.proof) return e.proof;
+  if (e.kind === "job") {
+    return /^Did: /.test(e.title)
+      ? { level: "checked", how: "I checked the finished result on screen before calling it done." }
+      : { level: "tried", how: "Not finished. Open it to see where I stopped." };
+  }
+  const svc = SERVICE[e.kind];
+  return svc ? { level: "confirmed", how: svc } : { level: "tried", how: "I did this, but couldn't double-check the result." };
+}
 
 /** One short spoken line for "what did you do?" (pure). */
 export function sayActivity(list: ActEntry[], sinceLabel = "today"): string {

@@ -1722,6 +1722,7 @@ function ApprovalCard({ job, outfit, onYes, onLook, onNo }: { job: MiloJob; outf
   );
 }
 
+const PROOF_LABEL: Record<"confirmed" | "checked" | "tried", string> = { confirmed: "✓ CONFIRMED", checked: "✓ CHECKED", tried: "NOT VERIFIED" };
 const KIND_LABEL: Record<MiloActivity["kind"], string> = {
   calendar: "Calendar",
   email_draft: "Email draft",
@@ -1823,7 +1824,9 @@ function DidPage({
                   <b>{a.title}</b>
                   {a.detail && <em>{a.detail}</em>}
                 </button>
-                <span className={`hb-didstatus ${a.undone ? "" : "ok"}`}>{a.undone ? "UNDONE" : "DONE"}</span>
+                <span className={`hb-didstatus ${a.undone ? "" : (a.proof?.level ?? "ok")}`} title={a.proof?.how}>
+                  {a.undone ? "UNDONE" : PROOF_LABEL[a.proof?.level ?? "confirmed"]}
+                </span>
                 {a.canUndo ? (
                   <button className="hb-mini" onClick={() => void window.milo.activity.undo(a.id)}>
                     Undo
@@ -1858,6 +1861,24 @@ function DidPage({
             <button className="hb-ghost hb-sm" onClick={() => window.milo.openUrl(pick.link!)}>
               Open where it happened
             </button>
+          )}
+          {pick.proof && (
+            <div className={`hb-proofbox ${pick.proof.level}`}>
+              <span className="hb-kicker">{pick.proof.level === "tried" ? "NOT VERIFIED" : "HOW I KNOW IT WORKED"}</span>
+              <p>{pick.proof.how}</p>
+            </div>
+          )}
+          {pick.source && (
+            <div className="hb-proofbox src">
+              <span className="hb-kicker">SOURCE</span>
+              {pick.source.url ? (
+                <button className="hb-link" onClick={() => window.milo.openUrl(pick.source!.url!)}>
+                  {pick.source.label}
+                </button>
+              ) : (
+                <p>{pick.source.label}</p>
+              )}
+            </div>
           )}
           <div className="hb-undobox">
             <span className="hb-kicker hb-purple">WHAT UNDO DOES</span>
