@@ -213,6 +213,9 @@ declare global {
       };
       paper: (request: string, name?: string) => Promise<{ ok: boolean; text: string; url?: string; link?: string; linkLabel?: string; needTopic?: boolean; connect?: boolean }>;
       paperStop: () => Promise<boolean>;
+      suggest: (said: string) => Promise<{ ok: true; seen: string; options: { label: string; say: string }[] } | { ok: false; text: string }>;
+      openDropped: (what: { path?: string; url?: string }) => Promise<{ ok: boolean; text?: string }>;
+      pathForFile: (f: File) => string;
       week: {
         busy: () => Promise<{ ok: boolean; events: { title: string; start: number; end: number }[]; text?: string }>;
         apply: (blocks: { title: string; course: string; start: number; end: number }[]) => Promise<{ ok: boolean; added: number; failed: number; text: string }>;

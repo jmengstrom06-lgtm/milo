@@ -114,6 +114,10 @@ export default function App() {
   const speakingRef = useRef(false);
   speakingRef.current = speaking;
   const [bubble, setBubble] = useState<string | null>(null);
+  // "Handle this": what Milo saw + 2-3 things he can do, as tappable chips by the frog
+  const [offer, setOffer] = useState<{ seen: string; options: { label: string; say: string }[] } | null>(null);
+  // click the frog: the quick menu with the three moves
+  const [menu, setMenu] = useState(false);
 
   const [chatOpen, setChatOpen] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -1250,6 +1254,69 @@ export default function App() {
     if (ears.current?.mode === "always") await ears.current.setMode("off");
   };
   // "Not in this class": stop now and delete everything recorded. No notes. Milo remembers the class.
+  /** "Milo, handle this": look, then offer 2-3 things instead of guessing. Tapping one runs it like a command. */
+  const handleThis = async (said: string) => {
+    setMenu(false);
+    setOffer(null);
+    setMood("looking");
+    say("Let me look.").then(() => undefined);
+    const r = await window.milo.suggest(said || "handle this");
+    setMood("idle");
+    if (!r.ok) {
+      say(r.text || "I couldn't see your screen.").then(() => setBubble(null));
+      return;
+    }
+    if (!r.options.length) {
+      say("I'm not sure what to do with this one. Tell me what you want and I'll do it.").then(() => setBubble(null));
+      return;
+    }
+    setBubble(null);
+    setOffer({ seen: r.seen, options: r.options });
+    bb("offer_shown", { n: r.options.length });
+    say(`${r.seen ? `${r.seen} ` : ""}Want me to ${r.options[0].label.toLowerCase()}?`).then(() => setBubble(null));
+  };
+  const pickOffer = (o: { label: string; say: string }) => {
+    setOffer(null);
+    hover(false);
+    bb("offer_picked", { label: o.label });
+    routeRef.current(o.say, false);
+  };
+  /** Something dragged onto the frog: a file, a link, or some text. */
+  const onDropToMilo = (e: React.DragEvent) => {
+    e.preventDefault();
+    const dt = e.dataTransfer;
+    const file = dt.files?.[0];
+    const url = (dt.getData("text/uri-list") || "").split("\n").find((l) => /^https?:\/\//.test(l.trim()))?.trim();
+    const text = dt.getData("text/plain").trim();
+    bb("drop", { file: !!file, url: !!url, text: !!text && !url });
+    if (file) {
+      const path = window.milo.pathForFile(file);
+      say(`Opening ${file.name}.`).then(() => undefined);
+      void window.milo.openDropped({ path }).then((r) => {
+        if (r.ok) window.setTimeout(() => void handleThis(`handle this file: ${file.name}`), 1800);
+        else void say(r.text || "I couldn't open that.").then(() => setBubble(null));
+      });
+      return;
+    }
+    if (url) {
+      say("Opening it.").then(() => undefined);
+      void window.milo.openDropped({ url }).then(() => window.setTimeout(() => void handleThis("handle this link"), 2500));
+      return;
+    }
+    if (text) {
+      const t = text.slice(0, 600);
+      setOffer({
+        seen: `“${t.slice(0, 60)}${t.length > 60 ? "…" : ""}”`,
+        options: [
+          { label: "Explain it", say: `explain this: ${t}` },
+          { label: "Quiz me on it", say: `quiz me on this: ${t}` },
+          { label: "Add to my notes", say: `add to my notes: ${t}` },
+        ],
+      });
+      say("Got it. What should I do with it?").then(() => setBubble(null));
+    }
+  };
+
   /** The student's answer to "does this class allow recording?" */
   const answerLecAsk = async (allowed: boolean) => {
     const a = lecAsk;
@@ -2662,7 +2729,7 @@ export default function App() {
     const intent = parse(text, { inLesson, awaitingAnswer, pendingAsk: !!pendingTask.current });
     const nb = notebookRef.current;
     // Unmistakable commands run right away. Everything else: the router decides, knowing what's open.
-    const SURE = ["hush", "yes", "no", "resume", "undo", "activity", "feedback", "paper"];
+    const SURE = ["hush", "yes", "no", "resume", "undo", "activity", "feedback", "paper", "week", "home", "handle"];
     const LESSON_SURE = ["close", "goto", "mode", "answer", "show", "copy", "practice", "skip", "repeat", "fill"];
     if (!SURE.includes(intent.kind) && !(inLesson && LESSON_SURE.includes(intent.kind))) {
       setMood("thinking");
@@ -2720,6 +2787,9 @@ export default function App() {
       case "feedback":
         setFeedback(intent.text);
         say(intent.text ? "Got it. Check it and hit send." : "What happened? Type it and I'll send it to Jake.").then(() => setBubble(null));
+        return;
+      case "handle":
+        void handleThis(text);
         return;
       case "week":
         try {
@@ -3965,8 +4035,17 @@ export default function App() {
             return;
           }
           if (lesson) return;
-          chatOpen ? closeChat() : openChat();
+          if (chatOpen) return closeChat();
+          setOffer(null);
+          setMenu((m) => !m);
         }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          hover(true);
+          setMood("looking");
+        }}
+        onDragLeave={() => setMood("idle")}
+        onDrop={onDropToMilo}
         title="Click me · Cmd+Shift+Y = look at my screen"
       >
         {(earState === "hearing" || (earState === "waiting" && ears.current?.mode === "once")) && (
@@ -3991,6 +4070,54 @@ export default function App() {
       </div>
 
       {bubble && <Bubble text={short(bubble)} style={bStyle} />}
+      {menu && !pending && (
+        <div className="qmenu" style={bStyle} role="menu" aria-label="Milo" onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)} onMouseLeave={() => hover(false)}>
+          {(
+            [
+              ["👀", "Handle this", "I look and offer options", () => void handleThis("handle this")],
+              ["🗓️", "What's next?", "Fix my week", () => routeRef.current("what's next", false)],
+              ["✅", "Check this", "Find mistakes in my work", () => routeRef.current("check my work", false)],
+              ["💬", "Chat", "Ask me anything", () => openChat()],
+              ["🏠", "Home base", "Everything in one place", () => void window.milo.home.open()],
+            ] as const
+          ).map(([icon, label, sub, go]) => (
+            <button
+              key={label}
+              role="menuitem"
+              className="qmenu__item"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenu(false);
+                go();
+              }}
+            >
+              <span className="qmenu__icon" aria-hidden="true">
+                {icon}
+              </span>
+              <span>
+                <b>{label}</b>
+                <em>{sub}</em>
+              </span>
+            </button>
+          ))}
+          <div className="qmenu__hint">Or just say “Milo, …”. Drop a file on me too.</div>
+        </div>
+      )}
+      {offer && !menu && !pending && (
+        <div className="offer" style={bStyle} role="dialog" aria-label="What Milo can do" onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)} onMouseLeave={() => hover(false)}>
+          {offer.seen && <div className="offer__seen">{offer.seen}</div>}
+          <div className="offer__row">
+            {offer.options.map((o, i) => (
+              <button key={o.label} className={`offer__chip ${i === 0 ? "offer__chip--best" : ""}`} onClick={() => pickOffer(o)}>
+                {o.label}
+              </button>
+            ))}
+            <button className="offer__x" aria-label="Never mind" onClick={() => (setOffer(null), hover(false))}>
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
       {proof && !pending && (
         <button
           className="proof"

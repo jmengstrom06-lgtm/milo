@@ -1861,3 +1861,21 @@ body,
 .ws-wait { font: 600 13px -apple-system, sans-serif; color: rgba(255,255,255,0.55); }
 .ws-note { margin: 10px 0 0; font: 500 12px/1.4 -apple-system, sans-serif; color: rgba(255,255,255,0.5); text-align: center; }
 @keyframes wsIn { from { opacity: 0; transform: translateY(6px) scale(.98); } to { opacity: 1; transform: none; } }
+
+/* click the frog: quick menu with the three moves */
+.qmenu { position: fixed; z-index: 47; box-sizing: border-box; width: 250px; padding: 6px; background: #fff; border: 2px solid var(--accent); border-radius: 16px; box-shadow: 0 12px 34px rgba(0, 0, 0, 0.28); animation: pop 0.16s ease-out; display: flex; flex-direction: column; gap: 2px; }
+.qmenu__item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 8px; border: 0; border-radius: 10px; background: transparent; text-align: left; cursor: pointer; font-family: inherit; }
+.qmenu__item:hover, .qmenu__item:focus-visible { background: rgba(124, 77, 255, 0.1); outline: none; }
+.qmenu__icon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; background: rgba(124, 77, 255, 0.08); font-size: 15px; }
+.qmenu__item b { display: block; font-size: 13.5px; color: #1f2a44; }
+.qmenu__item em { display: block; font-style: normal; font-size: 11.5px; color: #6b7280; }
+.qmenu__hint { padding: 6px 8px 4px; font-size: 11px; color: #9ca3af; border-top: 1px solid #eef0f4; margin-top: 2px; }
+/* "Handle this": what Milo saw + choices */
+.offer { position: fixed; z-index: 46; box-sizing: border-box; width: 300px; padding: 10px 12px; background: #fff; border: 2px solid var(--accent); border-radius: 14px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25); animation: pop 0.16s ease-out; }
+.offer__seen { font-family: "Caveat", cursive; font-size: 20px; line-height: 1.15; color: #1f2a44; margin-bottom: 8px; }
+.offer__row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.offer__chip { padding: 6px 11px; border-radius: 999px; border: 1.5px solid rgba(124, 77, 255, 0.35); background: #fff; color: #3b2a77; font: 700 12.5px -apple-system, sans-serif; cursor: pointer; }
+.offer__chip:hover { background: rgba(124, 77, 255, 0.08); }
+.offer__chip--best { background: var(--accent); border-color: var(--accent); color: #fff; }
+.offer__chip--best:hover { background: var(--accent); filter: brightness(1.08); }
+.offer__x { margin-left: auto; border: 0; background: transparent; color: #9ca3af; font-size: 14px; cursor: pointer; padding: 4px; }

@@ -24,6 +24,7 @@ export type Intent =
   | { kind: "resume" } // pick up where Milo was interrupted
   | { kind: "chain"; steps: Intent[] } // "open chrome, find a worksheet, and complete it": do in order
   | { kind: "activity" } // "what did you do?": open the timeline
+  | { kind: "handle" } // "handle this", "help with this": look at the screen and offer 2-3 things to do
   | { kind: "week" } // "what's next?", "fix my week": the week planner in Home base
   | { kind: "home" } // "open home", "show my home base": open the Home base window
   | { kind: "undo" } // "undo that": take back the newest thing
@@ -68,6 +69,9 @@ const NOT_RESEARCH = /\b(youtube|amazon|spotify|my (doc|email|gmail|screen|homew
 // Things that mean "use the computer": open apps, click, type into something.
 const TASK =
   /\b(type|typing|click|press|open( up)?|launch|paste|search|google|fill (in|out)|enter (my|the|this|it|in)|go (in|on)to|navigate|scroll|select all)\b|\b(write|put|add) .*\b(in|into|on|inside) (my|the|a|this)\b|\b(in|into|on) (my|the) (google doc|doc|document|notes|word|chrome|safari|browser|email|gmail|claude|chatgpt|search bar|spreadsheet|sheet)\b|\b(go to|pull up|bring up|switch to|take me to|new tab|new window|close (this |the )?tab|next tab|previous tab|go back|go forward|refresh|reload|look up|make a new|create a new|new google|play)\b/;
+
+/** Vague "do something with this" asks: Milo looks and offers choices instead of guessing. */
+export const HANDLE = /^(?:milo,?\s*)?(handle (this|that|it)|help( me)? (with )?(this|that)|what can you do (here|with (this|that))|do something with (this|that)|deal with (this|that)|take care of (this|that)|help me (here|out here)|what (do|should) i do (here|with (this|that)))[\s.!?]*$/;
 
 const SWEEP =
   /\b(do|finish|complete|answer|solve|fill (out|in))\b.*\b(whole|entire|all|every|everything)\b.*\b(worksheet|assignment|homework|page|quiz|questions|problems|them|these|it)?|\b(do|finish|complete|fill out) (this|the|my) (worksheet|assignment|homework|problem set)\b|\bworksheet sweep\b/;
@@ -135,6 +139,7 @@ function parseSingle(raw: string, ctx: Ctx): Intent {
   if (/^(watch me|watch my (work|screen)|keep an eye on (me|my work|this)|watch me work|check my work as i go|watch while i work)\b/.test(t))
     return { kind: "watch", on: true };
   if (WEEK_ASK.test(t)) return { kind: "week" };
+  if (HANDLE.test(t)) return { kind: "handle" };
   if (/^(check (my|this) work|is (this|my work) right|did i (do this|get this) right|any mistakes)\b/.test(t)) return { kind: "checkwork" };
   if (/^(what'?s due|what is due|what do i have (due|to do|today|tomorrow|this week)|daily brief|morning brief|my brief|brief me|what'?s on my plate|anything due)\b/.test(t)) return { kind: "brief" };
   if (/^(quiz me|test me|give me a (quiz|test|practice test)|make (me )?a (quiz|practice test)|study mode|quiz mode)\b/.test(t)) return { kind: "quiz", focus: text };

@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 function on(channel: string, cb: () => void) {
   const listener = () => cb();
@@ -148,6 +148,16 @@ contextBridge.exposeInMainWorld("milo", {
   d2lDue: (portal: string) => ipcRenderer.invoke("milo:d2l-due", portal),
   d2lCheck: (portal: string) => ipcRenderer.invoke("milo:d2l-check", portal),
   classesSync: (portal: string) => ipcRenderer.invoke("milo:classes-sync", portal),
+  suggest: (said: string) => ipcRenderer.invoke("milo:suggest", said),
+  openDropped: (what: { path?: string; url?: string }) => ipcRenderer.invoke("milo:open-dropped", what),
+  /** The real path of a file dropped on the frog (Electron 32+ hides File.path). */
+  pathForFile: (f: File) => {
+    try {
+      return webUtils.getPathForFile(f);
+    } catch {
+      return "";
+    }
+  },
   week: {
     busy: () => ipcRenderer.invoke("milo:week-busy"),
     apply: (blocks: unknown[]) => ipcRenderer.invoke("milo:week-apply", blocks),
