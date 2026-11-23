@@ -1,12 +1,13 @@
 // First run: Milo sets himself up with the student in about a minute.
-// Name -> sign in -> classes -> permissions (live checkmarks) -> D2L -> 3 things to try.
+// Name -> a live demo (Milo fixes a sample week) -> sign in -> classes -> permissions (live checkmarks) -> D2L -> 3 things to try.
 
 import { useEffect, useRef, useState } from "react";
+import WeekShow from "./WeekShow";
 import { ClassesEditor } from "./kit/Classes";
 import type { ClassStore } from "./kit/types";
 
-export type SetupStep = "hi" | "account" | "classes" | "perms" | "d2l" | "done";
-const STEPS: SetupStep[] = ["hi", "account", "classes", "perms", "d2l", "done"];
+export type SetupStep = "hi" | "show" | "account" | "classes" | "perms" | "d2l" | "done";
+const STEPS: SetupStep[] = ["hi", "show", "account", "classes", "perms", "d2l", "done"];
 const KEY = "milo.setupStep";
 
 export const setupDone = () => {
@@ -67,14 +68,15 @@ export default function Onboarding({
     if (said.current.has(step)) return;
     said.current.add(step);
     const lines: Record<SetupStep, string> = {
-      hi: "Hey! I'm Milo. I live on your screen and help you get through school. Let's get you set up. It takes about a minute.",
+      hi: "Hey! I'm Milo. I live on your screen and help you get through school. What should I call you?",
+      show: "",
       account: "First, your account. I'll email you a link.",
       classes: "What classes are you taking? Everything I make gets filed under them.",
       perms: "Now three switches, so I can hear you, see your homework and click for you.",
       d2l: "Last one. Connect D2L and I'll watch your due dates for you.",
       done: `You're all set${name ? `, ${name}` : ""}. Here's what to try first.`,
     };
-    say(lines[step]);
+    if (lines[step]) say(lines[step]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
 
@@ -145,7 +147,7 @@ export default function Onboarding({
         {step === "hi" && (
           <>
             <div className="ob-big">Hey, I'm Milo 👋</div>
-            <p className="ob-sub">Your study buddy that lives on your screen. Let's set you up. It takes about a minute.</p>
+            <p className="ob-sub">Your study buddy that lives on your screen. Tell me your name and I'll show you what I do.</p>
             <label className="ob-label">What should I call you?</label>
             <input className="ob-input" autoFocus value={name} placeholder="Your first name" onChange={(e) => setName(e.target.value.slice(0, 30))} onKeyDown={(e) => e.key === "Enter" && name.trim() && go()} />
             <div className="ob-actions">
@@ -155,6 +157,8 @@ export default function Onboarding({
             </div>
           </>
         )}
+
+        {step === "show" && <WeekShow name={name} say={say} onNext={() => go()} />}
 
         {step === "account" && (
           <>

@@ -8,6 +8,11 @@ import MiloFrog, { type FrogMood, type FrogOutfit } from "./MiloFrog";
 import { levelSeen, markLevelSeen, OUTFITS, readGrowth, readMoments, setOutfit, unlocked, XP } from "./growth";
 import ExamNight from "./ExamNight";
 import ShareSheet, { type Moment } from "./Share";
+import { demoOn, setDemo, withDemo } from "./demo";
+
+// Home base talks to the Mac through M. In demo mode, reads come from a labeled sample student instead.
+const DEMO = demoOn();
+const M: Window["milo"] = DEMO ? withDemo(window.milo) : window.milo;
 
 type Due = { title: string; course: string; due: string; due_iso?: string; kind?: string; url?: string };
 type Klass = { id: string; name: string; code: string; subject: string; color: string };
@@ -105,7 +110,7 @@ const Ico = ({ d, size = 16, w = 1.8 }: { d: JSX.Element; size?: number; w?: num
 );
 
 export default function HomeApp() {
-  const [portal] = useState(() => localStorage.getItem("milo.portal") || "");
+  const [portal] = useState(() => localStorage.getItem("milo.portal") || (DEMO ? "demo.school.edu" : ""));
   const [view, setView] = useState<View>("today");
   const [classId, setClassId] = useState<string | null>(null);
   const [overlay, setOverlay] = useState<null | "cmdk" | "voice">(null);
@@ -155,7 +160,7 @@ export default function HomeApp() {
   // ---------------- data ----------------
   const loadDue = useCallback(async () => {
     if (!portal) return setDueErr("setup");
-    const r = await window.milo.d2lDue(portal).catch(() => null);
+    const r = await M.d2lDue(portal).catch(() => null);
     if (r && r.ok) {
       setDue(r.items);
       setDueErr(null);
@@ -163,15 +168,15 @@ export default function HomeApp() {
   }, [portal]);
   useEffect(() => {
     void loadDue();
-    void window.milo.kit.classes().then((s: { classes?: Klass[] }) => setClasses(s?.classes ?? []));
-    if (portal) void window.milo.home.grades(portal).then(setGrades);
-    void window.milo.activity.list().then((a) => {
+    void M.kit.classes().then((s: { classes?: Klass[] }) => setClasses(s?.classes ?? []));
+    if (portal) void M.home.grades(portal).then(setGrades);
+    void M.activity.list().then((a) => {
       setActs(a);
       seenActs.current = a[0]?.id ?? "";
     });
-    void window.milo.lecture.now().then((l) => l && setLecture({ course: l.course, startedAt: l.startedAt }));
-    void window.milo.google.status().then((g) => setGoogle(g));
-    if (portal) void window.milo.d2lCheck(portal).then((c) => setD2l({ ok: c.ok, via: c.via }));
+    void M.lecture.now().then((l) => l && setLecture({ course: l.course, startedAt: l.startedAt }));
+    void M.google.status().then((g) => setGoogle(g));
+    if (portal) void M.d2lCheck(portal).then((c) => setD2l({ ok: c.ok, via: c.via }));
     const t = window.setInterval(() => setNow(Date.now()), 30e3);
     const on = () => setOnline(true);
     const off = () => setOnline(false);
@@ -189,27 +194,27 @@ export default function HomeApp() {
   // Milo's live work, from the same agent as the frog
   useEffect(() => {
     const offs = [
-      window.milo.activity.onChange(() =>
-        void window.milo.activity.list().then((a) => {
+      M.activity.onChange(() =>
+        void M.activity.list().then((a) => {
           setActs(a);
           const fresh = a.find((x) => x.id !== seenActs.current && x.canUndo && Date.now() - x.at < 20e3);
           if (a[0]) seenActs.current = a[0].id;
           if (fresh) setToast(fresh);
         })
       ),
-      window.milo.onJob((j) => {
+      M.onJob((j) => {
         setJob(j);
         const doing = j.steps.find((s) => s.status === "doing" || s.status === "retrying");
         if (doing) addStep(doing.do.split("\n")[0]);
         if (["done", "needs_you", "stuck", "stopped", "failed"].includes(j.status)) finishSteps(j.status === "done" ? j.summary || "Done" : j.question || j.status);
       }),
-      window.milo.onPaperProgress((p) => {
+      M.onPaperProgress((p) => {
         setPaper(p.stage === "done" || p.stage === "error" ? null : p);
         if (p.stage === "done") finishSteps("Paper finished");
         else if (p.stage !== "error") addStep(p.text);
       }),
-      window.milo.onTaskStep((s) => s.say && addStep(s.say)),
-      window.milo.home.onEcho((e) => {
+      M.onTaskStep((s) => s.say && addStep(s.say)),
+      M.home.onEcho((e) => {
         if (e.kind === "said") {
           const text = String(e.payload ?? "");
           if (text) appendToChat({ role: "milo", text, at: Date.now() });
@@ -228,18 +233,18 @@ export default function HomeApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
-    void window.milo.pause.get().then(setPaused);
-    return window.milo.pause.onChange(setPaused);
+    void M.pause.get().then(setPaused);
+    return M.pause.onChange(setPaused);
   }, []);
   useEffect(() => {
     if (view !== "settings") return;
-    void window.milo.perms().then(setPerms);
-    void window.milo.memories().then(setMems);
-    void window.milo.prefs.get().then(setPrefsState);
-    void window.milo.account().then(setAcct);
+    void M.perms().then(setPerms);
+    void M.memories().then(setMems);
+    void M.prefs.get().then(setPrefsState);
+    void M.account().then(setAcct);
   }, [view]);
-  useEffect(() => window.milo.onAccountChange(() => void window.milo.account().then(setAcct)), []);
-  const setPref = (p: Partial<MiloPrefs>) => void window.milo.prefs.set(p).then(setPrefsState);
+  useEffect(() => M.onAccountChange(() => void M.account().then(setAcct)), []);
+  const setPref = (p: Partial<MiloPrefs>) => void M.prefs.set(p).then(setPrefsState);
   useEffect(() => {
     if (!toast) return;
     const t = window.setTimeout(() => setToast(null), 7000);
@@ -298,7 +303,7 @@ export default function HomeApp() {
     setOverlay(null);
     appendToChat({ role: "user", text, at: Date.now() });
     setSteps([]);
-    window.milo.home.route(text);
+    M.home.route(text);
   };
   const newChat = () => {
     setChatId(null);
@@ -372,8 +377,8 @@ export default function HomeApp() {
   useEffect(() => {
     if (!exam) return;
     const first = exam.course.split(" ")[0];
-    void window.milo.kit.notes().then((n) => setExamNotes(n.filter((x) => x.course === exam.course || x.course.startsWith(first))));
-    if (examCls) void window.milo.lib.list({ classId: examCls.id, app: "study" }).then((l) => setExamSets(l.length));
+    void M.kit.notes().then((n) => setExamNotes(n.filter((x) => x.course === exam.course || x.course.startsWith(first))));
+    if (examCls) void M.lib.list({ classId: examCls.id, app: "study" }).then((l) => setExamSets(l.length));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exam?.title, examCls?.id]);
   const laterDue = (due ?? []).filter((d) => d.due_iso && new Date(d.due_iso).getTime() >= now + 7 * DAY).sort((a, b) => (a.due_iso ?? "").localeCompare(b.due_iso ?? "")).slice(0, 3);
@@ -436,17 +441,17 @@ export default function HomeApp() {
     chatIdRef.current = null;
     appendToChat({ role: "user", text: kind === "together" ? `Start ${next.title} with me` : `Do ${next.title} for me`, at: Date.now() });
     setSteps([]);
-    window.milo.home.action({ kind, item: { title: next.title, course: next.course, due: next.due } });
+    M.home.action({ kind, item: { title: next.title, course: next.course, due: next.due } });
   };
   const stopAll = () => {
-    window.milo.stopTask();
-    void window.milo.jobStop();
-    void window.milo.paperStop();
+    M.stopTask();
+    void M.jobStop();
+    void M.paperStop();
   };
   const openVoice = () => {
     setVoiceLines([]);
     setOverlay("voice");
-    window.milo.home.talk();
+    M.home.talk();
   };
 
   // ---------------- render ----------------
@@ -563,6 +568,14 @@ export default function HomeApp() {
         </header>
 
         <div className="hb-scroll">
+          {DEMO && (
+            <div className="hb-demobar" role="status">
+              <b>DEMO</b> Sample student, fake classes. Nothing real is read or changed.
+              <button className="hb-link" onClick={() => setDemo(false)}>
+                Exit demo
+              </button>
+            </div>
+          )}
           {/* ================= TODAY ================= */}
           {view === "today" && exam && !showAll && !paused?.on && (
             <div className="hb-page">
@@ -609,7 +622,7 @@ export default function HomeApp() {
                     <b>Milo is paused{paused.until ? ` until ${new Date(paused.until).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}` : ""}</b>
                     <span>He isn't looking at your screen, listening, or running anything. Your stuff below is just what D2L already said.</span>
                   </div>
-                  <button className="hb-primary hb-sm" onClick={() => void window.milo.pause.set(false).then(setPaused)}>
+                  <button className="hb-primary hb-sm" onClick={() => void M.pause.set(false).then(setPaused)}>
                     Turn Milo back on
                   </button>
                 </section>
@@ -637,7 +650,7 @@ export default function HomeApp() {
                     className="hb-primary hb-sm"
                     onClick={() =>
                       portal
-                        ? (window.milo.openUrl(portal.startsWith("http") ? portal : `https://${portal}`), window.setTimeout(() => void loadDue(), 45e3))
+                        ? (M.openUrl(portal.startsWith("http") ? portal : `https://${portal}`), window.setTimeout(() => void loadDue(), 45e3))
                         : send("Help me connect my school's D2L")
                     }
                   >
@@ -775,7 +788,7 @@ export default function HomeApp() {
                       <i style={{ width: "100%", background: "#3DD68C" }} />
                     </span>
                     {lastDone.link ? (
-                      <button className="hb-mini" onClick={() => window.milo.openUrl(lastDone.link!)}>
+                      <button className="hb-mini" onClick={() => M.openUrl(lastDone.link!)}>
                         Open
                       </button>
                     ) : (
@@ -979,7 +992,7 @@ export default function HomeApp() {
                     </button>
                   </div>
                   {paper?.url && (
-                    <button className="hb-ghost hb-sm" onClick={() => window.milo.openUrl(paper.url!)}>
+                    <button className="hb-ghost hb-sm" onClick={() => M.openUrl(paper.url!)}>
                       Open the Google Doc
                     </button>
                   )}
@@ -1141,7 +1154,7 @@ export default function HomeApp() {
                   </span>
                   {!paused?.on && (
                     <div className="hb-row">
-                      <button className="hb-ghost hb-sm" onClick={() => void window.milo.pause.set(true, 60).then(setPaused)}>
+                      <button className="hb-ghost hb-sm" onClick={() => void M.pause.set(true, 60).then(setPaused)}>
                         Pause 1 hour
                       </button>
                       <button
@@ -1150,7 +1163,7 @@ export default function HomeApp() {
                           const t = new Date();
                           t.setDate(t.getDate() + 1);
                           t.setHours(8, 0, 0, 0);
-                          void window.milo.pause.set(true, Math.round((t.getTime() - Date.now()) / 60e3)).then(setPaused);
+                          void M.pause.set(true, Math.round((t.getTime() - Date.now()) / 60e3)).then(setPaused);
                         }}
                       >
                         Until tomorrow 8 AM
@@ -1163,10 +1176,22 @@ export default function HomeApp() {
                   aria-checked={!!paused?.on}
                   aria-label="Pause Milo"
                   className={`hb-switch hb-switch-warn ${paused?.on ? "on" : ""}`}
-                  onClick={() => void window.milo.pause.set(!paused?.on).then(setPaused)}
+                  onClick={() => void M.pause.set(!paused?.on).then(setPaused)}
                 >
                   <i aria-hidden="true" />
                 </button>
+              </section>
+
+              <section className="hb-card" aria-label="Demo mode">
+                <div className="hb-set">
+                  <div>
+                    <b>Demo mode</b>
+                    <span>Show Home base with a sample student's week. Good for showing friends or filming Milo without your real classes on screen.</span>
+                  </div>
+                  <button role="switch" aria-checked={DEMO} aria-label="Demo mode" className={`hb-switch ${DEMO ? "on" : ""}`} onClick={() => setDemo(!DEMO)}>
+                    <i aria-hidden="true" />
+                  </button>
+                </div>
               </section>
 
               <section className="hb-card" aria-label="What Milo can see and do">
@@ -1191,7 +1216,7 @@ export default function HomeApp() {
                       <span>{why}</span>
                     </div>
                     {on === false && (
-                      <button className="hb-ghost hb-sm" onClick={() => void window.milo.permAsk(kind).then(() => window.milo.perms().then(setPerms))}>
+                      <button className="hb-ghost hb-sm" onClick={() => void M.permAsk(kind).then(() => M.perms().then(setPerms))}>
                         Turn on
                       </button>
                     )}
@@ -1236,7 +1261,7 @@ export default function HomeApp() {
                       className="hb-ghost hb-sm"
                       onClick={() => {
                         if (!portal) return send("Help me connect my school's D2L");
-                        void window.milo.d2lCheck(portal).then((c) => setD2l({ ok: c.ok, via: c.via }));
+                        void M.d2lCheck(portal).then((c) => setD2l({ ok: c.ok, via: c.via }));
                         void loadDue();
                       }}
                     >
@@ -1272,13 +1297,13 @@ export default function HomeApp() {
                     <button
                       className="hb-ghost hb-sm"
                       onClick={() => {
-                        if (window.confirm("Disconnect Google? Milo won't see your calendar, Gmail or Docs until you connect again.")) void window.milo.googleDisconnect().then(setGoogle);
+                        if (window.confirm("Disconnect Google? Milo won't see your calendar, Gmail or Docs until you connect again.")) void M.googleDisconnect().then(setGoogle);
                       }}
                     >
                       Disconnect
                     </button>
                   ) : (
-                    <button className="hb-ghost hb-sm" onClick={() => void window.milo.google.connect().then(() => window.milo.google.status().then(setGoogle))}>
+                    <button className="hb-ghost hb-sm" onClick={() => void M.google.connect().then(() => M.google.status().then(setGoogle))}>
                       Connect
                     </button>
                   )}
@@ -1375,7 +1400,7 @@ export default function HomeApp() {
                       </b>
                       <span>Signed in. Your memory, classes and plans sync across your Macs.</span>
                     </div>
-                    <button className="hb-ghost hb-sm" onClick={() => void window.milo.accountSignOut().then(setAcct)}>
+                    <button className="hb-ghost hb-sm" onClick={() => void M.accountSignOut().then(setAcct)}>
                       Sign out
                     </button>
                   </div>
@@ -1388,13 +1413,13 @@ export default function HomeApp() {
                       if (acctStep === "email") {
                         const em = acctEmail.trim();
                         if (!/^\S+@\S+\.\S+$/.test(em)) return setAcctMsg("That doesn't look like an email.");
-                        void window.milo.accountSend(em).then((r) => (r.ok ? (setAcctStep("code"), setAcctMsg(`Code sent to ${em}.`)) : setAcctMsg(r.text)));
+                        void M.accountSend(em).then((r) => (r.ok ? (setAcctStep("code"), setAcctMsg(`Code sent to ${em}.`)) : setAcctMsg(r.text)));
                       } else {
-                        void window.milo.accountVerify(acctEmail.trim(), acctCode.trim()).then((r) => {
+                        void M.accountVerify(acctEmail.trim(), acctCode.trim()).then((r) => {
                           if (!r.ok) return setAcctMsg(r.text);
                           setAcctStep("email");
                           setAcctCode("");
-                          void window.milo.account().then(setAcct);
+                          void M.account().then(setAcct);
                         });
                       }
                     }}
@@ -1450,7 +1475,7 @@ export default function HomeApp() {
                   <button
                     className="hb-link hb-danger"
                     onClick={() => {
-                      if (window.confirm("Make Milo forget everything he's learned about you? Your classes and files stay. This can't be undone.")) void window.milo.forgetAll().then(() => setMems([]));
+                      if (window.confirm("Make Milo forget everything he's learned about you? Your classes and files stay. This can't be undone.")) void M.forgetAll().then(() => setMems([]));
                     }}
                   >
                     Forget everything
@@ -1470,7 +1495,7 @@ export default function HomeApp() {
                     e.preventDefault();
                     const f = teach.trim();
                     if (!f) return;
-                    void window.milo.remember(f).then(() => window.milo.memories().then(setMems));
+                    void M.remember(f).then(() => M.memories().then(setMems));
                     setTeach("");
                   }}
                 >
@@ -1620,9 +1645,9 @@ export default function HomeApp() {
           key={`${job.id}:${job.question}`}
           job={job}
           outfit={outfit}
-          onYes={() => void window.milo.jobResume(true).then((j) => j && setJob(j))}
+          onYes={() => void M.jobResume(true).then((j) => j && setJob(j))}
           onLook={() => setView("chat")}
-          onNo={() => void window.milo.jobStop().then(() => setJob((j) => (j ? { ...j, status: "stopped" } : j)))}
+          onNo={() => void M.jobStop().then(() => setJob((j) => (j ? { ...j, status: "stopped" } : j)))}
         />
       )}
 
@@ -1633,7 +1658,7 @@ export default function HomeApp() {
           <span>{toast.title}</span>
           <button
             onClick={() => {
-              void window.milo.activity.undo(toast.id);
+              void M.activity.undo(toast.id);
               setToast(null);
             }}
           >
@@ -1681,7 +1706,7 @@ export default function HomeApp() {
             {!voiceLines.length && <p className="you">Say anything. “What's due this week?”</p>}
           </div>
           <div className="hb-row">
-            <button className="hb-ghost" onClick={() => window.milo.home.talk()}>
+            <button className="hb-ghost" onClick={() => M.home.talk()}>
               Talk again
             </button>
             <button className="hb-ghost" onClick={() => setOverlay(null)}>
@@ -1848,7 +1873,7 @@ function DidPage({
                   {a.undone ? "UNDONE" : PROOF_LABEL[a.proof?.level ?? "confirmed"]}
                 </span>
                 {a.canUndo ? (
-                  <button className="hb-mini" onClick={() => void window.milo.activity.undo(a.id)}>
+                  <button className="hb-mini" onClick={() => void M.activity.undo(a.id)}>
                     Undo
                   </button>
                 ) : (
@@ -1878,7 +1903,7 @@ function DidPage({
           <h2>{pick.title}</h2>
           {pick.detail && <p>{pick.detail}</p>}
           {pick.link && (
-            <button className="hb-ghost hb-sm" onClick={() => window.milo.openUrl(pick.link!)}>
+            <button className="hb-ghost hb-sm" onClick={() => M.openUrl(pick.link!)}>
               Open where it happened
             </button>
           )}
@@ -1892,7 +1917,7 @@ function DidPage({
             <div className="hb-proofbox src">
               <span className="hb-kicker">SOURCE</span>
               {pick.source.url ? (
-                <button className="hb-link" onClick={() => window.milo.openUrl(pick.source!.url!)}>
+                <button className="hb-link" onClick={() => M.openUrl(pick.source!.url!)}>
                   {pick.source.label}
                 </button>
               ) : (
@@ -1912,7 +1937,7 @@ function DidPage({
             {pick.undoError && <p className="hb-err">Last undo didn't work: {pick.undoError}</p>}
           </div>
           {pick.canUndo && (
-            <button className="hb-ghost" onClick={() => void window.milo.activity.undo(pick.id)}>
+            <button className="hb-ghost" onClick={() => void M.activity.undo(pick.id)}>
               Undo this
             </button>
           )}
@@ -1948,12 +1973,12 @@ function ActList({ acts, title, onAll }: { acts: MiloActivity[]; title: string; 
             </em>
           </div>
           {a.link && !a.undone && (
-            <button className="hb-mini" onClick={() => window.milo.openUrl(a.link!)}>
+            <button className="hb-mini" onClick={() => M.openUrl(a.link!)}>
               Open
             </button>
           )}
           {a.canUndo && (
-            <button className="hb-mini" onClick={() => void window.milo.activity.undo(a.id)}>
+            <button className="hb-mini" onClick={() => void M.activity.undo(a.id)}>
               Undo
             </button>
           )}
@@ -1968,8 +1993,8 @@ function ClassPage({ cls, grade, due, chats, onAsk, onChat }: { cls: Klass; grad
   const [notes, setNotes] = useState<{ id: string; title: string; updated: number }[]>([]);
   const [sets, setSets] = useState<{ id: string; title: string; data: unknown }[]>([]);
   useEffect(() => {
-    void window.milo.kit.notes().then((n) => setNotes(n.filter((x) => x.course === cls.name || x.course.startsWith(cls.name.split(" ")[0])).slice(0, 6)));
-    void window.milo.lib.list({ classId: cls.id, app: "study" }).then((l) => setSets(l.slice(0, 6) as { id: string; title: string; data: unknown }[]));
+    void M.kit.notes().then((n) => setNotes(n.filter((x) => x.course === cls.name || x.course.startsWith(cls.name.split(" ")[0])).slice(0, 6)));
+    void M.lib.list({ classId: cls.id, app: "study" }).then((l) => setSets(l.slice(0, 6) as { id: string; title: string; data: unknown }[]));
   }, [cls.id, cls.name]);
   const cards = (d: unknown) => ((d as { items?: unknown[] })?.items?.length ?? 0);
   return (
