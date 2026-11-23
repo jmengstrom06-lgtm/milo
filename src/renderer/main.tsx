@@ -17,7 +17,15 @@ window.addEventListener("unhandledrejection", (ev) => report(ev.reason));
 const root = createRoot(document.getElementById("root")!);
 // One codebase, two windows: the frog's see-through overlay, and Home base (#home).
 if (location.hash === "#home") {
-  void Promise.all([import("./home/HomeApp"), import("./home/home.css")]).then(([m]) =>
+  void Promise.all([
+    import("./home/HomeApp"),
+    import("@fontsource/plus-jakarta-sans/400.css"),
+    import("@fontsource/plus-jakarta-sans/500.css"),
+    import("@fontsource/plus-jakarta-sans/600.css"),
+    import("@fontsource/plus-jakarta-sans/700.css"),
+    import("@fontsource/plus-jakarta-sans/800.css"),
+    import("./home/home.css"),
+  ]).then(([m]) =>
     root.render(
       <React.StrictMode>
         <m.default />
