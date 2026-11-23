@@ -59,7 +59,7 @@ import { activateApp, click, ensureBrowser, resolveApp, frontApp, isRunning, ope
 import { plan } from "./quick";
 import { research } from "./research";
 import { buildTool } from "./builder";
-import { askScreen } from "./brain";
+import { askScreen , suggestActions } from "./brain";
 import { createTray, extensionDirs, firstRunDefaults, loadKeys } from "./appshell";
 import { isPaused, PAUSED_TEXT, pauseState, setPause } from "./pause";
 import { prefs, setPrefs, type Prefs } from "./prefs";
@@ -1028,6 +1028,27 @@ ipcMain.handle("milo:watch-check", async (_e, force: boolean) => {
   return { ok: true, changed: true, mistake: r.data.found_mistake && (r.data.confidence ?? 0) >= 0.75 && !!box, box, hint: r.data.hint };
 });
 ipcMain.on("milo:watch-reset", () => (lastThumb = null));
+/** "Milo, handle this": look at the screen and offer 2-3 things to do. */
+ipcMain.handle("milo:suggest", async (_e, said: string) => {
+  const cap = await captureScreen();
+  if (!cap.ok) return cap;
+  const small = toJpeg(cap.shot.full, 1280);
+  const r = await suggestActions(small.b64, small.size, String(said ?? "").slice(0, 200));
+  track("suggest", { ok: r.ok, n: r.ok ? r.data.options.length : 0 });
+  return r.ok ? { ok: true, seen: r.data.seen, options: r.data.options } : r;
+});
+/** Something dropped on the frog: open it so Milo can see it (files from Finder, links). */
+ipcMain.handle("milo:open-dropped", async (_e, what: { path?: string; url?: string }) => {
+  if (what?.url && /^https?:\/\//i.test(what.url)) {
+    await shell.openExternal(what.url);
+    return { ok: true };
+  }
+  if (what?.path && typeof what.path === "string") {
+    const err = await shell.openPath(what.path);
+    return err ? { ok: false, text: err } : { ok: true };
+  }
+  return { ok: false, text: "I couldn't open that." };
+});
 
 // ---------- quiz -----------------------------------------------------------------------------
 ipcMain.handle("milo:quiz", async (_e, focus: string) => {

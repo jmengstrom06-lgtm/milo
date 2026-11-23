@@ -49,3 +49,9 @@ describe("go words never eat the meaning", () => {
   it("lecture's over stays", () => expect(stripGo("the lecture's over")).toBe("the lecture's over"));
   it("radio-style over still goes", () => expect(stripGo("open chrome over")).toBe("open chrome"));
 });
+
+describe("handle this", () => {
+  const c = { inLesson: false, awaitingAnswer: false, pendingAsk: false };
+  it.each(["handle this", "Milo, handle this", "help me with this", "help with this", "what can you do here", "take care of this", "what do I do here"])("%s = handle", (t) => expect(parse(t, c).kind).toBe("handle"));
+  it.each(["help me with my stats homework", "handle this email to my professor by saying no"])("%s is specific, not handle", (t) => expect(parse(t, c).kind).not.toBe("handle"));
+});

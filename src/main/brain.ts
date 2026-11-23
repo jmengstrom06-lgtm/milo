@@ -994,3 +994,75 @@ The student asked a question about what's on their screen right now. Answer it f
 // Shared with the kit (kit.ts).
 export { callTool, callClaude, persona };
 export type { ApiOk, ApiErr };
+
+// ---------------------------------------------------------------------------
+// "Milo, handle this": a vague ask. Look at the screen and offer 2-3 concrete things Milo can do,
+// as tappable chips. Each chip's `say` is a normal command, so tapping it runs the usual flow.
+export type Suggestion = { seen: string; options: { label: string; say: string }[] };
+const SUGGEST_TOOL = {
+  name: "suggest",
+  description: "What is on screen, and the 2-3 most useful things Milo could do with it right now.",
+  input_schema: {
+    type: "object",
+    properties: {
+      seen: { type: "string", description: "Under 12 words, what's on screen. 'A stats problem set on D2L, question 4 of 12.'" },
+      options: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            label: { type: "string", description: "Button text, 2-6 words, starts with a verb. 'Make a game plan'" },
+            say: { type: "string", description: "The command Milo runs, in the student's words, using the phrasings listed." },
+          },
+          required: ["label", "say"],
+        },
+      },
+    },
+    required: ["seen", "options"],
+  },
+};
+export async function suggestActions(jpegBase64: string, size: { width: number; height: number }, said: string): Promise<ApiOk<Suggestion> | ApiErr> {
+  const r = await callTool<Suggestion>(
+    {
+      model: models.fast(),
+      max_tokens: 500,
+      system: `${persona()}
+The student pointed Milo at their screen with a vague ask ("${said.slice(0, 120)}"). Offer the 2 or 3 most useful things Milo can actually do with what's on screen, best first.
+Use ONLY these command phrasings for "say" (fill in the brackets):
+- "start this" (an assignment/problem set: game plan + first step)
+- "explain this" (teach the concept on screen step by step)
+- "quiz me on this" (practice quiz from slides, notes, a reading)
+- "check my work" (look for mistakes in work the student wrote)
+- "make flashcards on this"
+- "summarize this" (a reading, article, PDF)
+- "what's next" (planning, deadlines, calendar, a list of due dates)
+- "add [event] to my calendar on [day and time]" (an event, date or deadline that isn't on their calendar)
+- "write an email to [person] about [topic]" (an email or message that needs a reply)
+- "research [topic]"
+Never offer to do graded work for them, submit anything, or buy anything. Match the screen: an essay draft -> check my work; lecture slides -> quiz me / flashcards; an email -> reply.`,
+      tools: [SUGGEST_TOOL],
+      tool_choice: { type: "tool", name: SUGGEST_TOOL.name },
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: jpegBase64 } },
+            { type: "text", text: `Screenshot is ${size.width}x${size.height}. What are the best 2-3 things to offer?` },
+          ],
+        },
+      ],
+    },
+    SUGGEST_TOOL.name
+  );
+  if (!r.ok) return r;
+  return { ok: true, data: { seen: String(r.data.seen ?? "").slice(0, 120), options: cleanOptions(r.data.options) } };
+}
+/** Keep 1-3 options with real text; drop anything that would do graded work or submit/buy. (pure) */
+export function cleanOptions(opts: unknown): { label: string; say: string }[] {
+  if (!Array.isArray(opts)) return [];
+  return opts
+    .filter((o): o is { label: string; say: string } => !!o && typeof o.label === "string" && typeof o.say === "string" && !!o.label.trim() && !!o.say.trim())
+    .filter((o) => !/\b(submit|turn (it )?in|buy|purchase|pay|do (the|this|my) (whole )?(worksheet|assignment|homework|quiz|test|exam))\b/i.test(`${o.label} ${o.say}`))
+    .map((o) => ({ label: o.label.trim().slice(0, 40), say: o.say.trim().slice(0, 200) }))
+    .slice(0, 3);
+}
