@@ -1266,6 +1266,40 @@ export default function HomeApp() {
                 </div>
               </section>
 
+              <section className="hb-card" aria-label="Lecture listener">
+                <div className="hb-cardhead">
+                  <span className="hb-kicker">LECTURE LISTENER</span>
+                  <span className="hb-muted">say “Milo, listen to class”</span>
+                </div>
+                {classes.map((c) => {
+                  const on = !(prefs?.noRecord ?? []).includes(c.id);
+                  return (
+                    <div className="hb-set" key={c.id}>
+                      <div>
+                        <b>
+                          <i className="hb-dot" style={{ background: dotFor(c) }} aria-hidden="true" />
+                          {c.name}
+                        </b>
+                        <span>{on ? "Milo can take notes in this class" : "Milo never listens in this class"}</span>
+                      </div>
+                      <button
+                        role="switch"
+                        aria-checked={on}
+                        aria-label={`Lecture notes in ${c.name}`}
+                        className={`hb-switch ${on ? "on" : ""}`}
+                        onClick={() => setPref({ noRecord: on ? [...(prefs?.noRecord ?? []), c.id] : (prefs?.noRecord ?? []).filter((x) => x !== c.id) })}
+                      >
+                        <i aria-hidden="true" />
+                      </button>
+                    </div>
+                  );
+                })}
+                {!classes.length && <p className="hb-muted">Your classes show up here once D2L is connected.</p>}
+                <p className="hb-muted hb-promiseline">
+                  Some professors don't allow recording, so check each syllabus. In class, tap “Not in this class” on the listening badge to delete the recording on the spot. Audio is deleted once your notes are made.
+                </p>
+              </section>
+
               <section className="hb-card" aria-label="Notifications">
                 <div className="hb-cardhead">
                   <span className="hb-kicker">NOTIFICATIONS</span>

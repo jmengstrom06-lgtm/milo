@@ -36,7 +36,7 @@ import { calendarAdd, calendarDelete, calendarUpcoming, docsCreate, GoogleNotCon
 import { activity, did, registerActivity } from "./activityLog";
 import { writePaper } from "./paper";
 import { homeWin, openHome, toHome } from "./home";
-import { addChunk, fileLecture, finishLecture, finishLeftovers, forgetLectureNote, lectureNow, startLecture } from "./lecture";
+import { addChunk, discardLecture, fileLecture, finishLecture, finishLeftovers, forgetLectureNote, lectureNow, startLecture } from "./lecture";
 import { classFor, COLORS, loadClasses, saveClasses, SUBJECT_WORDS, type Klass } from "./classes";
 import { mergeD2l } from "./classSync";
 import { parsePaperAsk } from "./paperFormat";
@@ -1129,8 +1129,17 @@ ipcMain.handle("milo:classes-sync", async (_e, portal: string) => {
 ipcMain.handle("milo:lecture-file", (_e, lectureId: string, said: string) => fileLecture(String(lectureId), String(said ?? "")));
 ipcMain.handle("milo:lecture-start", async (_e, said: string) => {
   const m = await startLecture(String(said ?? ""));
+  if ("blocked" in m) {
+    track("lecture_blocked", { why: m.blocked });
+    return { id: "", course: m.course, startedAt: 0, blocked: m.blocked };
+  }
   track("lecture_start", { course: !!m.course });
   return { id: m.id, course: m.course, startedAt: m.startedAt };
+});
+ipcMain.handle("milo:lecture-discard", () => {
+  const r = discardLecture();
+  if (r.ok) track("lecture_discarded", { remembered: r.remembered });
+  return r;
 });
 ipcMain.handle("milo:lecture-chunk", (_e, id: string, n: number, wav: ArrayBuffer) => addChunk(String(id), Number(n), wav));
 ipcMain.handle("milo:lecture-now", () => lectureNow());
