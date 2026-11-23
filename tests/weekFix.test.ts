@@ -63,3 +63,15 @@ describe("fixWeek edge cases", () => {
     expect(r.problems.some((p) => p.kind === "tight")).toBe(true);
   });
 });
+
+import { toItems } from "../src/renderer/home/WeekPanel";
+describe("D2L items → week items", () => {
+  it("keeps only items with a real due date and marks exams", () => {
+    const r = toItems([
+      { title: "Midterm", course: "Bio", due: "Thu", due_iso: "2026-11-26T15:00:00Z", kind: "exam" },
+      { title: "No date", course: "Bio", due: "?" },
+    ]);
+    expect(r).toHaveLength(1);
+    expect(r[0].kind).toBe("exam");
+  });
+});

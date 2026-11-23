@@ -213,6 +213,10 @@ declare global {
       };
       paper: (request: string, name?: string) => Promise<{ ok: boolean; text: string; url?: string; link?: string; linkLabel?: string; needTopic?: boolean; connect?: boolean }>;
       paperStop: () => Promise<boolean>;
+      week: {
+        busy: () => Promise<{ ok: boolean; events: { title: string; start: number; end: number }[]; text?: string }>;
+        apply: (blocks: { title: string; course: string; start: number; end: number }[]) => Promise<{ ok: boolean; added: number; failed: number; text: string }>;
+      };
       onPaperProgress: (fn: (p: { stage: string; text: string; url?: string; step?: number; of?: number }) => void) => () => void;
       d2lFeedUrl: (portal: string) => Promise<string | null>;
       d2lSubscribeUrl: (portal: string) => Promise<string | null>;

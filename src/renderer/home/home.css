@@ -456,6 +456,29 @@ kbd { font-family: var(--mono); font-weight: 600; font-size: 11px; color: var(--
 .hb-signin p { margin: 0; }
 
 /* demo mode strip */
-.hb-demobar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 8px 14px; border-radius: 12px; background: rgba(139, 92, 246, 0.14); border: 1px solid rgba(139, 92, 246, 0.4); font-size: 13px; color: var(--text, #eee); }
+.hb-demobar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 8px 14px; border-radius: 12px; background: #1d1631; border: 1px solid rgba(139, 92, 246, 0.4); font-size: 13px; color: var(--text, #eee); }
 .hb-demobar b { padding: 2px 8px; border-radius: 999px; background: #8b5cf6; color: #fff; font-size: 11px; letter-spacing: 0.06em; }
 .hb-demobar .hb-link { margin-left: auto; }
+
+/* "What's next?" week planner */
+.hb-wkp { border-color: rgba(139, 92, 246, 0.45); box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.06); }
+.hb-wkhead { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+.hb-wkhead h2 { margin: 0; font-size: 18px; line-height: 1.35; font-weight: 700; }
+.hb-wkhead p { margin: 4px 0 0; }
+.hb-wkprobs { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.hb-wkprob { padding: 8px 12px; border-radius: 10px; font-size: 13px; background: rgba(242, 85, 90, 0.08); border: 1px solid rgba(242, 85, 90, 0.3); color: #ffc2c4; }
+.hb-wkprob.tight { background: rgba(224, 164, 88, 0.08); border-color: rgba(224, 164, 88, 0.3); color: #f3d3a6; }
+.hb-wkprob.early { background: rgba(143, 163, 232, 0.08); border-color: rgba(143, 163, 232, 0.3); color: #c9d3f6; }
+.hb-wkday { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.hb-wkday > .hb-kicker { margin: 4px 0 2px; }
+.hb-wkblock { display: grid; grid-template-columns: 18px 92px minmax(0, 1fr); align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(61, 214, 140, 0.04); cursor: pointer; transition: opacity 0.15s, background 0.15s; }
+.hb-wkblock:hover { background: rgba(61, 214, 140, 0.08); }
+.hb-wkblock.off { opacity: 0.45; background: transparent; }
+.hb-wkblock input { accent-color: var(--purple); width: 15px; height: 15px; }
+.hb-wktime { font-weight: 700; font-size: 13px; display: flex; flex-direction: column; }
+.hb-wktime em, .hb-wktitle em { font-style: normal; font-weight: 500; font-size: 11.5px; color: var(--muted); }
+.hb-wktitle { display: flex; flex-direction: column; min-width: 0; }
+.hb-wktitle b { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hb-wkact { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 6px; padding-top: 12px; border-top: 1px solid var(--line); }
+.hb-wkdone h2 { font-size: 22px; }
+.hb-wkproof { font-size: 12.5px; color: var(--ok); }

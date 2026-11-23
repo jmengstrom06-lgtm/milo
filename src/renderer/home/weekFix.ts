@@ -165,3 +165,6 @@ export function sampleWeek(now: number): { items: WItem[]; events: WEvent[] } {
     ],
   };
 }
+
+/** "What's next?", "fix my week", "I'm behind": open the week planner instead of chatting. */
+export const WEEK_ASK = /^(milo,?\s*)?(what'?s next( for me| this week)?|what should i (do|work on)( next| now)?|(fix|plan|organize|sort out) my week|get my week under control|i'?m (so |really )?behind|get me back on track)[\s.!?]*$/i;

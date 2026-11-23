@@ -2721,6 +2721,15 @@ export default function App() {
         setFeedback(intent.text);
         say(intent.text ? "Got it. Check it and hit send." : "What happened? Type it and I'll send it to Jake.").then(() => setBubble(null));
         return;
+      case "week":
+        try {
+          localStorage.setItem("milo.openWeek", String(Date.now()));
+        } catch {
+          /* ignore */
+        }
+        void window.milo.home.open().then(() => window.setTimeout(() => window.milo.home.echo("week", {}), 400));
+        say("Looking at your whole week. It's in Home base.").then(() => setBubble(null));
+        return;
       case "home":
         void window.milo.home.open();
         say("Opening Home base.").then(() => setBubble(null));

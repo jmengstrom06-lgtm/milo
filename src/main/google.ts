@@ -155,6 +155,17 @@ export async function calendarUpcoming(days = 7): Promise<Ev[]> {
   const r = await g<R>(`https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${from.toISOString()}&timeMax=${to.toISOString()}&singleEvents=true&orderBy=startTime&maxResults=25`);
   return (r.items ?? []).map((e) => ({ title: e.summary ?? "(no title)", start: e.start?.dateTime ?? e.start?.date ?? "", end: e.end?.dateTime ?? e.end?.date ?? "", allDay: !e.start?.dateTime, where: e.location }));
 }
+/** Busy time for the week planner: timed events only (all-day ones don't block hours), as epoch ms. */
+export async function calendarBusy(days = 8): Promise<{ title: string; start: number; end: number }[]> {
+  const from = new Date();
+  const to = new Date(Date.now() + days * 86400e3);
+  type R = { items?: { summary?: string; transparency?: string; start?: { dateTime?: string }; end?: { dateTime?: string } }[] };
+  const r = await g<R>(`https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${from.toISOString()}&timeMax=${to.toISOString()}&singleEvents=true&orderBy=startTime&maxResults=250`);
+  return (r.items ?? [])
+    .filter((e) => e.start?.dateTime && e.end?.dateTime && e.transparency !== "transparent")
+    .map((e) => ({ title: e.summary ?? "", start: Date.parse(e.start!.dateTime!), end: Date.parse(e.end!.dateTime!) }))
+    .filter((e) => e.end > e.start);
+}
 /** What's on the calendar right now (started up to 20 min from now, or already going). */
 export async function calendarNow(): Promise<Ev[]> {
   const from = new Date(Date.now() - 4 * 3600e3);

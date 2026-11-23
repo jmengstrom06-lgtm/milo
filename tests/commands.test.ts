@@ -29,6 +29,8 @@ describe("what Milo did + undo", () => {
   const ctx = { inLesson: false, awaitingAnswer: false, pendingAsk: false };
   it.each(["undo", "undo that", "Undo that.", "take that back", "undo the last thing"])("%s = undo", (t) => expect(parse(t, ctx).kind).toBe("undo"));
   it.each(["open home", "open my home base", "show me the dashboard", "pull up home base", "home base"])("%s = home", (t) => expect(parse(t, ctx).kind).toBe("home"));
+  it.each(["what's next", "What's next?", "fix my week", "get my week under control", "I'm behind", "plan my week", "get me back on track", "what should I work on now"])("%s = week", (t) => expect(parse(t, ctx).kind).toBe("week"));
+  it.each(["what's next on the syllabus for bio", "next slide"])("%s is not the week planner", (t) => expect(parse(t, ctx).kind).not.toBe("week"));
   it.each(["what did you do", "what did you do while I was gone", "show me what you did", "what happened while I was away"])("%s = activity", (t) =>
     expect(parse(t, ctx).kind).toBe("activity")
   );

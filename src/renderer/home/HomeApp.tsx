@@ -9,6 +9,8 @@ import { levelSeen, markLevelSeen, OUTFITS, readGrowth, readMoments, setOutfit, 
 import ExamNight from "./ExamNight";
 import ShareSheet, { type Moment } from "./Share";
 import { demoOn, setDemo, withDemo } from "./demo";
+import { WEEK_ASK } from "./weekFix";
+import WeekPanel from "./WeekPanel";
 
 // Home base talks to the Mac through M. In demo mode, reads come from a labeled sample student instead.
 const DEMO = demoOn();
@@ -115,6 +117,16 @@ export default function HomeApp() {
   const [classId, setClassId] = useState<string | null>(null);
   const [overlay, setOverlay] = useState<null | "cmdk" | "voice">(null);
   const [due, setDue] = useState<Due[] | null>(null);
+  // "Milo, what's next?": the week planner panel (opened from Today, chat, or the desktop frog)
+  const [weekOpen, setWeek] = useState(() => {
+    try {
+      const t = Number(localStorage.getItem("milo.openWeek") || 0);
+      localStorage.removeItem("milo.openWeek");
+      return Date.now() - t < 30e3;
+    } catch {
+      return false;
+    }
+  });
   const [dueErr, setDueErr] = useState<string | null>(null);
   const [classes, setClasses] = useState<Klass[]>([]);
   const [grades, setGrades] = useState<Grade[]>([]);
@@ -223,6 +235,10 @@ export default function HomeApp() {
           const text = String(e.payload ?? "");
           setVoiceLines((v) => [...v.slice(-4), { who: "you", text }]);
           if (document.hasFocus()) appendToChat({ role: "user", text, at: Date.now() });
+        } else if (e.kind === "week") {
+          setView("today");
+          setWeek(false);
+          window.setTimeout(() => setWeek(true), 0);
         } else if (e.kind === "lecture") {
           const p = e.payload as { on: boolean; course?: string; startedAt?: number };
           setLecture(p.on ? { course: p.course ?? "", startedAt: p.startedAt ?? Date.now() } : null);
@@ -298,6 +314,14 @@ export default function HomeApp() {
       appendToChat({ role: "milo", text: "I'm paused right now, so I'm not looking at your screen, listening, or doing anything. Turn me back on (top of Today or in Settings) and ask again.", at: Date.now() + 1 });
       return;
     }
+    if (WEEK_ASK.test(text)) {
+      setDraft("");
+      setOverlay(null);
+      setView("today");
+      setWeek(false);
+      window.setTimeout(() => setWeek(true), 0);
+      return;
+    }
     setDraft("");
     setView("chat");
     setOverlay(null);
@@ -349,6 +373,7 @@ export default function HomeApp() {
           ? `${thisWeek.length} thing${thisWeek.length > 1 ? "s" : ""} due this week.${next?.due_iso ? ` The first one is ${whenShort(next.due_iso) === "TODAY" ? "today" : whenShort(next.due_iso) === "TMRW" ? "tomorrow" : new Date(next.due_iso).toLocaleDateString("en-US", { weekday: "long" })}.` : ""}`
           : "Nothing due this week. You're all caught up.";
   const chips = [
+    "What's next?",
     next ? `Start ${next.title}` : "What's due this week?",
     "Quiz me on my last lecture",
     classes[0] ? `What do I need on the ${classes[0].name} final?` : "What can you do?",
@@ -615,6 +640,18 @@ export default function HomeApp() {
                 </section>
               )}
 
+              {weekOpen && !paused?.on && (
+                <WeekPanel
+                  M={M}
+                  due={due}
+                  demo={DEMO}
+                  googleOn={!!google?.connected}
+                  outfit={outfit}
+                  onClose={() => setWeek(false)}
+                  onConnect={() => void M.google.connect().then(() => M.google.status().then(setGoogle))}
+                  onSay={(t) => setVoiceLines((v) => [...v.slice(-4), { who: "milo", text: t }])}
+                />
+              )}
               {paused?.on && (
                 <section className="hb-state hb-state-paused" role="status">
                   <MiloFrog size={64} mood="sleep" outfit={outfit} />
