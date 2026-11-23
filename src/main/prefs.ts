@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 export type Prefs = { notifyAway: boolean; quiet: boolean; quietFrom: number; quietTo: number; noRecord: string[]; okRecord: string[]; autofill: boolean; preflight: boolean }; // preflight: "check this" uses the rubric check (beta); autofill: type answers into worksheets (off = show them, the student types) // noRecord: class ids Milo never listens to; okRecord: classes the student said allow recording
-const DEFAULTS: Prefs = { notifyAway: true, quiet: true, quietFrom: 23, quietTo: 8, noRecord: [], okRecord: [], autofill: false, preflight: false };
+const DEFAULTS: Prefs = { notifyAway: true, quiet: true, quietFrom: 23, quietTo: 8, noRecord: [], okRecord: [], autofill: false, preflight: true };
 const file = () => path.join(app.getPath("userData"), "prefs.json");
 let cache: Prefs | null = null;
 
