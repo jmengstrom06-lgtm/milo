@@ -6,6 +6,8 @@ vi.mock("electron", () => ({
   powerSaveBlocker: { start: (k: string) => (started.push("awake:" + k), 7), stop: () => started.push("asleep-ok") },
 }));
 vi.mock("../src/main/blackbox", () => ({ log: () => {} }));
+// Notification settings: on, no quiet hours, so the test passes at any time of day.
+vi.mock("../src/main/prefs", () => ({ prefs: () => ({ notifyAway: true, quiet: false, quietFrom: 23, quietTo: 8 }), inQuiet: () => false }));
 import { awayWatch, notice } from "../src/main/away";
 const job = (status: string, extra = {}) => ({ id: "j1", goal: "Fill out the survey", steps: [], status, createdAt: 0, updatedAt: 0, replans: 0, approved: false, actions: 0, ...extra }) as never;
 
