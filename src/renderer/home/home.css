@@ -441,3 +441,11 @@ kbd { font-family: var(--mono); font-weight: 600; font-size: 11px; color: var(--
 .hb-en-blocks em.now { color: var(--purple3); }
 .hb-en-blocks b { font-weight: 600; font-size: 13.5px; }
 .hb-en-blocks span { font-size: 12px; color: var(--muted); }
+
+/* ---------- notifications, account ---------- */
+.hb-select { margin: 0 2px; padding: 2px 6px; border: 1px solid var(--line2); border-radius: 8px; background: var(--side); color: var(--text); font: inherit; font-size: 12.5px; }
+.hb-select:disabled { opacity: 0.5; }
+.hb-signin { display: flex; flex-direction: column; gap: 8px; padding: 6px 0 12px; }
+.hb-signin > div:first-child { display: flex; flex-direction: column; gap: 2px; }
+.hb-signin > div:first-child span { color: var(--muted); font-size: 13px; }
+.hb-signin p { margin: 0; }

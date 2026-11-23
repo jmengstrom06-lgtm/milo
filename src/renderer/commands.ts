@@ -23,6 +23,7 @@ export type Intent =
   | { kind: "resume" } // pick up where Milo was interrupted
   | { kind: "chain"; steps: Intent[] } // "open chrome, find a worksheet, and complete it": do in order
   | { kind: "activity" } // "what did you do?": open the timeline
+  | { kind: "home" } // "open home", "show my home base": open the Home base window
   | { kind: "undo" } // "undo that": take back the newest thing
   | { kind: "feedback"; text: string } // "report a problem", "tell Jake that…"
   | { kind: "paper"; text: string } // "write a 5 page paper on…": written live into a Google Doc
@@ -126,6 +127,7 @@ function parseSingle(raw: string, ctx: Ctx): Intent {
     if (fb) return { kind: "feedback", text: text.slice(fb[0].length).trim() };
   }
   if (/^(undo( that| it| this| the last (thing|one))?|take (that|it) back|reverse that|cancel what you (just )?did)$/.test(t)) return { kind: "undo" };
+  if (/^(?:(?:can you |please )?(?:open|show|pull up|bring up|go to)(?: me)? (?:my |the )?(?:home|home base|homebase|dashboard|milo app)|(?:take me )?home base)\b/.test(t)) return { kind: "home" };
   if (/^(what (did|have) you (do|done)|what('?d| did) you (just )?do|show me what you (did|done)|what milo did|what you did|your (activity|history)|what happened while i was (gone|away|out))\b/.test(t)) return { kind: "activity" };
   if (/^(stop watching|stop checking|you can stop watching|quit watching)\b/.test(t)) return { kind: "watch", on: false };
   if (/^(watch me|watch my (work|screen)|keep an eye on (me|my work|this)|watch me work|check my work as i go|watch while i work)\b/.test(t))

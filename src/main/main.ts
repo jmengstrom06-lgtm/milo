@@ -32,7 +32,7 @@ import { isJob, lastJob, resumable, resumeJob, startJob, type JobDeps } from "./
 import { getProfile, setProfile, type Profile } from "./profile";
 import { usageToday } from "./usage";
 import { awayWatch } from "./away";
-import { calendarAdd, calendarDelete, calendarUpcoming, docsCreate, GoogleNotConnected, googleConnect, googleStatus, gmailDeleteDraft, gmailDraft, gmailSendDraft, gmailUnread } from "./google";
+import { calendarAdd, calendarDelete, calendarUpcoming, docsCreate, GoogleNotConnected, googleConnect, googleDisconnect, googleStatus, gmailDeleteDraft, gmailDraft, gmailSendDraft, gmailUnread } from "./google";
 import { activity, did, registerActivity } from "./activityLog";
 import { writePaper } from "./paper";
 import { homeWin, openHome, toHome } from "./home";
@@ -62,6 +62,7 @@ import { buildTool } from "./builder";
 import { askScreen } from "./brain";
 import { createTray, extensionDirs, firstRunDefaults, loadKeys } from "./appshell";
 import { isPaused, PAUSED_TEXT, pauseState, setPause } from "./pause";
+import { prefs, setPrefs, type Prefs } from "./prefs";
 import { checkForUpdate, installUpdate, startUpdater, startUpdates, updateReady } from "./updater";
 import { Action, askMilo, classify, RouteCtx, makeQuiz, readBrief, setUserName, sweepPlan, watchCheck, ChatMessage, checkAnswer, locateInCrop, nextActions, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
@@ -425,6 +426,12 @@ const gerr = (e: unknown) =>
     : { ok: false as const, text: `Google had a problem: ${(e as Error).message.slice(0, 120)}` };
 ipcMain.handle("milo:google-status", () => googleStatus());
 ipcMain.handle("milo:google-connect", () => googleConnect());
+ipcMain.handle("milo:google-disconnect", () => {
+  googleDisconnect();
+  return googleStatus();
+});
+ipcMain.handle("milo:prefs-get", () => prefs());
+ipcMain.handle("milo:prefs-set", (_e, p: Partial<Prefs>) => setPrefs(p ?? {}));
 ipcMain.handle("milo:google-calendar", async (_e, days: number, range: string) => {
   try {
     return { ok: true, text: sayCalendar(await calendarUpcoming(Number(days) || 7), String(range || "this week")) };

@@ -2675,6 +2675,10 @@ export default function App() {
         setFeedback(intent.text);
         say(intent.text ? "Got it. Check it and hit send." : "What happened? Type it and I'll send it to Jake.").then(() => setBubble(null));
         return;
+      case "home":
+        void window.milo.home.open();
+        say("Opening Home base.").then(() => setBubble(null));
+        return;
       case "activity":
         setActivityOpen(true);
         window.milo.activity.say().then((t) => say(t)).then(() => setBubble(null));

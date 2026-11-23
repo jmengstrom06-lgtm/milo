@@ -113,6 +113,11 @@ contextBridge.exposeInMainWorld("milo", {
   stopTask: () => ipcRenderer.send("milo:task-stop"),
   handsAccess: () => ipcRenderer.invoke("milo:hands-access"),
   perms: () => ipcRenderer.invoke("milo:perms"),
+  prefs: {
+    get: () => ipcRenderer.invoke("milo:prefs-get"),
+    set: (p: unknown) => ipcRenderer.invoke("milo:prefs-set", p),
+  },
+  googleDisconnect: () => ipcRenderer.invoke("milo:google-disconnect"),
   pause: {
     get: () => ipcRenderer.invoke("milo:pause-get"),
     set: (on: boolean, minutes?: number) => ipcRenderer.invoke("milo:pause-set", on, minutes),

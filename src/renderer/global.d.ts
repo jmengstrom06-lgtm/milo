@@ -16,6 +16,7 @@ declare global {
     summary?: string;
     actions: number;
   };
+  type MiloPrefs = { notifyAway: boolean; quiet: boolean; quietFrom: number; quietTo: number };
   type MiloPause = { on: boolean; since: number | null; until: number | null };
   type MiloActivity = {
     id: string;
@@ -251,6 +252,11 @@ declare global {
       accountVerify: (email: string, code: string) => Promise<{ ok: boolean; text: string }>;
       accountSignOut: () => Promise<{ signedIn: boolean; email: string }>;
       memories: () => Promise<string[]>;
+      prefs: {
+        get: () => Promise<MiloPrefs>;
+        set: (p: Partial<MiloPrefs>) => Promise<MiloPrefs>;
+      };
+      googleDisconnect: () => Promise<{ ready: boolean; connected: boolean; email: string | null }>;
       pause: {
         get: () => Promise<MiloPause>;
         set: (on: boolean, minutes?: number) => Promise<MiloPause>;
