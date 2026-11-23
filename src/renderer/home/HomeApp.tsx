@@ -513,10 +513,9 @@ export default function HomeApp() {
             <Ico d={I.clock} />
             <span>What Milo did</span>
           </button>
-          <button className={view === "milo" ? "on" : ""} onClick={() => setView("milo")}>
-            <Ico d={I.star} />
-            <span>Milo's room</span>
-            <em className="hb-lv">Lv {growth.level}</em>
+          <button className={view === "settings" ? "on" : ""} onClick={() => setView("settings")}>
+            <Ico d={I.gear} />
+            <span>Settings</span>
           </button>
         </nav>
         <div className="hb-group">

@@ -5,6 +5,29 @@ import path from "node:path";
 import { makeActivity, proofOf, sayActivity, type ActEntry } from "./activity";
 import { log as bb } from "./blackbox";
 import { track } from "./telemetry";
+import { makeMetrics, type MetricsState } from "./metrics";
+
+const mfile = () => path.join(app.getPath("userData"), "metrics.json");
+/** Retention, first value, success: see metrics.ts. */
+export const metrics = makeMetrics(
+  {
+    load: () => {
+      try {
+        return JSON.parse(fs.readFileSync(mfile(), "utf8")) as MetricsState;
+      } catch {
+        return null;
+      }
+    },
+    save: (s) => {
+      try {
+        fs.writeFileSync(mfile(), JSON.stringify(s), { mode: 0o600 });
+      } catch {
+        /* fine */
+      }
+    },
+  },
+  track
+);
 
 const file = () => path.join(app.getPath("userData"), "activity.json");
 
@@ -35,6 +58,8 @@ export const activity = makeActivity(
 /** Log it, black-box it, count it. */
 export function did(e: Parameters<typeof activity.record>[0]): string {
   bb("activity", "did", { kind: e.kind, undoable: !!e.undo });
+  track("value", { kind: e.kind });
+  metrics.value(e.kind);
   return activity.record(e);
 }
 

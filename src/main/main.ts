@@ -31,10 +31,10 @@ import { makeGamePlan } from "./homework";
 import { startSync } from "./sync";
 import { isJob, lastJob, resumable, resumeJob, startJob, type JobDeps } from "./jobs";
 import { getProfile, setProfile, type Profile } from "./profile";
-import { usageToday } from "./usage";
+import { usageToday, spentToday } from "./usage";
 import { awayWatch } from "./away";
 import { calendarAdd, calendarBusy, calendarDelete, calendarUpcoming, docsCreate, GoogleNotConnected, googleConnect, googleDisconnect, googleStatus, gmailDeleteDraft, gmailDraft, gmailSendDraft, gmailUnread } from "./google";
-import { activity, did, registerActivity } from "./activityLog";
+import { activity, did, registerActivity, metrics } from "./activityLog";
 import { writePaper } from "./paper";
 import { homeWin, openHome, toHome } from "./home";
 import { addChunk, discardLecture, fileLecture, finishLecture, finishLeftovers, forgetLectureNote, lectureNow, startLecture } from "./lecture";
@@ -382,7 +382,10 @@ function logJob(job: { id: string; goal: string; status: string; summary?: strin
   const e = { kind: "job" as const, title: `${end}: ${job.goal}`, detail: [job.summary || job.question, steps].filter(Boolean).join("\n\n"), noUndo: "This happened on websites, so open them to change it." };
   const prev = jobLogged.get(job.id);
   if (prev) activity.update(prev, e);
-  else jobLogged.set(job.id, did(e));
+  else {
+    jobLogged.set(job.id, did(e));
+    track("job_end", { status: job.status, steps: job.steps.length, done_steps: job.steps.filter((x) => x.status === "done").length });
+  }
 }
 /** Wait for a stopped action to really finish (its last click can still be landing) before starting again. */
 async function waitIdle(ms = 15000) {
@@ -1491,6 +1494,12 @@ app.on("web-contents-created", (_e, contents) => {
 
 app.whenReady().then(() => {
   watchBack();
+  // the numbers that say if Milo works: a day used, and AI spend so far today (every 3 hours)
+  metrics.active();
+  setInterval(() => {
+    metrics.active();
+    track("cost_snapshot", { usd_today: Math.round(spentToday() * 1000) / 1000 });
+  }, 3 * 3600e3);
   startBridge(extensionFolder());
   registerNativeHost(binaryPath()); // so the Chrome Web Store version of the extension can find Milo
   if (process.platform === "darwin") app.dock?.hide();
