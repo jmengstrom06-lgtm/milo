@@ -1,0 +1,23 @@
+# Run by hand (Actions tab → preflight-eval → Run workflow) before turning "Check this" on for students.
+# 20 synthetic assignments through the real AI. Fails if false warnings are 5%+ or it misses too much.
+name: preflight-eval
+on:
+  workflow_dispatch:
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Preflight evals (real AI)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: npm run eval:preflight

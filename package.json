@@ -15,6 +15,7 @@
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "eval": "vite-node --config vitest.config.ts evals/run-router.ts",
+    "eval:preflight": "vite-node --config vitest.config.ts evals/run-preflight.ts",
     "check": "npm run typecheck && npm test",
     "build:hands": "node scripts/build-hands.js",
     "dist": "cross-env MILO_UNIVERSAL=1 npm run build && electron-builder --mac --universal",

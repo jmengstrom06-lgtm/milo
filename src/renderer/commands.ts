@@ -141,6 +141,7 @@ function parseSingle(raw: string, ctx: Ctx): Intent {
   if (WEEK_ASK.test(t)) return { kind: "week" };
   if (HANDLE.test(t)) return { kind: "handle" };
   if (/^(check (my|this) work|is (this|my work) right|did i (do this|get this) right|any mistakes)\b/.test(t)) return { kind: "checkwork" };
+  if (/^(?:milo,?\s*)?(check (this|it)( (before|so) i (submit|turn (it|this) in))?|check (this|it|my work|my paper|my essay) against the rubric|preflight( this)?|does this meet the rubric)$/.test(t)) return { kind: "checkwork" };
   if (/^(what'?s due|what is due|what do i have (due|to do|today|tomorrow|this week)|daily brief|morning brief|my brief|brief me|what'?s on my plate|anything due)\b/.test(t)) return { kind: "brief" };
   if (/^(quiz me|test me|give me a (quiz|test|practice test)|make (me )?a (quiz|practice test)|study mode|quiz mode)\b/.test(t)) return { kind: "quiz", focus: text };
   if (SWEEP.test(t)) return { kind: "sweep" };

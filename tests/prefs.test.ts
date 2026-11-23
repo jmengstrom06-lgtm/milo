@@ -45,3 +45,9 @@ describe("worksheet autofill", () => {
     expect(setPrefs({ autofill: false }).autofill).toBe(false);
   });
 });
+
+import { looksLikeRubric } from "../src/main/prefs";
+describe("rubric detection", () => {
+  it("spots a rubric", () => expect(looksLikeRubric("Grading rubric (20 points): Thesis is clear (5 pts). At least 3 sources cited in MLA format (5 pts). Minimum 1000 words.")).toBe(true));
+  it("ignores normal copied text", () => expect(looksLikeRubric("Hey are we still meeting at the library at 7 tonight? Let me know")).toBe(false));
+});

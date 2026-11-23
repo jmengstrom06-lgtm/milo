@@ -55,3 +55,8 @@ describe("handle this", () => {
   it.each(["handle this", "Milo, handle this", "help me with this", "help with this", "what can you do here", "take care of this", "what do I do here"])("%s = handle", (t) => expect(parse(t, c).kind).toBe("handle"));
   it.each(["help me with my stats homework", "handle this email to my professor by saying no"])("%s is specific, not handle", (t) => expect(parse(t, c).kind).not.toBe("handle"));
 });
+
+describe("check this", () => {
+  const c = { inLesson: false, awaitingAnswer: false, pendingAsk: false };
+  it.each(["check this", "Milo, check this", "check this before I submit", "check my essay against the rubric", "preflight", "does this meet the rubric"])("%s = checkwork", (t) => expect(parse(t, c).kind).toBe("checkwork"));
+});

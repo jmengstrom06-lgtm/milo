@@ -1066,3 +1066,87 @@ export function cleanOptions(opts: unknown): { label: string; say: string }[] {
     .map((o) => ({ label: o.label.trim().slice(0, 40), say: o.say.trim().slice(0, 200) }))
     .slice(0, 3);
 }
+
+// ---------------------------------------------------------------------------
+// "Milo, check this" (Preflight, beta): check the student's own work against the requirements Milo can
+// actually see (the rubric they copied, instructions on screen). Every finding is labeled honestly:
+//   confirmed = a requirement Milo can quote is clearly not met; possible = might need a look; unknown = can't judge.
+export type PreflightItem = { status: "confirmed" | "possible" | "unknown"; text: string; quote: string; source: "rubric" | "screen" | "none" };
+export type Preflight = { requirements_seen: boolean; items: PreflightItem[]; summary: string };
+const PREFLIGHT_TOOL = {
+  name: "preflight",
+  description: "Findings from checking the student's work against the requirements.",
+  input_schema: {
+    type: "object",
+    properties: {
+      requirements_seen: { type: "boolean", description: "True only if a rubric or written instructions were actually available." },
+      items: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            status: { type: "string", enum: ["confirmed", "possible", "unknown"] },
+            text: { type: "string", description: "One plain sentence, kind and specific. 'The rubric asks for 3 sources and I can find 2.'" },
+            quote: { type: "string", description: "The exact requirement words from the rubric or instructions (under 20 words). Empty if none." },
+            source: { type: "string", enum: ["rubric", "screen", "none"] },
+          },
+          required: ["status", "text", "quote", "source"],
+        },
+      },
+      summary: { type: "string", description: "One short spoken line." },
+    },
+    required: ["requirements_seen", "items", "summary"],
+  },
+};
+export async function preflightCheck(src: { jpeg?: string; size?: { width: number; height: number }; work?: string; rubric?: string }): Promise<ApiOk<Preflight> | ApiErr> {
+  const content: unknown[] = [];
+  if (src.jpeg && src.size) content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: src.jpeg } });
+  content.push({
+    type: "text",
+    text: [
+      src.rubric ? `RUBRIC / INSTRUCTIONS THE STUDENT GAVE YOU:\n"""${src.rubric.slice(0, 6000)}"""` : "No rubric was given. Use only instructions visible on screen, if any.",
+      src.work ? `THE STUDENT'S WORK:\n"""${src.work.slice(0, 12000)}"""` : src.size ? `The student's work is on screen (${src.size.width}x${src.size.height}).` : "",
+      "Check the work before they submit it.",
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+  });
+  const r = await callTool<Preflight>(
+    {
+      max_tokens: 1500,
+      system: `${persona()}
+You are Milo's pre-submit check. The student asked you to look over THEIR OWN work against the requirements. You never rewrite or finish the work.
+Rules, strictly:
+- "confirmed" ONLY when you can quote a specific requirement from the rubric/instructions AND the work clearly doesn't meet it (count things, check what's there). Put the requirement's exact words in quote.
+- "possible" when something might be off but you aren't sure, or a requirement is only partly visible.
+- "unknown" for requirements you can't check from what you see (e.g. page count of a document you can't fully see, file format, due time).
+- Never invent requirements. If there is no rubric and no instructions, say so: requirements_seen=false, and only flag clear errors in the work itself as "possible".
+- Max 6 items, most important first. Don't list things that are fine. If everything checks out, return no items.
+- Talk like a friendly TA: specific and calm. Never "you will lose points".`,
+      tools: [PREFLIGHT_TOOL],
+      tool_choice: { type: "tool", name: PREFLIGHT_TOOL.name },
+      messages: [{ role: "user", content }],
+    },
+    PREFLIGHT_TOOL.name
+  );
+  if (!r.ok) return r;
+  return { ok: true, data: { requirements_seen: !!r.data.requirements_seen, items: honestItems(r.data.items, !!src.rubric), summary: String(r.data.summary ?? "").slice(0, 200) } };
+}
+/** Never claim more than Milo can back up: "confirmed" needs a quoted requirement from a real source. (pure) */
+export function honestItems(items: unknown, hadRubric: boolean): PreflightItem[] {
+  if (!Array.isArray(items)) return [];
+  const order = { confirmed: 0, possible: 1, unknown: 2 } as const;
+  const seen = new Set<string>();
+  return items
+    .filter((x): x is PreflightItem => !!x && typeof x.text === "string" && !!x.text.trim())
+    .map((x) => {
+      const quote = typeof x.quote === "string" ? x.quote.trim().slice(0, 160) : "";
+      let source: PreflightItem["source"] = x.source === "rubric" || x.source === "screen" ? x.source : "none";
+      if (source === "rubric" && !hadRubric) source = "screen"; // it can't have read a rubric it wasn't given
+      const status: PreflightItem["status"] = x.status === "confirmed" || x.status === "possible" || x.status === "unknown" ? x.status : "possible";
+      return { status: status === "confirmed" && (!quote || source === "none") ? "possible" : status, text: x.text.trim().slice(0, 240), quote, source: quote ? source : "none" };
+    })
+    .filter((x) => (seen.has(x.text) ? false : (seen.add(x.text), true)))
+    .sort((a, b) => order[a.status] - order[b.status])
+    .slice(0, 6);
+}
