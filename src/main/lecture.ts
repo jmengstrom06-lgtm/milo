@@ -8,6 +8,8 @@
 import { app, powerSaveBlocker } from "electron";
 import fs from "node:fs";
 import path from "node:path";
+import { isPaused } from "./pause";
+import { prefs, setPrefs } from "./prefs";
 import { account, backend } from "./account";
 import { log as bb } from "./blackbox";
 import { callTool, persona } from "./brain";
@@ -64,9 +66,16 @@ async function whichClass(said: string): Promise<{ cls: ReturnType<typeof classN
   return { cls: null, how: "unknown" };
 }
 
-export async function startLecture(said: string): Promise<Meta> {
+export type LectureStart = Meta | { blocked: "class" | "paused"; course: string };
+
+export async function startLecture(said: string): Promise<LectureStart> {
   if (current) return current;
+  if (isPaused()) return { blocked: "paused", course: "" };
   const { cls, how } = await whichClass(said).catch(() => ({ cls: null, how: "unknown" }));
+  if (cls && prefs().noRecord.includes(cls.id)) {
+    bb("lecture", "blocked", { how });
+    return { blocked: "class", course: cls.name };
+  }
   const id = `lec-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}`;
   fs.mkdirSync(dirOf(id), { recursive: true });
   current = { id, course: cls?.name ?? "", classId: cls?.id ?? null, startedAt: Date.now(), chunks: 0, how };
@@ -77,8 +86,33 @@ export async function startLecture(said: string): Promise<Meta> {
   return current;
 }
 
+/** "Not in this class": stop right now and throw away everything recorded. No transcript, no notes.
+ *  If Milo knew the class, it goes on the never-record list so it won't happen again. */
+export function discardLecture(): { ok: boolean; course: string; remembered: boolean } {
+  const m = current;
+  if (!m) return { ok: false, course: "", remembered: false };
+  current = null;
+  if (awake != null) {
+    powerSaveBlocker.stop(awake);
+    awake = null;
+  }
+  try {
+    fs.rmSync(dirOf(m.id), { recursive: true, force: true });
+  } catch {
+    /* already gone */
+  }
+  let remembered = false;
+  if (m.classId) {
+    setPrefs({ noRecord: [...prefs().noRecord, m.classId] });
+    remembered = true;
+  }
+  bb("lecture", "discarded", { known: !!m.classId });
+  return { ok: true, course: m.course, remembered };
+}
+
 /** A few minutes of audio (16 kHz mono WAV). Saved first, then transcribed in the background. */
 export function addChunk(id: string, n: number, wav: ArrayBuffer) {
+  if (current?.id !== id && !fs.existsSync(dirOf(id))) return false; // discarded: drop the late audio
   const m = current?.id === id ? current : readMeta(id);
   if (!m) return false;
   const file = path.join(dirOf(id), `chunk-${pad(n)}.wav`);

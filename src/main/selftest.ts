@@ -642,6 +642,7 @@ export async function runSelfTest(win: BrowserWindow) {
       const v = await macSpeak(lecture);
       if (!v.ok) return { score: 0, detail: "couldn't make the test audio" };
       const m = await startLecture("stats");
+      if ("blocked" in m) return { score: 0, detail: `recording is turned off (${m.blocked})` };
       addChunk(m.id, 0, new Uint8Array(Buffer.from(v.audio, "base64")).buffer);
       const t0 = Date.now();
       const r = await finishLecture(m.id);
@@ -657,6 +658,7 @@ export async function runSelfTest(win: BrowserWindow) {
       const v = await macSpeak("Today we are going over the causes of the French Revolution. The first cause was debt from wars. The second cause was a bad harvest that raised bread prices. The third cause was ideas from the Enlightenment about rights. Remember these three causes for the midterm.");
       if (!v.ok) return { score: 0, detail: "couldn't make the test audio" };
       const m = await startLecture("listen to my lecture");
+      if ("blocked" in m) return { score: 0, detail: `recording is turned off (${m.blocked})` };
       const guessed = m.how === "named";
       addChunk(m.id, 0, new Uint8Array(Buffer.from(v.audio, "base64")).buffer);
       const r = await finishLecture(m.id);

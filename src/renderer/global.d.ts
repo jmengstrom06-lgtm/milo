@@ -16,7 +16,7 @@ declare global {
     summary?: string;
     actions: number;
   };
-  type MiloPrefs = { notifyAway: boolean; quiet: boolean; quietFrom: number; quietTo: number };
+  type MiloPrefs = { notifyAway: boolean; quiet: boolean; quietFrom: number; quietTo: number; noRecord: string[] };
   type MiloPause = { on: boolean; since: number | null; until: number | null };
   type MiloActivity = {
     id: string;
@@ -201,7 +201,8 @@ declare global {
         onAction: (fn: (a: { kind: string; item: { title: string; course: string; due: string } }) => void) => () => void;
       };
       lecture: {
-        start: (said: string) => Promise<{ id: string; course: string; startedAt: number }>;
+        start: (said: string) => Promise<{ id: string; course: string; startedAt: number; blocked?: "class" | "paused" }>;
+        discard: () => Promise<{ ok: boolean; course: string; remembered: boolean }>;
         chunk: (id: string, n: number, wav: ArrayBuffer) => Promise<boolean>;
         stop: () => Promise<{ ok: boolean; text: string; lectureId?: string; needsClass?: boolean; noteId?: string; minutes?: string; title?: string; flashcards?: number; alerts?: number }>;
         now: () => Promise<{ id: string; course: string; startedAt: number; chunks: number } | null>;

@@ -5,8 +5,8 @@ import { app } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 
-export type Prefs = { notifyAway: boolean; quiet: boolean; quietFrom: number; quietTo: number };
-const DEFAULTS: Prefs = { notifyAway: true, quiet: true, quietFrom: 23, quietTo: 8 };
+export type Prefs = { notifyAway: boolean; quiet: boolean; quietFrom: number; quietTo: number; noRecord: string[] }; // noRecord: class ids Milo never listens to
+const DEFAULTS: Prefs = { notifyAway: true, quiet: true, quietFrom: 23, quietTo: 8, noRecord: [] };
 const file = () => path.join(app.getPath("userData"), "prefs.json");
 let cache: Prefs | null = null;
 
@@ -25,6 +25,7 @@ export function setPrefs(p: Partial<Prefs>): Prefs {
   if (typeof p.quiet === "boolean") next.quiet = p.quiet;
   if (Number.isInteger(p.quietFrom) && p.quietFrom! >= 0 && p.quietFrom! < 24) next.quietFrom = p.quietFrom!;
   if (Number.isInteger(p.quietTo) && p.quietTo! >= 0 && p.quietTo! < 24) next.quietTo = p.quietTo!;
+  if (Array.isArray(p.noRecord)) next.noRecord = Array.from(new Set(p.noRecord.filter((x) => typeof x === "string" && x))).slice(0, 50);
   cache = next;
   try {
     fs.writeFileSync(file(), JSON.stringify(next), { mode: 0o600 });

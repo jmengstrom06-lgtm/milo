@@ -1206,6 +1206,14 @@ export default function App() {
       /* ignore */
     }
     const m = await window.milo.lecture.start(said);
+    if (m.blocked) {
+      say(
+        m.blocked === "paused"
+          ? "I'm paused, so I'm not listening. Turn me back on in Home base first."
+          : `You turned off recording for ${m.course}, so I won't listen in this class. You can change that in Home base, Settings.`
+      ).then(() => setBubble(null));
+      return;
+    }
     const rec = new LectureRecorder(
       m.id,
       (id, n, wav) => void window.milo.lecture.chunk(id, n, wav),
@@ -1234,6 +1242,23 @@ export default function App() {
     earsBeforeClass.current = (ears.current?.mode as "always" | "off" | "once") ?? "off";
     if (ears.current?.mode === "always") await ears.current.setMode("off");
   };
+  // "Not in this class": stop now and delete everything recorded. No notes. Milo remembers the class.
+  const notInThisClass = async () => {
+    const rec = recRef.current;
+    if (!rec) return;
+    recRef.current = null;
+    await rec.stop().catch(() => {});
+    inClassRef.current = false;
+    window.milo.home.echo("lecture", { on: false });
+    setLecture(null);
+    setLectureWarn(null);
+    if (earsBeforeClass.current === "always") await ears.current?.setMode("always");
+    const r = await window.milo.lecture.discard();
+    setMood("happy");
+    await say(r.remembered ? `Done. I deleted that recording and I won't listen in ${r.course} again. You can change that in Home base, Settings.` : "Done. I deleted that recording. Nothing was saved.");
+    setBubble(null);
+  };
+
   const stopLecture = async () => {
     const rec = recRef.current;
     if (!rec) {
@@ -3698,6 +3723,9 @@ export default function App() {
           </span>
           <button className="kit-btn kit-btn--sm" onClick={() => void stopLecture()}>
             Stop
+          </button>
+          <button className="kit-btn kit-btn--sm" title="Stop and delete this recording. No notes are made." onClick={() => void notInThisClass()}>
+            Not in this class
           </button>
           {lectureWarn && <div className="lec-warn">{lectureWarn}</div>}
         </div>
