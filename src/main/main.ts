@@ -1058,6 +1058,7 @@ ipcMain.handle("milo:suggest", async (_e, said: string) => {
   const small = toJpeg(cap.shot.full, 1280);
   const r = await suggestActions(small.b64, small.size, String(said ?? "").slice(0, 200));
   track("suggest", { ok: r.ok, n: r.ok ? r.data.options.length : 0 });
+  if (r.ok && !r.data.options.length) bb("suggest", "no_options", { seen: r.data.seen.slice(0, 80) });
   return r.ok ? { ok: true, seen: r.data.seen, options: r.data.options } : r;
 });
 /** "Milo, check this" (Preflight beta): the work on screen against the rubric they copied (if any). */

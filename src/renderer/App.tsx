@@ -1272,10 +1272,13 @@ export default function App() {
       say(r.text || "I couldn't see your screen.").then(() => setBubble(null));
       return;
     }
-    if (!r.options.length) {
-      say("I'm not sure what to do with this one. Tell me what you want and I'll do it.").then(() => setBubble(null));
-      return;
-    }
+    // nothing specific came back: still offer the moves that work on almost any screen
+    if (!r.options.length)
+      r.options = [
+        { label: "Explain this", say: "explain this" },
+        { label: "Quiz me on this", say: "quiz me on this" },
+        { label: "Start this", say: "start this" },
+      ];
     setBubble(null);
     setOffer({ seen: r.seen, options: r.options });
     bb("offer_shown", { n: r.options.length });

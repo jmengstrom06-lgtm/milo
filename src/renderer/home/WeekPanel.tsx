@@ -21,6 +21,7 @@ export default function WeekPanel({
   due,
   demo,
   googleOn,
+  dueErr,
   outfit,
   onClose,
   onConnect,
@@ -30,6 +31,7 @@ export default function WeekPanel({
   due: Due[] | null;
   demo: boolean;
   googleOn: boolean;
+  dueErr?: string | null; // "signin" / "setup" / "offline": D2L isn't giving us due dates
   outfit: FrogOutfit;
   onClose: () => void;
   onConnect: () => void;
@@ -121,7 +123,17 @@ export default function WeekPanel({
           <div className="hb-wkhead">
             <MiloFrog size={56} mood={plan.problems.length ? "worried" : "happy"} outfit={outfit} />
             <div>
-              <h2>{plan.blocks.length ? plan.say : "Nothing due this week. You're clear."}</h2>
+              <h2>
+                {plan.blocks.length
+                  ? plan.say
+                  : !demo && dueErr
+                    ? dueErr === "signin"
+                      ? "I can't see your due dates: your D2L sign-in ran out. Sign in to D2L in Chrome, then ask again."
+                      : dueErr === "setup"
+                        ? "Connect D2L first (Settings → Connections) so I can see what's due."
+                        : "I couldn't reach D2L just now, so I can't see what's due. Try again in a minute."
+                    : "Nothing due this week. You're clear."}
+              </h2>
               {calNote && <p className="hb-muted">{calNote}</p>}
             </div>
           </div>

@@ -46,3 +46,10 @@ describe("preflight honesty", () => {
     expect(new Set(r.map((x) => x.text)).size).toBe(6);
   });
 });
+
+describe("options sent as a JSON string", () => {
+  it("are still read", () => {
+    expect(cleanOptions('[{"label":"Explain this","say":"explain this"}]')).toEqual([{ label: "Explain this", say: "explain this" }]);
+    expect(honestItems('[{"status":"possible","text":"Maybe short","quote":"","source":"none"}]', false)).toHaveLength(1);
+  });
+});
