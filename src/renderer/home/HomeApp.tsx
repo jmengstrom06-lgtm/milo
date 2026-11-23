@@ -306,7 +306,9 @@ export default function HomeApp() {
     setSteps([]);
     window.setTimeout(() => inputRef.current?.focus(), 50);
   };
-  useEffect(() => endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }), [chat?.messages.length, steps.length]);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [chat?.messages.length, steps.length]);
 
   // ---------------- derived ----------------
   const week = useMemo(
