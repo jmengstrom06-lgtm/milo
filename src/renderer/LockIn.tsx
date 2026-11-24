@@ -155,8 +155,8 @@ const LockIn = forwardRef<LockInHandle, { api: LockInApi; miloPos: Pos; onActive
     a.setMood("celebrating");
     setTimeout(() => setIntro(null), 2200);
     const line = S.current.topic
-      ? `Locked in. ${minutes} minutes on ${S.current.topic}. I'll keep watch.`
-      : `Locked in for ${minutes} minutes. I'll keep watch.`;
+      ? `Locked in. ${minutes} minute${minutes === 1 ? "" : "s"} on ${S.current.topic}. I'll keep watch.`
+      : `Locked in for ${minutes} minute${minutes === 1 ? "" : "s"}. I'll keep watch.`;
     await a.say(line);
     a.setBubble(null);
     await settle();
@@ -198,7 +198,7 @@ const LockIn = forwardRef<LockInHandle, { api: LockInApi; miloPos: Pos; onActive
         a.confetti(p.x + MILO_W / 2, p.y + 20);
       } else a.setMood("idle");
       const slipText = s.slips === 0 ? "zero slips" : s.slips === 1 ? "one slip" : `${s.slips} slips`;
-      await a.say(completed ? `Done. ${mins} minutes locked in, ${slipText}.` : `Stopped. ${mins} minutes locked in, ${slipText}.`);
+      await a.say(completed ? `Done. ${mins} minute${mins === 1 ? "" : "s"} locked in, ${slipText}.` : `Stopped. ${mins} minute${mins === 1 ? "" : "s"} locked in, ${slipText}.`);
       a.setBubble(null);
       a.setMood("sitting");
     },
