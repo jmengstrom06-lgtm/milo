@@ -27,6 +27,8 @@ const UFC: Ctx = { researchOpen: true, researchTopic: "Who is Usman Nurmagomedov
 
 export const CASES: Case[] = [
   // ---- real (from the logs) -----------------------------------------------------------------
+  { real: true, say: "open chrome, go to the TCU library website and tell me today's hours", expect: { kind: ["task", "research"] }, note: "a real library website, not Milo's saved work" },
+  { say: "what are the library hours today", expect: { kind: ["research", "task", "chat"] } },
   { real: true, say: "How are you today?", expect: { kind: "chat" } },
   { real: true, say: "open a Chrome tab for me with depogram.com on it", expect: { kind: "task" } },
   { real: true, say: "open ChatGPT and ask it to write a short story about a frog", expect: { kind: "task" } },

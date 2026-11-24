@@ -2801,7 +2801,9 @@ export default function App() {
     const SURE = ["hush", "yes", "no", "resume", "undo", "activity", "feedback", "paper", "week", "home", "handle", "d2lclass"];
     const LESSON_SURE = ["close", "goto", "mode", "answer", "show", "copy", "practice", "skip", "repeat", "fill"];
     const sureSweep = intent.kind === "sweep" && (!!intent.show || !!intent.fill); // "show me the answers" / "fill it in": no doubt
-    if (!SURE.includes(intent.kind) && !sureSweep && !(inLesson && LESSON_SURE.includes(intent.kind))) {
+    // a computer task that names a browser or a website is a web task, not one of Milo's own apps ("the TCU library website")
+    const sureWeb = intent.kind === "task" && /\b(chrome|safari|browser|website|web ?site|web ?page|https?:|[a-z0-9-]+\.(com|edu|org|net|gov|io))\b/i.test(text);
+    if (!SURE.includes(intent.kind) && !sureSweep && !sureWeb && !(inLesson && LESSON_SURE.includes(intent.kind))) {
       setMood("thinking");
       const r0 = Date.now();
       getRoute(text).then((rt) => {
