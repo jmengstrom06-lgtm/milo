@@ -95,6 +95,9 @@ export const SHOW_ONLY =
 /** Worksheet, and type the answers in (overrides a show-only default). */
 export const FILL_IN = /\b(fill (it|them|this|everything) in|type (them|it|the answers) in|put the answers in)\b/;
 
+/** Just "fill it in" / "type them in", nothing else: the worksheet on screen, answers typed in. */
+const FILL_ONLY = /^(?:just |go ahead and |can you |please )?(?:fill (?:it|them|this|everything) in|type (?:them|it|the answers) in|put the answers in)(?: for me)?$/;
+
 const SWEEP =
   /\b(do|finish|complete|answer|solve|fill (out|in))\b.*\b(whole|entire|all|every|everything)\b.*\b(worksheet|assignment|homework|page|quiz|questions|problems|them|these|it)?|\b(do|finish|complete|fill out) (this|the|my) (worksheet|assignment|homework|problem set)\b|\bworksheet sweep\b/;
 
@@ -169,6 +172,8 @@ function parseSingle(raw: string, ctx: Ctx): Intent {
   if (/^(what'?s due|what is due|what do i have (due|to do|today|tomorrow|this week)|daily brief|morning brief|my brief|brief me|what'?s on my plate|anything due)\b/.test(t)) return { kind: "brief" };
   if (/^(quiz me|test me|give me a (quiz|test|practice test)|make (me )?a (quiz|practice test)|study mode|quiz mode)\b/.test(t)) return { kind: "quiz", focus: text };
   if (!ctx.inLesson && SHOW_ONLY.test(t)) return { kind: "sweep", show: true };
+  // "fill it in" / "type them in" on its own: do the worksheet on screen and type the answers in
+  if (!ctx.inLesson && FILL_ONLY.test(t)) return { kind: "sweep", fill: true };
   if (SWEEP.test(t)) return { kind: "sweep", ...(FILL_IN.test(t) ? { fill: true } : {}) };
   if (BUILD.test(t) && !/\b(google (doc|sheet|slide)s?|new (tab|window|doc|sheet)|folder|spreadsheet in|document)\b/.test(t)) return { kind: "build", request: text };
 
