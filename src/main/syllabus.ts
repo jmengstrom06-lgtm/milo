@@ -75,22 +75,69 @@ export function parseScale(text: string): Scale | null {
 const tried = new Map<number, number>(); // course id -> when we last looked (don't hammer D2L)
 
 /** Read this class's syllabus from D2L (once), remember its scale (and weights if asked). */
-/** Find a class's syllabus in D2L Content and read it: text (Word/page) or the PDF itself. Null if there isn't one. */
-export async function syllabusSource(portal: string, c: Course): Promise<{ text: string; pdf?: string; title: string; ext: string } | null> {
-  const topics = await contentTopics(portal, c).catch(() => []);
-  const pick = topics.find((t) => /syllab/i.test(t.Title)) ?? topics.find((t) => /syllab/i.test(t.Url)) ?? topics.find((t) => /course (info|outline|overview)|grading/i.test(t.Title));
-  if (!pick?.Url) return null;
-  const ext = (pick.Url.match(/\.(\w+)(?:\?|$)/)?.[1] ?? "").toLowerCase();
+/** How likely a Content item is the syllabus, from its title, its folder path and its type. 0 = no. (pure) */
+export function syllabusScore(t: { Title: string; Url: string; path?: string }): number {
+  const title = t.Title.toLowerCase();
+  const path = (t.path ?? "").toLowerCase();
+  const url = t.Url.toLowerCase();
+  let s = 0;
+  if (/syllab/.test(title)) s += 10;
+  if (/syllab/.test(url)) s += 6;
+  if (/syllab/.test(path)) s += 6; // a "Syllabus" folder holding "STAT 20103 Fall 2026.pdf"
+  if (/course (info|information|outline|overview|policies|guide)|start here|getting started|policies|course schedule/.test(title)) s += 4;
+  if (/course (info|information|overview)|start here|getting started|administrative/.test(path)) s += 2;
+  if (s && /\.(pdf|docx?)(\?|$)/.test(url)) s += 1;
+  return s;
+}
+const AI_WORDS = /\b(artificial intelligence|generative|chatgpt|gen ?ai|large language|\bai\b (tools?|use|policy)|use of ai|ai-generated)/i;
+
+async function readTopic(portal: string, t: { Title: string; Url: string }): Promise<{ text: string; pdf?: string; title: string; ext: string } | null> {
+  const ext = (t.Url.match(/\.(\w+)(?:\?|$)/)?.[1] ?? "").toLowerCase();
+  const b64 = await fileBase64(portal, t.Url).catch(() => null);
+  if (!b64) return null;
+  const buf = Buffer.from(b64, "base64");
   let text = "";
   let pdf: string | undefined;
-  const b64 = await fileBase64(portal, pick.Url).catch(() => null);
-  if (b64) {
-    const buf = Buffer.from(b64, "base64");
-    if (ext === "docx") text = docxText(buf);
-    else if (ext === "pdf" || buf.subarray(0, 4).toString() === "%PDF") pdf = b64;
-    else text = buf.toString("utf8").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ");
+  if (ext === "docx") text = docxText(buf);
+  else if (ext === "pdf" || buf.subarray(0, 4).toString() === "%PDF") pdf = b64;
+  else text = buf.toString("utf8").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ");
+  return text || pdf ? { text, pdf, title: t.Title, ext } : null;
+}
+
+/** Find a class's syllabus in D2L Content and read it: text (Word/page) or the PDF itself. Null if there isn't one.
+ *  Looks at titles AND folder names, tries the best few candidates, and (for the AI policy) prefers the one that
+ *  actually mentions AI. Falls back to the course Overview's attached file. `why` says what happened. */
+export async function syllabusSource(
+  portal: string,
+  c: Course,
+  opts: { wantAi?: boolean } = {}
+): Promise<{ text: string; pdf?: string; title: string; ext: string; why?: string } | null> {
+  const topics = await contentTopics(portal, c).catch(() => []);
+  const ranked = topics
+    .map((t) => ({ t, s: syllabusScore(t) }))
+    .filter((x) => x.s > 0)
+    .sort((a, b) => b.s - a.s)
+    .slice(0, opts.wantAi ? 4 : 1);
+  let first: Awaited<ReturnType<typeof readTopic>> = null;
+  for (const { t } of ranked) {
+    const got = await readTopic(portal, t);
+    if (!got) continue;
+    first ??= got;
+    if (!opts.wantAi || got.pdf || AI_WORDS.test(got.text)) return got; // PDFs: the AI reads them; text: must mention AI
   }
-  return { text, pdf, title: pick.Title, ext };
+  if (first) return first;
+  // the course homepage's Overview often has the syllabus attached
+  const ov = await courseOverviewFile(portal, c).catch(() => null);
+  if (ov) return ov;
+  bb("syllabus", "not_found", { course: c.short, topics: topics.length, candidates: ranked.length });
+  return null;
+}
+
+/** The file attached to the course Overview (D2L's own "syllabus" spot in many courses). */
+async function courseOverviewFile(portal: string, c: Course) {
+  const url = `/d2l/api/le/1.100/${c.id}/overview/attachment`;
+  const got = await readTopic(portal, { Title: "Course overview", Url: url });
+  return got ? { ...got, title: "Course overview attachment" } : null;
 }
 
 export async function learnSyllabus(portal: string, c: Course, wantWeights: boolean): Promise<{ scale: Scale | null; weights: boolean }> {
