@@ -93,3 +93,13 @@ describe("ask when unsure", () => {
     expect(cleanAsk({ kind: "research", question: "x" })).toEqual({ kind: "research", question: "x" });
   });
 });
+
+import { speakMath, stripMath } from "../src/renderer/MathText";
+describe("math out loud", () => {
+  it("never drops Greek letters", () => {
+    expect(speakMath("mean $\\mu$ and standard deviation $\\sigma$?")).toBe("mean mu and standard deviation sigma?");
+    expect(speakMath("$z = \\frac{x - \\mu}{\\sigma}$")).toBe("z = x - mu over sigma");
+    expect(stripMath("$\\mu$ and $\\sigma$")).toBe("μ and σ");
+    expect(stripMath("$\\left(a\\right) \\le b$")).toBe("(a) ≤ b");
+  });
+});

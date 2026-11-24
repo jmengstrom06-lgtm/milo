@@ -133,6 +133,10 @@ export default function App() {
   const [bubble, setBubble] = useState<string | null>(null);
   // "Handle this": what Milo saw + 2-3 things he can do, as tappable chips by the frog
   const [offer, setOffer] = useState<{ seen: string; options: { label: string; say: string }[] } | null>(null);
+  const chipsRef = useRef<typeof offer>(null); // the buttons on screen right now (cleared the instant one is picked)
+  useEffect(() => {
+    chipsRef.current = offer;
+  }, [offer]);
   // click the frog: the quick menu with the three moves
   const [menu, setMenu] = useState(false);
   // Milo speaks first: a heads-up card by the frog ("Thursday's stacked", "While you were in class…")
@@ -1288,6 +1292,7 @@ export default function App() {
   /** "Milo, handle this": look, then offer 2-3 things instead of guessing. Tapping one runs it like a command. */
   const handleThis = async (said: string) => {
     setMenu(false);
+    setChatOpen(false);
     setOffer(null);
     setMood("looking");
     say("Let me look.").then(() => undefined);
@@ -1317,6 +1322,7 @@ export default function App() {
     say(`${r.seen ? `${r.seen} ` : ""}Want me to ${r.options[0].label.toLowerCase()}?`).then(() => setBubble(null));
   };
   const pickOffer = (o: { label: string; say: string }) => {
+    chipsRef.current = null; // before routing: the chosen command must never be read as picking a button again
     setOffer(null);
     hover(false);
     bb("offer_picked", { label: o.label });
@@ -2490,9 +2496,11 @@ export default function App() {
     }
     if (offerAnswer(text)) return;
     // Milo's buttons are up ("help me with bio" → three choices): "the first one" / "quiz me" picks one
-    if (offer && !bubble) {
-      const i = pickSpoken(text, offer.options);
-      if (i >= 0) return pickOffer(offer.options[i]);
+    const chips = chipsRef.current;
+    if (chips) {
+      chipsRef.current = null;
+      const i = pickSpoken(text, chips.options);
+      if (i >= 0) return pickOffer(chips.options[i]);
       setOffer(null); // they said something else: drop the buttons and do that
     }
     // "What's it about?" -> "the french revolution"
@@ -2964,6 +2972,7 @@ export default function App() {
       case "ask": {
         // Not sure what they meant: ask with buttons instead of guessing. Tapping (or saying) one runs it.
         const options = rt.choices ?? [];
+        setChatOpen(false); // the buttons sit where the chat box is: show them on their own
         setMood("idle");
         setBubble(null);
         setOffer({ seen: rt.question ?? "", options });
@@ -4131,6 +4140,8 @@ export default function App() {
         onOpenChange={(a) => {
           setKitApp(a);
           if (!a) {
+            hush(); // stop talking about something that's no longer on screen
+            setBubble(null);
             hover(false);
             setMood("idle");
           }

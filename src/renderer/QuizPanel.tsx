@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import MathText, { stripMath } from "./MathText";
+import MathText, { speakMath, stripMath } from "./MathText";
 import type { PanelSize } from "./ResearchPanel";
 import { sfx } from "./sfx";
 
@@ -36,7 +36,7 @@ const QuizPanel = forwardRef<QuizHandle, Props>(function QuizPanel(p, ref) {
   useEffect(() => {
     if (done || !q) return;
     setLeft(SECONDS);
-    p.say(stripMath(q.q));
+    p.say(speakMath(q.q));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [i, done]);
 
