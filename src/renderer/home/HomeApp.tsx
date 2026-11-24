@@ -2059,18 +2059,20 @@ function RulesCard({ cls }: { cls: Klass }) {
     void M.rules.get().then(setRules).catch(() => {});
   }, []);
   const r = rules[cls.id];
-  const toggle = async () => {
+  const run = async (on: boolean, fromScreen = false) => {
     setBusy(true);
-    const res = await M.rules.set({ classId: cls.id, course: cls.name, on: !r, portal: localStorage.getItem("milo.portal") || "" }).catch(() => null);
+    const res = await M.rules.set({ classId: cls.id, course: cls.name, on, portal: localStorage.getItem("milo.portal") || "", fromScreen }).catch(() => null);
     setBusy(false);
     if (res?.rules) setRules(res.rules);
   };
+  const toggle = () => run(!r);
+  const notFound = !!r && !r.quote;
   return (
     <section className="hb-card" aria-label="Syllabus AI rules">
       <div className="hb-set">
         <div>
           <b>Follow my syllabus AI rules</b>
-          <span>{busy ? "Reading your syllabus…" : r ? RULE_DOES[r.level] : "Off. Milo works like any AI tool here. Turn on and he'll read this class's syllabus and follow its AI policy."}</span>
+          <span>{busy ? "Reading your syllabus… (a few seconds)" : r ? (r.quote ? RULE_DOES[r.level] : "On, but I still need the syllabus. See below.") : "Off. Milo works like any AI tool here. Turn on and he'll read this class's syllabus and follow its AI policy."}</span>
         </div>
         <button role="switch" aria-checked={!!r} aria-label="Follow my syllabus AI rules" disabled={busy} className={`hb-switch ${r ? "on" : ""}`} onClick={() => void toggle()}>
           <i aria-hidden="true" />
@@ -2088,8 +2090,20 @@ function RulesCard({ cls }: { cls: Klass }) {
               ))}
             </select>
           </div>
-          {r.quote ? <blockquote>“{r.quote}”</blockquote> : <p className="hb-muted">I couldn't find an AI policy in this syllabus.</p>}
-          <p className="hb-muted">From: {r.source}</p>
+          {r.quote ? (
+            <>
+              <blockquote>“{r.quote}”</blockquote>
+              <p className="hb-muted">From: {r.source}</p>
+            </>
+          ) : (
+            <div className="hb-rulemiss">
+              <b>{/No syllabus found/.test(r.source) ? "I couldn't find this class's syllabus in D2L." : "I couldn't find an AI policy in this syllabus."}</b>
+              <span>Open the syllabus (D2L page, PDF or Word doc) and scroll to the part about AI, then come back and tap below. Until then I treat this class as studying only.</span>
+              <button className="hb-primary hb-sm" disabled={busy} onClick={() => void run(true, true)}>
+                Read it from my screen
+              </button>
+            </div>
+          )}
         </div>
       )}
     </section>

@@ -152,7 +152,7 @@ contextBridge.exposeInMainWorld("milo", {
   suggest: (said: string) => ipcRenderer.invoke("milo:suggest", said),
   rules: {
     get: () => ipcRenderer.invoke("milo:rules-get"),
-    set: (q: { classId: string; course: string; on: boolean; portal: string }) => ipcRenderer.invoke("milo:rules-set", q),
+    set: (q: { classId: string; course: string; on: boolean; portal: string; fromScreen?: boolean }) => ipcRenderer.invoke("milo:rules-set", q),
     level: (classId: string, level: string) => ipcRenderer.invoke("milo:rules-level", classId, level),
     check: (act: string, said: string) => ipcRenderer.invoke("milo:rules-check", act, said),
   },

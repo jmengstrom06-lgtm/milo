@@ -1179,8 +1179,9 @@ const POLICY_TOOL = {
     required: ["level", "quote"],
   },
 };
-export async function readAiPolicy(src: { text?: string; pdf?: string }): Promise<ApiOk<{ level: string; quote: string }> | ApiErr> {
+export async function readAiPolicy(src: { text?: string; pdf?: string; jpeg?: string }): Promise<ApiOk<{ level: string; quote: string }> | ApiErr> {
   const content: unknown[] = [];
+  if (src.jpeg) content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: src.jpeg } });
   if (src.pdf) content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: src.pdf } });
   content.push({ type: "text", text: `${src.text ? `SYLLABUS:\n"""${src.text.slice(0, 60000)}"""\n\n` : ""}What is this class's rule on students using AI tools (ChatGPT etc.)? Quote it exactly. Look for sections like "AI", "Artificial Intelligence", "ChatGPT", "generative", "academic integrity", "technology use". If there's nothing specific about AI, the level is unclear.` });
   return callTool<{ level: string; quote: string }>(
