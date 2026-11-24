@@ -271,6 +271,19 @@ export async function backend(route: string, init: { body: BodyInit; contentType
   });
 }
 
+/** Milo's Google sign-in helper on the server (keeps the Google client secret off students' Macs). */
+export async function googleBackend(route: "config" | "token" | "refresh", body?: unknown): Promise<{ status: number; data: any } | null> {
+  const token = await accessToken();
+  if (!token) return null;
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/milo-google/${route}`, {
+    method: body === undefined ? "GET" : "POST",
+    headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_ANON, "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  }).catch(() => null);
+  if (!res) return null;
+  return { status: res.status, data: await res.json().catch(() => ({})) };
+}
+
 /** Read/write the student's own rows (row-level security keeps it to them). */
 export async function rest(pathAndQuery: string, init: { method?: string; body?: unknown; prefer?: string } = {}): Promise<any> {
   const token = await accessToken();
