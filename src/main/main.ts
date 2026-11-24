@@ -223,7 +223,7 @@ function toJpeg(img: Electron.NativeImage, max: number) {
 // Milo still sees the whole screen (so clicks and boxes line up); everything outside the part that matters is dimmed.
 
 type ScreenRect = { x: number; y: number; width: number; height: number }; // screen points
-let pickedArea: { box: ScreenRect; app: string } | null = null;
+let pickedArea: { box: ScreenRect; app: string; at: number } | null = null;
 let workWindow: { app: string; box: ScreenRect } | null = null;
 const MILO_APP = /^(milo|electron)$/i;
 setInterval(async () => {
@@ -231,7 +231,9 @@ setInterval(async () => {
   const w = await frontWindow().catch(() => null);
   if (!w?.app || MILO_APP.test(w.app)) return; // clicking Milo shouldn't change what he looks at
   workWindow = w.frame ? { app: w.app, box: { x: w.frame.x, y: w.frame.y, width: w.frame.w, height: w.frame.h } } : null;
-  if (pickedArea && pickedArea.app && pickedArea.app !== w.app) {
+  // switched to another app a while after picking (clicking into the picked window right away is normal)
+  if (pickedArea && pickedArea.app && pickedArea.app !== w.app && Date.now() - pickedArea.at < 90e3) pickedArea.app = w.app; // clicked into the window they picked
+  else if (pickedArea && pickedArea.app && pickedArea.app !== w.app) {
     pickedArea = null; // moved on to another app: the box no longer means anything
     overlay?.webContents.send("milo:area-cleared");
   }
@@ -246,7 +248,7 @@ ipcMain.handle("milo:area-set", async (_e, box: ScreenRect | null) => {
     pickedArea = null;
     return { ok: true };
   }
-  pickedArea = { box: overlayToScreen(box), app: workWindow?.app ?? "" };
+  pickedArea = { box: overlayToScreen(box), app: workWindow?.app ?? "", at: Date.now() };
   bb("area", "picked", { w: Math.round(box.width), h: Math.round(box.height), app: pickedArea.app });
   track("area_picked", {});
   return { ok: true };
@@ -266,10 +268,12 @@ async function focusFor(
   const toPx = (b: ScreenRect) => clampRect({ x: (b.x - shot.bounds.x) * k, y: (b.y - shot.bounds.y) * k, width: b.width * k, height: b.height * k }, small.size.width, small.size.height);
   const toScreen = (b: ScreenRect) => ({ x: shot.bounds.x + b.x / k, y: shot.bounds.y + b.y / k, width: b.width / k, height: b.height / k });
   if (pickedArea) return { box: toPx(pickedArea.box), how: "picked" };
-  if (named && said && namesATarget(said)) {
+  // Named it ("the stats one") or not ("help with this"): either way, if two separate things are on screen
+  // and it's not clear which, ask instead of guessing.
+  if (named && said) {
     const r = await locateTarget(small.b64, small.size, said).catch(() => null);
     const d = decideTarget(r && r.ok ? r.data : null);
-    bb("area", "named", { said: said.slice(0, 80), kind: d.kind, label: d.kind === "one" ? d.label : undefined });
+    bb("area", "named", { said: said.slice(0, 80), named: namesATarget(said), kind: d.kind, regions: r && r.ok ? r.data.regions?.length ?? 0 : -1, pick: r && r.ok ? r.data.pick : null, label: d.kind === "one" ? d.label : undefined });
     if (d.kind === "one") {
       overlay?.webContents.send("milo:area-flash", { box: screenToOverlay(toScreen(d.box)), label: d.label });
       return { box: clampRect(d.box, small.size.width, small.size.height), how: "named", label: d.label };
@@ -1238,7 +1242,8 @@ ipcMain.handle("milo:preflight", async () => {
   const rubric = looksLikeRubric(clip) ? clip : "";
   const cap = await captureScreen();
   if (!cap.ok) return cap;
-  const fj = await focusedJpeg(cap.shot, 1568, "", false);
+  const fj = await focusedJpeg(cap.shot, 1568, "check my work");
+  if (fj.ask) return ASKED;
   const small = fj.small;
   const r = await preflightCheck({ jpeg: small.b64, size: small.size, rubric: rubric || undefined });
   track("preflight", { ok: r.ok, rubric: !!rubric, n: r.ok ? r.data.items.length : 0, confirmed: r.ok ? r.data.items.filter((i) => i.status === "confirmed").length : 0 });

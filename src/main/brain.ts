@@ -1246,7 +1246,10 @@ export async function locateTarget(jpegBase64: string, size: { width: number; he
     {
       model: models.fast(),
       max_tokens: 600,
-      system: `You find which part of a student's screen they mean. They said: "${said.slice(0, 200)}". Match by subject (stats vs algebra, math vs English), by side or position (left, right, top), and by app or tab name. Pixel coordinates in the screenshot.`,
+      system: `You find which part of a student's screen they mean. They said: "${said.slice(0, 200)}".
+List each separate piece of work visible: different windows or apps (Chrome and Safari side by side), split panes, separate documents. One window with one assignment = one region.
+Match by subject (stats vs algebra, math vs English), by side or position (left, right, top), and by app or tab name.
+If they did NOT say which one ("my math problem", "this", "the problem on my screen", "help me") and 2 or more regions could be what they mean, pick -1 so Milo asks instead of guessing. Two math problems + "my math problem" = -1. Pixel coordinates in the screenshot.`,
       tools: [TARGET_TOOL],
       tool_choice: { type: "auto" },
       messages: [

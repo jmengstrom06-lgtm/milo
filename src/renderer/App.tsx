@@ -2057,6 +2057,7 @@ export default function App() {
     setBubble("Checking your work against the requirements…");
     const r = await window.milo.preflight();
     setBubble(null);
+    if (!r.ok && (r as { asked?: boolean }).asked) return void setMood("idle"); // "Which one?" buttons are up
     if (!r.ok) return say(r.text || "I couldn't check right now.").then(() => setBubble(null));
     const fix = r.items.filter((i) => i.status === "confirmed").length;
     const look = r.items.filter((i) => i.status === "possible").length;
