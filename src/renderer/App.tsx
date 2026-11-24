@@ -3931,7 +3931,7 @@ export default function App() {
     else if (a === "did") setActivityOpen(true);
     else if (a === "checkup") {
       try {
-        localStorage.setItem("milo.openSettings", String(Date.now()));
+        localStorage.setItem("milo.openToday", String(Date.now()));
       } catch {
         /* ignore */
       }

@@ -82,4 +82,14 @@ describe("checkup", () => {
     const items = checklist({ ...good, perms: { screen: false, hands: true, mic: false } });
     expect(checkupLine(items, [])).toMatch(/2 things/);
   });
+
+  it("paused is the first problem, with a turn-on fix", () => {
+    const items = checklist({ ...good, paused: true });
+    expect(problems(items)[0]).toMatchObject({ id: "paused", fix: { kind: "unpause" } });
+  });
+
+  it("Chrome running with no windows isn't a problem", () => {
+    expect(by({ ...good, chrome: { running: true, extension: false, windows: 0 } }, "chrome").ok).toBeNull();
+    expect(by({ ...good, chrome: { running: true, extension: false, windows: 2 } }, "chrome").ok).toBe(false);
+  });
 });

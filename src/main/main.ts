@@ -56,7 +56,7 @@ import { captureError, identify, recentEvents, sendFeedback, startTelemetry, tra
 import { allowForSession, backToWork, startFocus, stopFocus } from "./focus";
 import { planBlocks } from "./focusRules";
 import { rest } from "./account";
-import { activateApp, click, ensureBrowser, resolveApp, frontApp, isRunning, openApp, openFolder, openLatestDownload, openUrl, pressKeys, quitApp, typeText } from "./hands";
+import { activateApp, chromeWindowCount, click, ensureBrowser, resolveApp, frontApp, isRunning, openApp, openFolder, openLatestDownload, openUrl, pressKeys, quitApp, typeText } from "./hands";
 import { plan } from "./quick";
 import { research } from "./research";
 import { buildTool } from "./builder";
@@ -1480,9 +1480,17 @@ async function probeCheckup(portal: string): Promise<Probe> {
   const [aiServer, d2l, google, chromeRunning] = await Promise.all([
     devKey || !signedIn
       ? Promise.resolve(null)
-      : fetch(`${SUPABASE_URL}/functions/v1/milo/health`, { headers: { Authorization: `Bearer ${SUPABASE_ANON}`, apikey: SUPABASE_ANON }, signal: AbortSignal.timeout(8000) })
-          .then(async (r) => (r.ok ? !!((await r.json()) as { anthropic?: boolean }).anthropic : false))
-          .catch(() => null),
+      : (async () => {
+          // one miss right after the Mac wakes is normal (wifi still joining): try twice before calling it broken
+          const once = () =>
+            fetch(`${SUPABASE_URL}/functions/v1/milo/health`, { headers: { Authorization: `Bearer ${SUPABASE_ANON}`, apikey: SUPABASE_ANON }, signal: AbortSignal.timeout(8000) })
+              .then(async (r) => (r.ok ? !!((await r.json()) as { anthropic?: boolean }).anthropic : false))
+              .catch(() => null);
+          const first = await once();
+          if (first === true) return true;
+          await new Promise((res) => setTimeout(res, 4000));
+          return once();
+        })(),
     portal ? d2lCheck(portal).then((c) => ({ ok: c.ok, signin: c.signin })).catch(() => ({ ok: false, signin: false })) : Promise.resolve(null),
     (async () => {
       await refreshGoogleConfig().catch(() => false);
@@ -1497,6 +1505,8 @@ async function probeCheckup(portal: string): Promise<Probe> {
     })(),
     mac ? isRunning("Google Chrome").catch(() => false) : Promise.resolve(false),
   ]);
+  // Chrome running with no windows: its helper may be asleep, and that's fine until a page is open
+  const chromeWindows = chromeRunning && !bridgeConnected() ? await chromeWindowCount() : 1;
   return {
     devKey,
     signedIn,
@@ -1504,7 +1514,8 @@ async function probeCheckup(portal: string): Promise<Probe> {
     portal,
     d2l,
     google,
-    chrome: { running: !!chromeRunning, extension: bridgeConnected() },
+    chrome: { running: !!chromeRunning, extension: bridgeConnected(), windows: chromeWindows },
+    paused: pauseState().on,
     perms: mac
       ? { screen: systemPreferences.getMediaAccessStatus("screen") === "granted", hands: systemPreferences.isTrustedAccessibilityClient(false), mic: systemPreferences.getMediaAccessStatus("microphone") === "granted" }
       : { screen: true, hands: true, mic: true },
@@ -1521,6 +1532,10 @@ ipcMain.handle("milo:checkup", async (_e, portal?: string) => {
 ipcMain.handle("milo:checkup-fix", async (_e, kind: FixKind) => {
   track("checkup_fix", { kind });
   if (kind === "google") return googleConnect();
+  if (kind === "unpause") {
+    setPause(false);
+    return { ok: true, text: "I'm back on." };
+  }
   if (kind === "chrome") {
     await openApp("Google Chrome").catch(() => {});
     if (!bridgeConnected()) await shell.openPath(extensionDirs()[0]).catch(() => "");

@@ -338,3 +338,13 @@ export async function openFolder(which: "downloads" | "desktop" | "documents") {
   await run("open", [app.getPath(which)]);
   await sleep(700);
 }
+
+/** How many windows Chrome has open (1 if we can't tell, so nothing is hidden by a failed check). */
+export async function chromeWindowCount(): Promise<number> {
+  try {
+    const n = Number((await run("osascript", ["-e", 'tell application "Google Chrome" to count windows'])).trim());
+    return Number.isFinite(n) ? n : 1;
+  } catch {
+    return 1;
+  }
+}
