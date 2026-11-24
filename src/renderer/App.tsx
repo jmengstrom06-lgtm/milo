@@ -1282,8 +1282,15 @@ export default function App() {
     say("Let me look.").then(() => undefined);
     const r = await window.milo.suggest(said || "handle this");
     setMood("idle");
+    // couldn't see the screen (permission, paused): say so. Anything else (the AI stumbled): still offer the basics.
+    if (!r.ok && /screen|paused|permission|privacy/i.test(r.text || "")) {
+      say(r.text).then(() => setBubble(null));
+      return;
+    }
     if (!r.ok) {
-      say(r.text || "I couldn't see your screen.").then(() => setBubble(null));
+      bb("suggest_fallback", { why: (r.text || "").slice(0, 80) });
+      setOffer({ seen: "", options: [{ label: "Explain this", say: "explain this" }, { label: "Quiz me on this", say: "quiz me on this" }, { label: "Start this", say: "start this" }] });
+      say("Here's what I can do with this.").then(() => setBubble(null));
       return;
     }
     // nothing specific came back: still offer the moves that work on almost any screen
