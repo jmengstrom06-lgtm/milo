@@ -1024,7 +1024,6 @@ const SUGGEST_TOOL = {
 export async function suggestActions(jpegBase64: string, size: { width: number; height: number }, said: string): Promise<ApiOk<Suggestion> | ApiErr> {
   const r = await callTool<Suggestion>(
     {
-      model: models.fast(),
       max_tokens: 500,
       system: `${persona()}
 The student pointed Milo at their screen with a vague ask ("${said.slice(0, 120)}"). Offer the 2 or 3 most useful things Milo can actually do with what's on screen, best first.

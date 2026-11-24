@@ -1083,7 +1083,7 @@ ipcMain.handle("milo:suggest", async (_e, said: string) => {
   if (!cap.ok) return cap;
   const small = toJpeg(cap.shot.full, 1280);
   const r = await suggestActions(small.b64, small.size, String(said ?? "").slice(0, 200));
-  track("suggest", { ok: r.ok, n: r.ok ? r.data.options.length : 0 });
+  track("suggest", { ok: r.ok, n: r.ok ? r.data.options.length : 0, ...(r.ok ? {} : { err: r.text.slice(0, 80) }) });
   if (r.ok && !r.data.options.length) bb("suggest", "no_options", { seen: r.data.seen.slice(0, 80) });
   return r.ok ? { ok: true, seen: r.data.seen, options: r.data.options } : r;
 });

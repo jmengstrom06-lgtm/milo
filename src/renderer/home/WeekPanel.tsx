@@ -55,9 +55,14 @@ export default function WeekPanel({
         events = s.events;
         its = s.items;
       } else if (googleOn) {
-        const r = await M.week.busy().catch(() => ({ ok: false, events: [] as typeof events, text: "" }));
+        const r = await M.week.busy().catch((e: Error) => ({ ok: false, events: [] as typeof events, text: e.message }));
         if (r.ok) events = r.events;
-        else setCalNote("I couldn't read your calendar, so I only avoided class-time guesses. Check the times before approving.");
+        else
+          setCalNote(
+            /connect google again|401/i.test(r.text || "")
+              ? "Your Google sign-in ran out, so I can't see when you're busy. Reconnect Google in Settings, then ask again."
+              : `I couldn't read your calendar (${(r.text || "no answer").slice(0, 80)}), so check the times before approving.`
+          );
       } else setCalNote("Your Google Calendar isn't connected, so I can't see when you're busy. Connect it and I'll plan around everything.");
       if (!live) return;
       const p = fixWeek(its, events, now);
