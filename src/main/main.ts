@@ -46,7 +46,7 @@ import { feedUrl } from "./school";
 import { checkMath, isQuantitative, type MathVerdict } from "./mathcheck";
 import { askForecast, setFinalWeight } from "./grades";
 import { addScore, gradeNow, readSyllabus } from "./gradebook";
-import { calendarFeedUrl, subscribePageUrl, d2lCheck, keepSignedIn, courses as d2lCourses, dueSoon as d2lDue, gradeSheet as d2lSheet, matchCourse as d2lMatch, SignInNeeded } from "./d2l";
+import { calendarFeedUrl, subscribePageUrl, d2lCheck, keepSignedIn, courses as d2lCourses, dueSoon as d2lDue, gradeSheet as d2lSheet, matchCourse as d2lMatch, links as d2lLinks, SignInNeeded } from "./d2l";
 import { makeExam } from "./exam";
 import { transcribe } from "./ears";
 import { binaryPath, stopNative } from "./native";
@@ -66,6 +66,7 @@ import { isPaused, PAUSED_TEXT, pauseState, setPause } from "./pause";
 import { looksLikeRubric, prefs, setPrefs, type Prefs } from "./prefs";
 import { allowed as ruleAllows, cleanPolicy, holdBackLine, ruleFor, type Act, type Level } from "./classRules";
 import { loadRules, saveRule } from "./classRulesStore";
+import { setStudentContext, type StudentContext } from "./studentContext";
 import { syllabusSource } from "./syllabus";
 import { frontWindow } from "./focus";
 import { checkForUpdate, installUpdate, startUpdater, startUpdates, updateReady } from "./updater";
@@ -456,7 +457,7 @@ ipcMain.handle("milo:usage", () => usageToday());
 // ---------- Google: Gmail, Calendar, Docs (sending and adding always wait for the student's yes) ----------
 const gerr = (e: unknown) =>
   e instanceof GoogleNotConnected
-    ? { ok: false as const, connect: true, text: googleStatus().ready ? "Connect your Google account first. Say connect Google." : "Google isn't set up in Milo yet." }
+    ? { ok: false as const, connect: true, text: googleStatus().ready ? "Connect your Google account first. Say connect Google." : "Google sign-in isn't available in this copy of Milo yet, so Calendar, Gmail and Docs can't work." }
     : { ok: false as const, text: `Google had a problem: ${(e as Error).message.slice(0, 120)}` };
 ipcMain.handle("milo:google-status", () => googleStatus());
 ipcMain.handle("milo:google-connect", () => googleConnect());
@@ -690,6 +691,23 @@ ipcMain.handle("milo:grade-now", async (_e, course: string, portal?: string) => 
 ipcMain.handle("milo:d2l-check", (_e, portal: string) => d2lCheck(String(portal ?? "")));
 ipcMain.handle("milo:d2l-feed-url", (_e, portal: string) => calendarFeedUrl(String(portal ?? "")).catch(() => null));
 ipcMain.handle("milo:d2l-subscribe-url", (_e, portal: string) => subscribePageUrl(String(portal ?? "")).catch(() => null));
+/** "Open my stats class / grades / assignments on D2L": straight to the right page, no AI needed. */
+ipcMain.handle("milo:d2l-open-class", async (_e, portal: string, course: string, page: string) => {
+  const p = String(portal ?? "");
+  if (!p) return { ok: false, text: "Connect D2L first (Home base, Settings)." };
+  const list = await d2lCourses(p).catch(() => []);
+  const c = d2lMatch(String(course ?? ""), list);
+  if (!c) return { ok: false, text: list.length ? `I couldn't find a class called "${course}" in D2L.` : "I couldn't reach D2L. Sign in to D2L in Chrome first." };
+  const L = d2lLinks(p.startsWith("http") ? p : `https://${p}`, c.id) as Record<string, string>;
+  const url = L[String(page)] ?? L.home;
+  try {
+    await ext("new_tab", { url }, 15000);
+  } catch {
+    await openUrl(url).catch(() => {});
+  }
+  track("d2l_open_class", { page: String(page) });
+  return { ok: true, text: `Opened ${c.name}${page && page !== "home" ? ` ${page}` : ""} on D2L.`, url };
+});
 ipcMain.handle("milo:d2l-open-chrome", async (_e, url: string) => {
   const u = /^https?:\/\//.test(String(url)) ? String(url) : `https://${url}`;
   try {
@@ -1103,6 +1121,7 @@ ipcMain.handle("milo:preflight", async () => {
   return r.ok ? { ok: true, ...r.data, rubricFrom: rubric ? "clipboard" : null } : r;
 });
 // ---------- Optional: follow a class's syllabus AI rules (off unless the student turns it on) ----------
+ipcMain.on("milo:context-set", (_e, c: Partial<StudentContext>) => setStudentContext(c ?? {}));
 ipcMain.handle("milo:rules-get", () => loadRules());
 ipcMain.handle("milo:rules-set", async (_e, q: { classId: string; course: string; on: boolean; portal: string; fromScreen?: boolean }) => {
   const id = String(q?.classId ?? "");

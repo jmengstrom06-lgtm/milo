@@ -53,7 +53,8 @@ function store(t: Tokens | null) {
 }
 export const googleStatus = () => {
   const t = load();
-  return { ready: googleReady(), connected: !!t?.refresh, email: t?.email ?? null };
+  // "connected" only when Milo can really use it: a sign-in AND the app's Google keys (or the sign-in can't refresh)
+  return { ready: googleReady(), connected: googleReady() && !!t?.refresh, email: t?.email ?? null };
 };
 export const googleDisconnect = () => store(null);
 

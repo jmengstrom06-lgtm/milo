@@ -150,6 +150,8 @@ contextBridge.exposeInMainWorld("milo", {
   d2lCheck: (portal: string) => ipcRenderer.invoke("milo:d2l-check", portal),
   classesSync: (portal: string) => ipcRenderer.invoke("milo:classes-sync", portal),
   suggest: (said: string) => ipcRenderer.invoke("milo:suggest", said),
+  setContext: (c: { portal?: string; classes?: { name: string; grade: number | null }[] }) => ipcRenderer.send("milo:context-set", c),
+  d2lOpenClass: (portal: string, course: string, page: string) => ipcRenderer.invoke("milo:d2l-open-class", portal, course, page),
   rules: {
     get: () => ipcRenderer.invoke("milo:rules-get"),
     set: (q: { classId: string; course: string; on: boolean; portal: string; fromScreen?: boolean }) => ipcRenderer.invoke("milo:rules-set", q),

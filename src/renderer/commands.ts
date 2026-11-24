@@ -24,6 +24,7 @@ export type Intent =
   | { kind: "resume" } // pick up where Milo was interrupted
   | { kind: "chain"; steps: Intent[] } // "open chrome, find a worksheet, and complete it": do in order
   | { kind: "activity" } // "what did you do?": open the timeline
+  | { kind: "d2lclass"; course: string; page: string } // "open my stats class on D2L", "show my bio grades"
   | { kind: "handle" } // "handle this", "help with this": look at the screen and offer 2-3 things to do
   | { kind: "week" } // "what's next?", "fix my week": the week planner in Home base
   | { kind: "home" } // "open home", "show my home base": open the Home base window
@@ -69,6 +70,21 @@ const NOT_RESEARCH = /\b(youtube|amazon|spotify|my (doc|email|gmail|screen|homew
 // Things that mean "use the computer": open apps, click, type into something.
 const TASK =
   /\b(type|typing|click|press|open( up)?|launch|paste|search|google|fill (in|out)|enter (my|the|this|it|in)|go (in|on)to|navigate|scroll|select all)\b|\b(write|put|add) .*\b(in|into|on|inside) (my|the|a|this)\b|\b(in|into|on) (my|the) (google doc|doc|document|notes|word|chrome|safari|browser|email|gmail|claude|chatgpt|search bar|spreadsheet|sheet)\b|\b(go to|pull up|bring up|switch to|take me to|new tab|new window|close (this |the )?tab|next tab|previous tab|go back|go forward|refresh|reload|look up|make a new|create a new|new google|play)\b/;
+
+/** "open my statistical analysis class on d2l", "pull up my stats assignments", "show me my bio grades in d2l". (pure) */
+export function parseD2lClass(t: string): { kind: "d2lclass"; course: string; page: string } | null {
+  const m = t
+    .replace(/^(?:milo,?\s*)?(?:can you |please )?/, "")
+    .match(/^(?:open|go to|pull up|bring up|take me to|show me|show)\s+(?:my\s+|the\s+)?(.+?)\s+(class|course|grades|assignments|dropbox|quizzes|discussions?|announcements|content|calendar)(?:\s+page)?(?:\s+(?:on|in)\s+d2l)?[\s.!?]*$/);
+  if (!m) return null;
+  const course = m[1].replace(/\s+(class|course)$/, "").trim();
+  if (!course || /^(chrome|google|safari|the|a|my)$/.test(course) || course.split(" ").length > 6) return null;
+  const word = m[2];
+  const page = word === "class" || word === "course" ? "home" : word === "dropbox" ? "assignments" : word === "discussion" ? "discussions" : word;
+  // only when it's clearly about school: "on d2l", or a class word
+  if (!/\b(on|in) d2l\b/.test(t) && !/\b(class|course|grades|assignments|quizzes|discussions?|announcements)\b/.test(word)) return null;
+  return { kind: "d2lclass", course, page };
+}
 
 /** Vague "do something with this" asks: Milo looks and offers choices instead of guessing. */
 export const HANDLE = /^(?:milo,?\s*)?(handle (this|that|it)|help( me)? (with )?(this|that)|what can you do (here|with (this|that))|do something with (this|that)|deal with (this|that)|take care of (this|that)|help me (here|out here)|what (do|should) i do (here|with (this|that)))[\s.!?]*$/;
@@ -144,6 +160,8 @@ function parseSingle(raw: string, ctx: Ctx): Intent {
   if (/^(stop watching|stop checking|you can stop watching|quit watching)\b/.test(t)) return { kind: "watch", on: false };
   if (/^(watch me|watch my (work|screen)|keep an eye on (me|my work|this)|watch me work|check my work as i go|watch while i work)\b/.test(t))
     return { kind: "watch", on: true };
+  const dc = parseD2lClass(t);
+  if (dc) return dc;
   if (WEEK_ASK.test(t)) return { kind: "week" };
   if (HANDLE.test(t)) return { kind: "handle" };
   if (/^(check (my|this) work|is (this|my work) right|did i (do this|get this) right|any mistakes)\b/.test(t)) return { kind: "checkwork" };

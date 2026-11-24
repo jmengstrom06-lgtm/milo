@@ -351,6 +351,12 @@ export default function HomeApp() {
   const exam = week.find((d) => d.kind === "exam" && d.due_iso && new Date(d.due_iso).getTime() - now < 36 * 3600e3);
   const classOf = (name: string) => classes.find((c) => c.name === name || name.startsWith(c.name) || c.name.startsWith(name)) ?? null;
   const gradeOf = (name: string) => grades.find((g) => g.name === name || g.name.startsWith(name) || name.startsWith(g.name))?.grade ?? null;
+  // tell Milo's brain what Home base knows, so chat can use it (never sent anywhere else)
+  useEffect(() => {
+    if (DEMO) return;
+    M.setContext?.({ portal, classes: classes.map((c) => ({ name: c.name, grade: gradeOf(c.name) })) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [portal, classes, grades]);
   const known = classes.map((c) => gradeOf(c.name)).filter((g): g is number => g != null);
   const avg = known.length ? known.reduce((a, b) => a + b, 0) / known.length : null;
   const thisWeek = week.filter((d) => new Date(d.due_iso!).getTime() < now + 7 * DAY);
