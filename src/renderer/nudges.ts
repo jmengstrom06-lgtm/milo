@@ -2,7 +2,7 @@
 // Pure: the frog decides *when* (calm moment, not paused, not quiet hours); this decides *what*.
 import { fixWeek, type WItem } from "./home/weekFix";
 
-export type Nudge = { id: string; text: string; actions: ("week" | "did" | "start" | "dismiss")[]; start?: string };
+export type Nudge = { id: string; text: string; actions: ("week" | "did" | "start" | "checkup" | "dismiss")[]; start?: string };
 
 const HOUR = 3600e3;
 const DAY = 24 * HOUR;

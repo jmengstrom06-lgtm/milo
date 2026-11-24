@@ -118,6 +118,19 @@ export default function HomeApp() {
   const [overlay, setOverlay] = useState<null | "cmdk" | "voice">(null);
   const [due, setDue] = useState<Due[] | null>(null);
   // "Milo, what's next?": the week planner panel (opened from Today, chat, or the desktop frog)
+  // the frog's "Fix it" on a checkup heads-up opens Settings, where the checkup list is
+  useEffect(() => {
+    try {
+      const t = Number(localStorage.getItem("milo.openSettings") || 0);
+      if (Date.now() - t < 30e3) {
+        localStorage.removeItem("milo.openSettings");
+        setView("settings");
+      }
+    } catch {
+      /* ignore */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [weekOpen, setWeek] = useState(() => {
     try {
       const t = Number(localStorage.getItem("milo.openWeek") || 0);
@@ -351,6 +364,34 @@ export default function HomeApp() {
   const exam = week.find((d) => d.kind === "exam" && d.due_iso && new Date(d.due_iso).getTime() - now < 36 * 3600e3);
   const classOf = (name: string) => classes.find((c) => c.name === name || name.startsWith(c.name) || c.name.startsWith(name)) ?? null;
   const gradeOf = (name: string) => grades.find((g) => g.name === name || g.name.startsWith(name) || name.startsWith(g.name))?.grade ?? null;
+  // ---- checkup: run on open and every 30 minutes; fixes rerun it ----
+  const [check, setCheck] = useState<MiloCheckItem[] | null>(null);
+  const [checking, setChecking] = useState(false);
+  const runCheckup = useCallback(async () => {
+    if (DEMO) return setCheck([]);
+    setChecking(true);
+    const r = await M.checkup(portal).catch(() => null);
+    setChecking(false);
+    if (r) setCheck(r);
+  }, [portal]);
+  useEffect(() => {
+    void runCheckup();
+    const t = window.setInterval(() => void runCheckup(), 30 * 60e3);
+    return () => window.clearInterval(t);
+  }, [runCheckup]);
+  const fixCheck = async (i: MiloCheckItem) => {
+    const k = i.fix?.kind;
+    if (k === "sign-in") setView("settings");
+    else if (k === "d2l") {
+      if (portal) M.openUrl(portal.startsWith("http") ? portal : `https://${portal}`);
+      else send("Help me connect my school's D2L");
+    } else if (k === "google" || k === "chrome") {
+      const r = await M.checkupFix(k).catch(() => null);
+      if (r?.text) setVoiceLines((v) => [...v.slice(-4), { who: "milo", text: r.text }]);
+    } else if (k === "screen" || k === "hands" || k === "mic") await M.permAsk(k);
+    window.setTimeout(() => void runCheckup(), k === "retry" ? 0 : 4000);
+  };
+
   // tell Milo's brain what Home base knows, so chat can use it (never sent anywhere else)
   useEffect(() => {
     if (DEMO) return;
@@ -645,6 +686,7 @@ export default function HomeApp() {
                 </section>
               )}
 
+              {!paused?.on && <Checkup items={check} busy={checking} onFix={(i) => void fixCheck(i)} onRun={() => void runCheckup()} />}
               {weekOpen && !paused?.on && (
                 <WeekPanel
                   M={M}
@@ -1224,6 +1266,8 @@ export default function HomeApp() {
                   <i aria-hidden="true" />
                 </button>
               </section>
+
+              <Checkup all items={check} busy={checking} onFix={(i) => void fixCheck(i)} onRun={() => void runCheckup()} />
 
               <section className="hb-card" aria-label="Check this beta">
                 <div className="hb-set">
@@ -2045,6 +2089,42 @@ function ActList({ acts, title, onAll }: { acts: MiloActivity[]; title: string; 
         </div>
       ))}
       {!acts.length && <p className="hb-empty">Nothing yet. Everything Milo does for you shows up here, with Undo.</p>}
+    </section>
+  );
+}
+
+/** The checkup: what's broken and a one-tap fix for each. `all` shows the full list (Settings). */
+function Checkup({ items, all, busy, onFix, onRun }: { items: MiloCheckItem[] | null; all?: boolean; busy: boolean; onFix: (i: MiloCheckItem) => void; onRun: () => void }) {
+  const bad = (items ?? []).filter((i) => i.ok === false);
+  const shown = all ? items ?? [] : bad;
+  if (!all && !bad.length) return null;
+  return (
+    <section className={`hb-card hb-checkup ${bad.length ? "bad" : ""}`} aria-label="Checkup">
+      <div className="hb-cardhead">
+        <span className="hb-kicker">{all ? "CHECKUP" : `CHECKUP · ${bad.length} THING${bad.length > 1 ? "S" : ""} NEED${bad.length > 1 ? "" : "S"} YOU`}</span>
+        <button className="hb-link" disabled={busy} onClick={onRun}>
+          {busy ? "Checking…" : "Check again"}
+        </button>
+      </div>
+      {!items && <p className="hb-muted">Checking everything Milo needs…</p>}
+      {shown.map((i) => (
+        <div className="hb-set" key={i.id}>
+          <div>
+            <b>
+              <span className={`hb-ck ${i.ok === true ? "ok" : i.ok === false ? "bad" : "off"}`} aria-hidden="true">
+                {i.ok === true ? "✓" : i.ok === false ? "!" : "–"}
+              </span>
+              {i.label}
+            </b>
+            <span>{i.detail}</span>
+          </div>
+          {i.fix && i.ok !== true && (
+            <button className={i.ok === false ? "hb-primary hb-sm" : "hb-ghost hb-sm"} onClick={() => onFix(i)}>
+              {i.fix.label}
+            </button>
+          )}
+        </div>
+      ))}
     </section>
   );
 }

@@ -19,6 +19,7 @@ import { fastDecide, looksLikeBackground, parseExam, parseFinalWeight, parseFore
 import { alertLine, emptyRadar, markWarned, mergeScan, pendingAlerts, upcoming, whenText, type Radar, type RadarItem, type ScanItem, type Warn } from "./radar";
 import RadarCard, { type RadarView } from "./RadarCard";
 import { backNudge, weekNudge, type Nudge } from "./nudges";
+import { checkupLine, type CheckItem } from "../main/checkup";
 import Onboarding, { setupDone } from "./Onboarding";
 import ActivityPanel from "./ActivityPanel";
 import FeedbackPanel from "./FeedbackPanel";
@@ -3907,9 +3908,45 @@ export default function App() {
     bb("nudge_act", { a });
     if (a === "week") routeRef.current("what's next", false);
     else if (a === "did") setActivityOpen(true);
+    else if (a === "checkup") {
+      try {
+        localStorage.setItem("milo.openSettings", String(Date.now()));
+      } catch {
+        /* ignore */
+      }
+      void window.milo.home.open();
+    }
     else if (a === "start" && n?.start) routeRef.current(`start ${n.start}`, false);
   };
-  const NUDGE_LABEL: Record<Nudge["actions"][number], string> = { week: "Fix my week", did: "See what you did", start: "Start it", dismiss: "Later" };
+  const NUDGE_LABEL: Record<Nudge["actions"][number], string> = { week: "Fix my week", did: "See what you did", start: "Start it", checkup: "Fix it", dismiss: "Later" };
+  // the checkup: when something Milo needs newly breaks (Google signed out, D2L expired, a permission off), say so once
+  useEffect(() => {
+    const tick = async () => {
+      if (radarBusy.current || (await window.milo.pause.get().catch(() => null))?.on) return;
+      const items = await window.milo.checkup(portal || undefined).catch(() => null);
+      if (!items) return;
+      let last: string[] = [];
+      try {
+        last = JSON.parse(localStorage.getItem("milo.checkupBad") || "[]");
+      } catch {
+        /* ignore */
+      }
+      const line = checkupLine(items as CheckItem[], last);
+      try {
+        localStorage.setItem("milo.checkupBad", JSON.stringify(items.filter((i) => i.ok === false).map((i) => i.id)));
+      } catch {
+        /* ignore */
+      }
+      if (line) showNudge({ id: `checkup-${Date.now()}`, text: line, actions: ["checkup", "dismiss"] });
+    };
+    const first = window.setTimeout(() => void tick(), 45e3);
+    const t = window.setInterval(() => void tick(), 4 * 3600e3);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [portal]);
 
   const bStyle = bubblePos();
 
