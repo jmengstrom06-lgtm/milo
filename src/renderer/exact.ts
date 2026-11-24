@@ -25,7 +25,7 @@ const WEB = /\b(chrome|safari|browser|website|web ?site|web ?page|https?:|[a-z0-
 export function isSure(intent: Intent, text: string, inLesson: boolean): boolean {
   if (SURE.has(intent.kind)) return true;
   if (inLesson && LESSON_SURE.has(intent.kind)) return true;
-  if (intent.kind === "sweep" && (!!intent.show || !!intent.fill)) return true; // "show me the answers" / "fill it in"
+  if (intent.kind === "sweep") return true; // a whole worksheet, by its own strict rule: never a one-problem lesson
   if (intent.kind === "task" && WEB.test(text)) return true; // names a browser or website: a web task, not one of Milo's apps
   // "quiz me on chapter 5": a quiz. "quiz me on my notes" / "flashcards" belong to Milo's apps: the router picks which.
   if (intent.kind === "quiz" && !/\b(notes?|flash ?cards?|sheet|deck)\b/i.test(text)) return true;
