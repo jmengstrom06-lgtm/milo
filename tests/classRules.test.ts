@@ -40,3 +40,13 @@ describe("optional syllabus rules", () => {
     expect(cleanPolicy({ level: "study", quote: " Use AI to study only. " })).toEqual({ level: "study", quote: "Use AI to study only." });
   });
 });
+
+import { syllabusScore } from "../src/main/syllabus";
+describe("finding the syllabus in D2L", () => {
+  it("by its title", () => expect(syllabusScore({ Title: "STAT 20103 Syllabus Fall 2026", Url: "/content/x.pdf" })).toBeGreaterThan(9));
+  it("by the folder it's in", () => expect(syllabusScore({ Title: "STAT 20103 Fall 2026.pdf", Url: "/content/a.pdf", path: "Start Here > Syllabus" })).toBeGreaterThan(5));
+  it("course info pages count a little", () => expect(syllabusScore({ Title: "Course Information", Url: "/content/i.html" })).toBeGreaterThan(0));
+  it("random lecture files don't", () => expect(syllabusScore({ Title: "Lecture 4 slides", Url: "/content/l4.pdf", path: "Week 2" })).toBe(0));
+  it("a title match beats a folder match", () =>
+    expect(syllabusScore({ Title: "Syllabus", Url: "/s.pdf" })).toBeGreaterThan(syllabusScore({ Title: "Doc.pdf", Url: "/d.pdf", path: "Syllabus" })));
+});

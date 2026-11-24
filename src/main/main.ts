@@ -1116,6 +1116,7 @@ ipcMain.handle("milo:rules-set", async (_e, q: { classId: string; course: string
   let level: Level = "unclear";
   let quote = "";
   let source = "No syllabus found in D2L";
+  let why = "";
   try {
     if (q.fromScreen) {
       // the syllabus the student has open: the Chrome page's text if we can get it, plus a screenshot (PDFs, Word)
@@ -1131,7 +1132,8 @@ ipcMain.handle("milo:rules-set", async (_e, q: { classId: string; course: string
     }
     const list = q.portal ? await d2lCourses(String(q.portal)) : [];
     const c = d2lMatch(course, list);
-    const src = c ? await syllabusSource(String(q.portal), c) : null;
+    const src = c ? await syllabusSource(String(q.portal), c, { wantAi: true }) : null;
+    why = !q.portal ? "no_portal" : !list.length ? "no_courses" : !c ? "no_course_match" : !src ? "no_syllabus" : "found";
     if (src && (src.text || src.pdf)) {
       source = src.title;
       const r = await readAiPolicy({ text: src.text || undefined, pdf: src.pdf });
@@ -1141,7 +1143,7 @@ ipcMain.handle("milo:rules-set", async (_e, q: { classId: string; course: string
     bb("rules", "read_failed", { error: (e as Error).message.slice(0, 120) });
   }
   const rules = saveRule(id, { course, level, quote, readAt: Date.now(), source });
-  track("rules_on", { level, found: source !== "No syllabus found in D2L" });
+  track("rules_on", { level, found: source !== "No syllabus found in D2L", why });
   return { ok: true, rules };
 });
 /** The student changes a class's level themselves (their call; the quote stays visible). */

@@ -2098,10 +2098,15 @@ function RulesCard({ cls }: { cls: Klass }) {
           ) : (
             <div className="hb-rulemiss">
               <b>{/No syllabus found/.test(r.source) ? "I couldn't find this class's syllabus in D2L." : "I couldn't find an AI policy in this syllabus."}</b>
-              <span>Open the syllabus (D2L page, PDF or Word doc) and scroll to the part about AI, then come back and tap below. Until then I treat this class as studying only.</span>
-              <button className="hb-primary hb-sm" disabled={busy} onClick={() => void run(true, true)}>
-                Read it from my screen
-              </button>
+              <span>Last resort: open the syllabus and scroll to the part about AI, then tap “Read it from my screen.” Until then I treat this class as studying only.</span>
+              <div className="hb-row">
+                <button className="hb-ghost hb-sm" disabled={busy} onClick={() => void run(true)}>
+                  Search D2L again
+                </button>
+                <button className="hb-primary hb-sm" disabled={busy} onClick={() => void run(true, true)}>
+                  Read it from my screen
+                </button>
+              </div>
             </div>
           )}
         </div>
