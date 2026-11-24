@@ -147,6 +147,7 @@ export default function App() {
 
   const [chatOpen, setChatOpen] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([]);
+  const [chatMore, setChatMore] = useState(false); // the chat's settings list (instead of a wall of chips)
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [voice, setVoice] = useState(true);
@@ -4478,116 +4479,162 @@ export default function App() {
       />
 
       {chatOpen && (
-        <div className="panel" style={chatStyle} onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)} onMouseLeave={() => hover(false)}>
-          <div className="panel__head">
-            <span>Milo</span>
-            <div className="panel__actions">
-              <button
-                className="chip"
-                title="Switch character"
-                onClick={() => setCharacter((c) => (c === "frog" ? "monkey" : "frog"))}
-              >
-                {CHARACTERS[character].label}
-              </button>
-              <button className={`chip ${handsFree ? "chip--on" : ""}`} onClick={toggleHandsFree} title='Always listening for "Milo…"'>
-                {handsFree ? "Hands-free on" : "Hands-free"}
-              </button>
-              <button
-                className="chip"
-                onClick={() => {
-                  setSounds(!sounds);
-                  setSoundsState(!sounds);
-                }}
-                title="Interface sounds"
-              >
-                {sounds ? "Sounds on" : "Sounds off"}
-              </button>
-              <button className="chip" onClick={() => setVoice((v) => !v)}>
-                {voice ? "Voice on" : "Voice off"}
-              </button>
-              <button
-                className={`chip ${freeVoice ? "chip--on" : ""}`}
-                onClick={() => setFree(!freeVoice)}
-                title="Free voice uses your Mac's built-in voice and saves ElevenLabs credits. Listening still works."
-              >
-                {freeVoice ? "Free voice" : "Natural voice"}
-              </button>
-              <span className={`chip ${chromeOn ? "chip--on" : ""}`} title={chromeOn ? "Chrome extension connected: fast web tasks" : "Chrome extension not connected (web tasks use screenshots)"}>
-                {chromeOn ? "Chrome ✓" : "Chrome –"}
-              </span>
-              <button className="chip chip--kit" onClick={() => { closeChat(); setRingOpen(true); }} title="Milo's apps: Study, Sketch, Notes, Sheet, Planner, Pocket">
-                Kit
-              </button>
-              <AccountChip />
-              <button className="chip" onClick={() => window.milo.openLogs()} title="Open Milo's black-box log (Cmd+Shift+B flags a bug)">
-                Logs
-              </button>
-              <button className="chip" onClick={closeChat}>
-                Hide
-              </button>
-              <button className="chip chip--danger" onClick={() => window.milo.quit()}>
-                Quit
-              </button>
+        <div className="mc" style={chatStyle} onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)} onMouseLeave={() => hover(false)}>
+          {/* header: who, how he's doing, and three quiet buttons */}
+          <div className="mc__head">
+            <span className="mc__avatar" aria-hidden="true">
+              {character === "frog" ? "🐸" : "🐵"}
+            </span>
+            <div className="mc__who">
+              <b>Milo</b>
+              <span className={`mc__status ${busy ? "is-busy" : handsFree ? "is-live" : ""}`}>{busy ? "Thinking…" : handsFree ? "Listening for “Milo”" : "Ready"}</span>
             </div>
+            <button className={`mc__icon ${chatMore ? "is-on" : ""}`} onClick={() => setChatMore((v) => !v)} title="Settings" aria-label="Settings" aria-expanded={chatMore}>
+              <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M8.6 1.5h2.8l.4 2.3c.5.2 1 .5 1.4.8l2.2-.8 1.4 2.4-1.8 1.5a5 5 0 0 1 0 1.6l1.8 1.5-1.4 2.4-2.2-.8c-.4.3-.9.6-1.4.8l-.4 2.3H8.6l-.4-2.3c-.5-.2-1-.5-1.4-.8l-2.2.8-1.4-2.4 1.8-1.5a5 5 0 0 1 0-1.6L3.2 6.2l1.4-2.4 2.2.8c.4-.3.9-.6 1.4-.8zM10 7.2a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6z" /></svg>
+            </button>
+            <button className="mc__icon" onClick={() => (closeChat(), setRingOpen(true))} title="Milo's apps: Study, Sketch, Notes, Sheet, Planner" aria-label="Milo's apps">
+              <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M4 3h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm8 0h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM4 11h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1zm8 0h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1z" /></svg>
+            </button>
+            <button className="mc__icon" onClick={() => void window.milo.home.open()} title="Open Home base" aria-label="Open Home base">
+              <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M10 2.5 2.5 8.6V17a.8.8 0 0 0 .8.8h4.4v-5h4.6v5h4.4a.8.8 0 0 0 .8-.8V8.6z" /></svg>
+            </button>
+            <button className="mc__icon" onClick={closeChat} title="Close" aria-label="Close">
+              <svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true"><path stroke="currentColor" strokeWidth="2" strokeLinecap="round" d="m5 5 10 10M15 5 5 15" /></svg>
+            </button>
           </div>
 
-          <div className="panel__look">
-            <div className="seg">
-              {(["teach", "help", "do"] as MiloMode[]).map((m) => (
-                <button key={m} className={`seg__b ${m === mode ? "seg__b--on" : ""}`} onClick={() => setMode(m)}>
-                  {m === "teach" ? "Teach me" : m === "help" ? "Hint" : "Do it for me"}
+          {chatMore ? (
+            /* settings: one clean list instead of a wall of chips */
+            <div className="mc__more">
+              {(
+                [
+                  ["Hands-free", "Always listening for “Milo”", handsFree, () => void toggleHandsFree()],
+                  ["Voice", "Milo talks out loud", voice, () => setVoice((v) => !v)],
+                  ["Natural voice", freeVoice ? "Off: using your Mac's free voice" : "On: the real Milo voice", !freeVoice, () => setFree(!freeVoice)],
+                  ["Sounds", "Little clicks and dings", sounds, () => (setSounds(!sounds), setSoundsState(!sounds))],
+                ] as [string, string, boolean, () => void][]
+              ).map(([label, sub, on, flip]) => (
+                <button key={label} className="mc__row" role="switch" aria-checked={on} onClick={flip}>
+                  <span>
+                    <b>{label}</b>
+                    <small>{sub}</small>
+                  </span>
+                  <i className={`mc__switch ${on ? "on" : ""}`} aria-hidden="true" />
                 </button>
               ))}
-            </div>
-            <button className="look-btn" onClick={() => look(mode, "")} disabled={busy}>
-              Look at my screen
-            </button>
-            <button className="talk-btn" onClick={talk}>
-              Talk to Milo
-            </button>
-            {tools.length > 0 && (
-              <div className="mytools">
-                <span>My tools</span>
-                {tools.slice(0, 6).map((t) => (
-                  <button key={t.id} onClick={() => openTool(t)} title={`Open ${t.title}`}>
-                    {t.title}
+              <div className="mc__row mc__row--static">
+                <span>
+                  <b>Chrome helper</b>
+                  <small>{chromeOn ? "Connected. Web tasks are fast." : "Not connected. Open Chrome and it connects."}</small>
+                </span>
+                <i className={`mc__dot ${chromeOn ? "ok" : ""}`} aria-hidden="true" />
+              </div>
+              <button className="mc__row" onClick={() => setCharacter((c) => (c === "frog" ? "monkey" : "frog"))}>
+                <span>
+                  <b>Character</b>
+                  <small>{CHARACTERS[character].label}</small>
+                </span>
+                <em>Switch</em>
+              </button>
+              <label className="mc__row mc__row--name">
+                <span>
+                  <b>Your name</b>
+                </span>
+                <input value={name} onChange={(e) => setNameState(e.target.value.slice(0, 30))} placeholder="So Milo can greet you" />
+              </label>
+              <div className="mc__foot">
+                <button onClick={() => void window.milo.home.open()}>Account &amp; more in Home base</button>
+                <span>
+                  <button onClick={() => window.milo.openLogs()}>Logs</button>
+                  <button className="mc__quit" onClick={() => window.milo.quit()}>
+                    Quit Milo
                   </button>
+                </span>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="mc__list" ref={listRef}>
+                {messages.length === 0 && !busy && (
+                  <div className="mc__empty">
+                    <b>{name ? `Hey ${name}. What are we working on?` : "What are we working on?"}</b>
+                    <div className="mc__sugs">
+                      {["What's due this week?", "Help with this", "Lock in for 25 minutes", "Quiz me"].map((q) => (
+                        <button
+                          key={q}
+                          onClick={() => {
+                            if (q === "Help with this") return void handleThis("handle this");
+                            setMessages((m) => [...m, { role: "user", content: q }]);
+                            routeRef.current(q, false);
+                          }}
+                        >
+                          {q}
+                        </button>
+                      ))}
+                    </div>
+                    {tools.length > 0 && (
+                      <div className="mc__tools">
+                        <small>Your tools</small>
+                        {tools.slice(0, 4).map((t) => (
+                          <button key={t.id} onClick={() => openTool(t)}>
+                            {t.title}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {messages.map((m, i) => (
+                  <div key={i} className={`mc__msg mc__msg--${m.role}`}>
+                    {m.content}
+                  </div>
                 ))}
+                {busy && (
+                  <div className="mc__msg mc__msg--assistant mc__typing" aria-label="Milo is thinking">
+                    <i />
+                    <i />
+                    <i />
+                  </div>
+                )}
               </div>
-            )}
-            <label className="name-row">
-              <span>Your name</span>
-              <input value={name} onChange={(e) => setNameState(e.target.value.slice(0, 30))} placeholder="So Milo can greet you" />
-            </label>
-            <div className="hint">Cmd+Shift+Space = talk · Cmd+Shift+Y = look · or turn on Hands-free</div>
-          </div>
 
-          <div className="panel__list" ref={listRef}>
-            {messages.map((m, i) => (
-              <div key={i} className={`bubble bubble--${m.role}`}>
-                {m.content}
+              {/* screen help: pick how much help, then one button */}
+              <div className="mc__look">
+                <div className="mc__seg" role="radiogroup" aria-label="How much help">
+                  {(["teach", "help", "do"] as MiloMode[]).map((m) => (
+                    <button key={m} role="radio" aria-checked={m === mode} className={m === mode ? "on" : ""} onClick={() => setMode(m)}>
+                      {m === "teach" ? "Teach" : m === "help" ? "Hint" : "Do it"}
+                    </button>
+                  ))}
+                </div>
+                <button className="mc__lookbtn" onClick={() => look(mode, "")} disabled={busy}>
+                  Look at my screen
+                </button>
               </div>
-            ))}
-            {busy && <div className="bubble bubble--assistant bubble--typing">Milo is thinking…</div>}
-          </div>
-          <form
-            className="panel__input"
-            onSubmit={(e) => {
-              e.preventDefault();
-              send();
-            }}
-          >
-            <input
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder='Ask anything, or "teach me this"'
-              onKeyDown={(e) => e.key === "Escape" && closeChat()}
-            />
-            <button type="submit" disabled={busy || !input.trim()}>
-              Send
-            </button>
-          </form>
+
+              <form
+                className="mc__input"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  send();
+                }}
+              >
+                <input
+                  ref={inputRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder="Ask Milo anything…"
+                  onKeyDown={(e) => e.key === "Escape" && closeChat()}
+                />
+                <button type="button" className="mc__mic" onClick={talk} title="Talk (⌘⇧Space)" aria-label="Talk to Milo">
+                  <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M10 12.5a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v4.5a3 3 0 0 0 3 3zm5-3a.8.8 0 0 0-1.6 0 3.4 3.4 0 0 1-6.8 0 .8.8 0 0 0-1.6 0 5 5 0 0 0 4.2 4.9V16H7.5a.8.8 0 0 0 0 1.6h5a.8.8 0 0 0 0-1.6h-1.7v-1.6A5 5 0 0 0 15 9.5z" /></svg>
+                </button>
+                <button type="submit" className="mc__send" disabled={busy || !input.trim()} aria-label="Send">
+                  <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M10 3.5a.9.9 0 0 1 .64.26l5 5a.9.9 0 1 1-1.28 1.28L10.9 6.58V16a.9.9 0 1 1-1.8 0V6.58L5.64 10.04a.9.9 0 0 1-1.28-1.28l5-5A.9.9 0 0 1 10 3.5z" /></svg>
+                </button>
+              </form>
+            </>
+          )}
         </div>
       )}
     </>
