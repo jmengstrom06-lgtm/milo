@@ -223,7 +223,7 @@ declare global {
       >;
       rules: {
         get: () => Promise<MiloRules>;
-        set: (q: { classId: string; course: string; on: boolean; portal: string }) => Promise<{ ok: boolean; text?: string; rules?: MiloRules }>;
+        set: (q: { classId: string; course: string; on: boolean; portal: string; fromScreen?: boolean }) => Promise<{ ok: boolean; text?: string; rules?: MiloRules }>;
         level: (classId: string, level: MiloRuleLevel) => Promise<MiloRules>;
         check: (act: "plan" | "study" | "check" | "write" | "fill", said: string) => Promise<{ ok: boolean; text?: string }>;
       };

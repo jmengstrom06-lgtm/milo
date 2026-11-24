@@ -491,3 +491,6 @@ kbd { font-family: var(--mono); font-weight: 600; font-size: 11px; color: var(--
 .hb-rulebadge.study, .hb-rulebadge.unclear { background: rgba(224, 164, 88, 0.12); color: #f3c07e; }
 .hb-rule select { background: var(--card); color: var(--text); border: 1px solid var(--line2); border-radius: 8px; padding: 4px 8px; font: inherit; font-size: 12px; }
 .hb-rule blockquote { margin: 0; padding: 8px 12px; border-left: 3px solid var(--purple); background: rgba(139, 92, 246, 0.06); border-radius: 0 8px 8px 0; font-size: 13px; line-height: 1.45; }
+.hb-rulemiss { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; background: rgba(224, 164, 88, 0.08); border: 1px solid rgba(224, 164, 88, 0.3); }
+.hb-rulemiss b { font-size: 13.5px; }
+.hb-rulemiss span { font-size: 12.5px; color: var(--muted); }

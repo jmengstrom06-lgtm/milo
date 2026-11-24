@@ -1104,7 +1104,7 @@ ipcMain.handle("milo:preflight", async () => {
 });
 // ---------- Optional: follow a class's syllabus AI rules (off unless the student turns it on) ----------
 ipcMain.handle("milo:rules-get", () => loadRules());
-ipcMain.handle("milo:rules-set", async (_e, q: { classId: string; course: string; on: boolean; portal: string }) => {
+ipcMain.handle("milo:rules-set", async (_e, q: { classId: string; course: string; on: boolean; portal: string; fromScreen?: boolean }) => {
   const id = String(q?.classId ?? "");
   const course = String(q?.course ?? "").slice(0, 120);
   if (!id) return { ok: false, text: "No class." };
@@ -1117,6 +1117,18 @@ ipcMain.handle("milo:rules-set", async (_e, q: { classId: string; course: string
   let quote = "";
   let source = "No syllabus found in D2L";
   try {
+    if (q.fromScreen) {
+      // the syllabus the student has open: the Chrome page's text if we can get it, plus a screenshot (PDFs, Word)
+      const front = await frontApp().catch(() => "");
+      const page = bridgeConnected() && /Google Chrome/i.test(front) ? ((await ext("snapshot", {}, 8000).catch(() => null)) as { text?: string; title?: string } | null) : null;
+      const cap = await captureScreen();
+      source = page?.title ? `${page.title} (your screen)` : "The syllabus on your screen";
+      const r = await readAiPolicy({ text: page?.text && page.text.length > 200 ? page.text : undefined, jpeg: cap.ok ? toJpeg(cap.shot.full, 1568).b64 : undefined });
+      if (r.ok) ({ level, quote } = cleanPolicy(r.data));
+      const rules = saveRule(id, { course, level, quote, readAt: Date.now(), source });
+      track("rules_on", { level, found: !!quote, screen: true });
+      return { ok: true, rules };
+    }
     const list = q.portal ? await d2lCourses(String(q.portal)) : [];
     const c = d2lMatch(course, list);
     const src = c ? await syllabusSource(String(q.portal), c) : null;
