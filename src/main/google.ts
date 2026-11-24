@@ -12,24 +12,59 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { log as bb } from "./blackbox";
+import { googleBackend } from "./account";
 
-const SCOPES = [
+// Pilot scopes: Calendar + Docs only. Gmail and all-of-Drive are "restricted" at Google (a paid security audit to
+// get approved), so they're only asked for in developer copies (MILO_GOOGLE_FULL=1).
+const BASE_SCOPES = [
   "openid",
   "email",
   "https://www.googleapis.com/auth/calendar.events", // see and add calendar events
+  "https://www.googleapis.com/auth/documents", // make and edit Google Docs
+];
+const FULL_SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly", // read email (search, unread)
   "https://www.googleapis.com/auth/gmail.compose", // write drafts, send (only after the student says yes)
-  "https://www.googleapis.com/auth/documents", // make and edit Google Docs
   "https://www.googleapis.com/auth/drive.readonly", // find files in Drive
 ];
+const SCOPES = () => (process.env.MILO_GOOGLE_FULL === "1" ? [...BASE_SCOPES, ...FULL_SCOPES] : BASE_SCOPES);
 
-type Tokens = { access: string; refresh: string; expires: number; email?: string };
+type Tokens = { access: string; refresh: string; expires: number; email?: string; scope?: string };
 const file = () => path.join(app.getPath("userData"), "google.bin");
 let cached: Tokens | null = null;
 
-const clientId = () => process.env.MILO_GOOGLE_CLIENT_ID ?? "";
-const clientSecret = () => process.env.MILO_GOOGLE_CLIENT_SECRET ?? "";
+// Two ways to sign in: a developer's own keys (.env), or Milo's server (every installed copy). The server holds the
+// client secret; the app only ever gets the public client ID.
+const localId = () => process.env.MILO_GOOGLE_CLIENT_ID ?? "";
+const localSecret = () => process.env.MILO_GOOGLE_CLIENT_SECRET ?? "";
+const local = () => !!localId() && !!localSecret();
+let serverId = "";
+/** Ask Milo's server if Google sign-in is set up (cached). Call at startup and before signing in. */
+export async function refreshGoogleConfig(): Promise<boolean> {
+  if (local()) return true;
+  const r = await googleBackend("config").catch(() => null);
+  serverId = r && r.status === 200 && r.data?.configured && typeof r.data.clientId === "string" ? r.data.clientId : "";
+  return !!serverId;
+}
+const clientId = () => (local() ? localId() : serverId);
 export const googleReady = () => !!clientId();
+/** Trade a code / refresh token for tokens: directly with a developer's keys, otherwise through Milo's server. */
+async function tokenCall(params: Record<string, string>): Promise<{ access_token?: string; refresh_token?: string; expires_in?: number; id_token?: string; scope?: string; error?: string }> {
+  if (local()) {
+    const r = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ client_id: localId(), client_secret: localSecret(), ...params }),
+    });
+    return (await r.json()) as never;
+  }
+  const route = params.grant_type === "refresh_token" ? "refresh" : "token";
+  const r = await googleBackend(route, route === "refresh" ? { refresh_token: params.refresh_token } : { code: params.code, code_verifier: params.code_verifier, redirect_uri: params.redirect_uri });
+  if (!r) return { error: "Sign in to Milo first (Home base, Settings, Account)." };
+  return r.data ?? { error: "server_error" };
+}
+/** Did this sign-in include Gmail? (Pilot sign-ins don't: email opens in Gmail for the student to send.) */
+export const hasGmail = () => /gmail/.test(load()?.scope ?? (process.env.MILO_GOOGLE_FULL === "1" ? "gmail" : ""));
 
 function load(): Tokens | null {
   if (cached) return cached;
@@ -61,9 +96,9 @@ export const googleDisconnect = () => store(null);
 // ---------- sign in (in the student's own browser, back to Milo on this Mac) ----------
 let signingIn: Promise<{ ok: boolean; text: string }> | null = null;
 export function googleConnect(): Promise<{ ok: boolean; text: string }> {
-  if (!googleReady()) return Promise.resolve({ ok: false, text: "Google isn't set up in this copy of Milo yet." });
   if (signingIn) return signingIn;
-  signingIn = new Promise<{ ok: boolean; text: string }>((resolve) => {
+  signingIn = new Promise<{ ok: boolean; text: string }>(async (resolve) => {
+    if (!googleReady() && !(await refreshGoogleConfig())) return resolve({ ok: false, text: "Google sign-in isn't set up on Milo's server yet. (Make sure you're signed in to Milo first.)" });
     const verifier = crypto.randomBytes(48).toString("base64url");
     const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
     const state = crypto.randomBytes(16).toString("hex");
@@ -82,15 +117,10 @@ export function googleConnect(): Promise<{ ok: boolean; text: string }> {
       if (!code) return done(false, u.searchParams.get("error") === "access_denied" ? "No problem, nothing was connected." : "Google didn't send a code.");
       try {
         const port = (srv.address() as { port: number }).port;
-        const r = await fetch("https://oauth2.googleapis.com/token", {
-          method: "POST",
-          headers: { "content-type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ code, client_id: clientId(), client_secret: clientSecret(), redirect_uri: `http://127.0.0.1:${port}/google`, grant_type: "authorization_code", code_verifier: verifier }),
-        });
-        const t = (await r.json()) as { access_token?: string; refresh_token?: string; expires_in?: number; id_token?: string; error?: string };
+        const t = await tokenCall({ code, redirect_uri: `http://127.0.0.1:${port}/google`, grant_type: "authorization_code", code_verifier: verifier });
         if (!t.access_token || !t.refresh_token) return done(false, t.error ?? "Google didn't give Milo access.");
         const email = t.id_token ? (JSON.parse(Buffer.from(t.id_token.split(".")[1], "base64url").toString()) as { email?: string }).email : undefined;
-        store({ access: t.access_token, refresh: t.refresh_token, expires: Date.now() + (t.expires_in ?? 3000) * 1000, email });
+        store({ access: t.access_token, refresh: t.refresh_token, expires: Date.now() + (t.expires_in ?? 3000) * 1000, email, scope: t.scope });
         bb("google", "connected", {});
         done(true, `Milo can now use your Google account${email ? ` (${email})` : ""}.`);
       } catch (e) {
@@ -108,7 +138,7 @@ export function googleConnect(): Promise<{ ok: boolean; text: string }> {
         client_id: clientId(),
         redirect_uri: `http://127.0.0.1:${port}/google`,
         response_type: "code",
-        scope: SCOPES.join(" "),
+        scope: SCOPES().join(" "),
         access_type: "offline",
         prompt: "consent",
         code_challenge: challenge,
@@ -127,12 +157,8 @@ async function token(): Promise<string> {
   const t = load();
   if (!t?.refresh) throw new GoogleNotConnected("Connect Google first.");
   if (Date.now() < t.expires - 60e3) return t.access;
-  const r = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ client_id: clientId(), client_secret: clientSecret(), refresh_token: t.refresh, grant_type: "refresh_token" }),
-  });
-  const j = (await r.json()) as { access_token?: string; expires_in?: number; error?: string };
+  if (!googleReady()) await refreshGoogleConfig();
+  const j = await tokenCall({ refresh_token: t.refresh, grant_type: "refresh_token" });
   if (!j.access_token) {
     if (j.error === "invalid_grant") store(null); // they removed Milo's access in their Google account
     throw new GoogleNotConnected("Connect Google again.");

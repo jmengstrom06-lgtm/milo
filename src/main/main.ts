@@ -33,7 +33,7 @@ import { isJob, lastJob, resumable, resumeJob, startJob, type JobDeps } from "./
 import { getProfile, setProfile, type Profile } from "./profile";
 import { usageToday, spentToday } from "./usage";
 import { awayWatch } from "./away";
-import { calendarAdd, calendarBusy, calendarDelete, calendarUpcoming, docsCreate, GoogleNotConnected, googleConnect, googleDisconnect, googleStatus, gmailDeleteDraft, gmailDraft, gmailSendDraft, gmailUnread } from "./google";
+import { calendarAdd, calendarBusy, calendarDelete, calendarUpcoming, docsCreate, GoogleNotConnected, googleConnect, googleDisconnect, googleStatus, gmailDeleteDraft, gmailDraft, gmailSendDraft, gmailUnread, hasGmail, refreshGoogleConfig } from "./google";
 import { activity, did, registerActivity, metrics } from "./activityLog";
 import { writePaper } from "./paper";
 import { homeWin, openHome, toHome } from "./home";
@@ -459,7 +459,10 @@ const gerr = (e: unknown) =>
   e instanceof GoogleNotConnected
     ? { ok: false as const, connect: true, text: googleStatus().ready ? "Connect your Google account first. Say connect Google." : "Google sign-in isn't available in this copy of Milo yet, so Calendar, Gmail and Docs can't work." }
     : { ok: false as const, text: `Google had a problem: ${(e as Error).message.slice(0, 120)}` };
-ipcMain.handle("milo:google-status", () => googleStatus());
+ipcMain.handle("milo:google-status", async () => {
+  await refreshGoogleConfig().catch(() => false);
+  return googleStatus();
+});
 ipcMain.handle("milo:google-connect", () => googleConnect());
 ipcMain.handle("milo:google-disconnect", () => {
   googleDisconnect();
@@ -475,6 +478,7 @@ ipcMain.handle("milo:google-calendar", async (_e, days: number, range: string) =
   }
 });
 ipcMain.handle("milo:google-mail", async () => {
+  if (!hasGmail()) return { ok: false, text: "Reading your email isn't part of the pilot yet. I can still write emails for you: say \"write an email to\" someone." };
   try {
     return { ok: true, text: sayMail(await gmailUnread(8)) };
   } catch (e) {
@@ -496,6 +500,19 @@ ipcMain.handle("milo:google-draft", async (_e, request: string) => {
   try {
     const r = await composeEmail(String(request));
     if (!r.ok) return { ok: false, text: r.text };
+    if (!hasGmail()) {
+      // pilot: no Gmail access. Milo writes it and opens it in Gmail; the student checks it and hits Send.
+      const to = /@/.test(r.data.to) ? r.data.to : "";
+      const url = `https://mail.google.com/mail/?view=cm&fs=1${to ? `&to=${encodeURIComponent(to)}` : ""}&su=${encodeURIComponent(r.data.subject)}&body=${encodeURIComponent(r.data.body)}`;
+      try {
+        await ext("new_tab", { url }, 15000);
+      } catch {
+        await openUrl(url).catch(() => {});
+      }
+      did({ kind: "email_draft", title: `Wrote an email to ${r.data.to}: "${r.data.subject}" (open in Gmail)`, link: url, noUndo: "It's open in Gmail, not sent. Close that window to throw it away.", proof: { level: "confirmed", how: "Opened it in Gmail, ready for you to check and send." } });
+      track("email_compose_web", { to: !!to });
+      return { ok: true, link: url, linkLabel: "Open in Gmail", to: r.data.to, subject: r.data.subject, body: r.data.body, text: `I wrote it and opened it in Gmail${to ? "" : `. Add ${r.data.to}'s address`}. Check it and hit Send when you're ready.`, opened: true };
+    }
     if (!r.data.found) return { ok: false, needAddress: r.data.to, text: `I couldn't find ${r.data.to}'s email. What's their address?` };
     const d = await gmailDraft(r.data);
     draftEntries.set(d.draftId, did({ kind: "email_draft", title: `Wrote an email to ${r.data.to}: "${r.data.subject}" (in your drafts)`, link: d.link, undo: { type: "draft_delete", data: { draftId: d.draftId } } }));
@@ -1622,6 +1639,7 @@ app.whenReady().then(() => {
   if (overlay) startSync(overlay); // class folders, classes and game plans follow you to any Mac you sign in on
   keepSignedIn(); // D2L / school login survives restarts
   if (overlay) startUpdates(overlay); // every fix reaches students on its own (installed app only)
+  void refreshGoogleConfig().catch(() => false); // is Google sign-in available from Milo's server?
   // `npm run test:milo`: drive Milo through his self-test, write the report, quit. (Sound muted so it runs quietly.)
   if (selfTestOn() && overlay) {
     const win = overlay;
