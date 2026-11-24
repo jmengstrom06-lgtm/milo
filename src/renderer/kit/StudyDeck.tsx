@@ -7,7 +7,7 @@
 // Remembers every skill you practice (mastery bars), and serves your weak spots back.
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import MathText, { stripMath } from "../MathText";
+import MathText, { speakMath, stripMath } from "../MathText";
 import { sfx } from "../sfx";
 import Graph from "./Graph";
 import type { StudyItem, StudyMode, StudySet } from "./types";
@@ -62,6 +62,14 @@ const StudyDeck = forwardRef<StudyHandle, {
   useEffect(() => {
     refreshMastery();
   }, []);
+
+  // closing the Study app stops the lesson mid-sentence (no more lines after it's gone)
+  useEffect(
+    () => () => {
+      run.current++;
+    },
+    []
+  );
 
   // ---- the mini-lesson (learn mode)
   useEffect(() => {
@@ -203,7 +211,7 @@ const StudyDeck = forwardRef<StudyHandle, {
     next: () => (phase === "lesson" ? (run.current++, setPhase("intro")) : next()),
     hint: () => {
       setHintOn(true);
-      if (item?.hint) say(stripMath(item.hint));
+      if (item?.hint) say(speakMath(item.hint));
     },
     show: () => (isCards ? setFlipped(true) : solve()),
     replay: () => solve(),
