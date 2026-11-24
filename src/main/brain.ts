@@ -3,6 +3,7 @@ import { anthropic, limitText, models, NoBrainError } from "./gateway";
 import { profileText } from "./profile";
 import { memoryPrompt, noteTurn } from "./memory";
 import { rulesPrompt } from "./classRules";
+import { contextPrompt } from "./studentContext";
 import { loadRules } from "./classRulesStore";
 // Milo's brain: all Anthropic API calls live in the main process,
 // so the API key never touches the renderer.
@@ -34,7 +35,7 @@ export function setUserName(name: string) {
   userName = (name || "").slice(0, 40);
 }
 const persona = () => `You are Milo, ${characterDesc}, an animated companion who lives on a college student's computer screen.${userName ? ` The student's name is ${userName}.` : ""}
-You are friendly, sharp and quick. You talk like a smart friend: short, precise, confident. No hype, no cheesy jokes, no exclamation marks everywhere, never like a textbook.${memoryPrompt()}${rulesPrompt(loadRules())}`;
+You are friendly, sharp and quick. You talk like a smart friend: short, precise, confident. No hype, no cheesy jokes, no exclamation marks everywhere, never like a textbook.${memoryPrompt()}${contextPrompt()}${rulesPrompt(loadRules())}`;
 
 const chatPrompt = () => `${persona()}
 You live on the student's Mac. You CAN look at their screen, jump to homework questions and teach them in your notebook,

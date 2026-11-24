@@ -2798,7 +2798,7 @@ export default function App() {
     const intent = parse(text, { inLesson, awaitingAnswer, pendingAsk: !!pendingTask.current });
     const nb = notebookRef.current;
     // Unmistakable commands run right away. Everything else: the router decides, knowing what's open.
-    const SURE = ["hush", "yes", "no", "resume", "undo", "activity", "feedback", "paper", "week", "home", "handle"];
+    const SURE = ["hush", "yes", "no", "resume", "undo", "activity", "feedback", "paper", "week", "home", "handle", "d2lclass"];
     const LESSON_SURE = ["close", "goto", "mode", "answer", "show", "copy", "practice", "skip", "repeat", "fill"];
     const sureSweep = intent.kind === "sweep" && (!!intent.show || !!intent.fill); // "show me the answers" / "fill it in": no doubt
     if (!SURE.includes(intent.kind) && !sureSweep && !(inLesson && LESSON_SURE.includes(intent.kind))) {
@@ -2860,6 +2860,9 @@ export default function App() {
         return;
       case "handle":
         void handleThis(text);
+        return;
+      case "d2lclass":
+        void window.milo.d2lOpenClass(portal, intent.course, intent.page).then((r) => say(r.text).then(() => setBubble(null)));
         return;
       case "week":
         try {

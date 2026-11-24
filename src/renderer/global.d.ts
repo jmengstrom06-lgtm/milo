@@ -227,6 +227,8 @@ declare global {
         level: (classId: string, level: MiloRuleLevel) => Promise<MiloRules>;
         check: (act: "plan" | "study" | "check" | "write" | "fill", said: string) => Promise<{ ok: boolean; text?: string }>;
       };
+      d2lOpenClass: (portal: string, course: string, page: string) => Promise<{ ok: boolean; text: string; url?: string }>;
+      setContext: (c: { portal?: string; classes?: { name: string; grade: number | null }[] }) => void;
       onBack: (fn: (awayMs: number) => void) => () => void;
       openDropped: (what: { path?: string; url?: string }) => Promise<{ ok: boolean; text?: string }>;
       pathForFile: (f: File) => string;

@@ -170,10 +170,11 @@ const letterize = (t: string) => t.replace(/\b([abcd])\s+plus\b/gi, "$1+").repla
 export function parseForecast(text: string): { exam: string; letter: string; course: string } | null {
   const t = letterize(text.trim().replace(/[?.!]+$/, "").replace(/^(hey )?milo,?\s*/i, ""));
   const m = t.match(
-    /^what(?:'s| is)?\s+(?:do|would|will|should)?\s*i\s+(?:need|have)\s+(?:to\s+(?:get|score|make)\s+)?(?:on|in)\s+(?:the\s+|my\s+)?(final(?:\s+exam)?|midterm(?:\s+\d+)?|exam(?:\s+\d+)?|test(?:\s+\d+)?|quiz\s+\d+)(?:\s+in\s+(?:my\s+)?(.+?))?\s+(?:to\s+(?:get|end\s+(?:up\s+)?with|keep|pass\s+with)|for)\s+(?:an?\s+)?([abcd][+-]?)(?:\s+in\s+(?:my\s+)?(.+?))?(?:\s+class)?$/i
+    /^what(?:'s| is)?\s+(?:do|would|will|should)?\s*i\s+(?:need|have)\s+(?:to\s+(?:get|score|make)\s+)?(?:on|in)\s+(?:the\s+|my\s+)?(?:(?<pre>(?!final\b|midterm\b|exam\b|test\b).+?)\s+)?(?<exam>final(?:\s+exam)?|midterm(?:\s+\d+)?|exam(?:\s+\d+)?|test(?:\s+\d+)?|quiz\s+\d+)(?:\s+in\s+(?:my\s+)?(?<mid>.+?))?\s+(?:to\s+(?:get|end\s+(?:up\s+)?with|keep|pass\s+with)|for)\s+(?:an?\s+)?(?<letter>[abcd][+-]?)(?:\s+in\s+(?:my\s+)?(?<post>.+?))?(?:\s+class)?$/i
   );
-  if (!m) return null;
-  return { exam: m[1].toLowerCase().replace(/\s+exam$/, ""), letter: m[3].toUpperCase(), course: (m[4] || m[2] || "").replace(/\s+class$/i, "").trim() };
+  if (!m?.groups) return null;
+  const g = m.groups;
+  return { exam: g.exam.toLowerCase().replace(/\s+exam$/, ""), letter: g.letter.toUpperCase(), course: (g.post || g.mid || g.pre || "").replace(/\s+class$/i, "").trim() };
 }
 /** "the final is worth 25 percent in stats" */
 export function parseFinalWeight(text: string): { exam: string; weight: number; course: string } | null {

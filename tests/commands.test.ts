@@ -72,3 +72,11 @@ describe("worksheets: fill in by default, easy to say 'just show me'", () => {
   it("plain 'do this worksheet' uses the default", () => expect(parse("do this worksheet", c)).toEqual({ kind: "sweep" }));
   it("inside a lesson, 'show me the answer' is still the lesson's answer", () => expect(parse("show me the answer", { ...c, inLesson: true }).kind).toBe("show"));
 });
+
+describe("open a D2L class page directly", () => {
+  const c = { inLesson: false, awaitingAnswer: false, pendingAsk: false };
+  it("class home", () => expect(parse("open my Statistical Analysis class on D2L", c)).toEqual({ kind: "d2lclass", course: "statistical analysis", page: "home" }));
+  it("grades", () => expect(parse("show me my bio grades", c)).toEqual({ kind: "d2lclass", course: "bio", page: "grades" }));
+  it("assignments", () => expect(parse("pull up my stats assignments", c)).toEqual({ kind: "d2lclass", course: "stats", page: "assignments" }));
+  it.each(["open chrome", "open my notes", "show me the answers", "open home base"])("%s is not a D2L class", (t) => expect(parse(t, c).kind).not.toBe("d2lclass"));
+});

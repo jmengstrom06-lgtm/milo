@@ -198,3 +198,10 @@ describe("first-minute offer", () => {
     ["what's the weather", null],
   ])("%s -> %s", (t, want) => expect(parseOfferAnswer(t)).toBe(want));
 });
+
+import { parseForecast as pf2 } from "../src/renderer/decide";
+describe("final-grade question, course before the exam", () => {
+  it("'on the Statistical Analysis final to get an A'", () =>
+    expect(pf2("what do I need on the Statistical Analysis final to get an A?")).toEqual({ exam: "final", letter: "A", course: "Statistical Analysis" }));
+  it("'on my stats midterm for a B'", () => expect(pf2("what do i need on my stats midterm for a B")).toEqual({ exam: "midterm", letter: "B", course: "stats" }));
+});
