@@ -88,7 +88,7 @@ declare global {
     work: string;
     answer: string;
     box: MiloBox;
-    kind: "type" | "choose" | "none";
+    kind: "type" | "choose" | "select" | "none";
     point: { x: number; y: number } | null;
     screen: { x: number; y: number } | null;
     later?: boolean; // too close to the bottom edge: do it after the next scroll
@@ -329,7 +329,7 @@ declare global {
       sweepPlan: (skip: string[], extra?: string, name?: string) => Promise<{ ok: true; items: SweepItem[]; more: boolean } | Err>;
       scrollTop: () => Promise<{ ok: true } | Err>;
       sweepFill: (item: SweepItem) => Promise<{ ok: true } | Err>;
-      scrollPage: () => Promise<{ ok: true } | Err>;
+      scrollPage: () => Promise<{ ok: true; moved?: boolean } | Err>;
       build: (req: string) => Promise<boolean>;
       stopBuild: () => void;
       onBuild: (cb: (ev: { type: "code"; delta: string } | { type: "done"; title: string; html: string } | { type: "error"; text: string }) => void) => () => void;

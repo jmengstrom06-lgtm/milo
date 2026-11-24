@@ -56,7 +56,7 @@ import { captureError, identify, recentEvents, sendFeedback, startTelemetry, tra
 import { allowForSession, backToWork, startFocus, stopFocus } from "./focus";
 import { planBlocks } from "./focusRules";
 import { rest } from "./account";
-import { activateApp, chromeWindowCount, click, ensureBrowser, resolveApp, frontApp, isRunning, openApp, openFolder, openLatestDownload, openUrl, pressKeys, quitApp, typeText } from "./hands";
+import { activateApp, chromeWindowCount, click, scrollAt, ensureBrowser, resolveApp, frontApp, isRunning, openApp, openFolder, openLatestDownload, openUrl, pressKeys, quitApp, typeText } from "./hands";
 import { plan } from "./quick";
 import { research } from "./research";
 import { buildTool } from "./builder";
@@ -1163,7 +1163,13 @@ ipcMain.handle(
     try {
       await sleep(60);
       await click(item.screen.x, item.screen.y);
-      await sleep(item.kind === "type" ? 150 : 220); // let a radio/checkbox register before moving on
+      await sleep(item.kind === "type" ? 150 : item.kind === "select" ? 350 : 220); // let a radio/checkbox register before moving on
+      if (item.kind === "select") {
+        // an open dropdown jumps to what you type; Return picks it
+        await typeText(item.answer);
+        await sleep(150);
+        await pressKeys("return");
+      }
       if (item.kind === "type") {
         await pressKeys("cmd+a"); // replace anything already in the box
         await typeText(item.answer);
@@ -1186,8 +1192,13 @@ ipcMain.handle("milo:scroll-top", async () => {
   overlay?.setFocusable(false);
   overlay?.blur();
   try {
-    await pressKeys("escape");
-    await pressKeys("cmd+up");
+    const wa = screen.getPrimaryDisplay().workArea;
+    const area = pickedArea?.box ?? (workWindow && worthFocusing(workWindow.box, screen.getPrimaryDisplay().bounds) ? workWindow.box : null) ?? wa;
+    // the wheel works even when a text box has focus (where ⌘↑ would just move the cursor)
+    if (!(await scrollAt(area.x + area.width / 2, area.y + area.height / 2, -30000))) {
+      await pressKeys("escape");
+      await pressKeys("cmd+up");
+    }
     await sleep(700);
     return { ok: true };
   } catch (err) {
@@ -1198,16 +1209,33 @@ ipcMain.handle("milo:scroll-top", async () => {
   }
 });
 ipcMain.handle("milo:scroll-page", async () => {
+  // Scroll ~60% of what Milo is looking at (the picked area / the work window / the screen), with the pointer
+  // over it so the right pane scrolls. Then compare: if nothing moved, that was the end of the page.
+  handsBusy++;
   overlay?.setFocusable(false);
   overlay?.blur();
+  applyClickable();
   try {
-    await pressKeys("escape"); // leave any text box so the page itself scrolls
-    await pressKeys("pagedown");
-    await sleep(700);
-    return { ok: true };
+    const wa = screen.getPrimaryDisplay().workArea;
+    const area = pickedArea?.box ?? (workWindow && worthFocusing(workWindow.box, screen.getPrimaryDisplay().bounds) ? workWindow.box : null) ?? wa;
+    const before = await captureScreen();
+    const cx = area.x + area.width / 2;
+    const cy = area.y + area.height / 2;
+    const native = await scrollAt(cx, cy, Math.max(200, area.height * 0.6));
+    if (!native) {
+      await pressKeys("escape"); // older helper: keyboard (leave any text box so the page itself scrolls)
+      await pressKeys("pagedown");
+    }
+    await sleep(650);
+    const after = await captureScreen();
+    const moved = before.ok && after.ok ? changed(thumb(before.shot.full), thumb(after.shot.full)) : true;
+    bb("sweep", "scroll", { native, moved });
+    return { ok: true, moved };
   } catch (err) {
     return { ok: false, text: (err as Error).message };
   } finally {
+    handsBusy = Math.max(0, handsBusy - 1);
+    applyClickable();
     overlay?.setFocusable(true);
   }
 });

@@ -194,6 +194,18 @@ func handle(_ m: [String: Any]) {
     case "type":
         typeText((m["text"] as? String) ?? "", delayMs: Int(num(m["delayMs"]) ?? 12))
         reply(id, ["ok": true])
+    case "scroll":
+        // Scroll the page under (x, y) by dy points, in small steps so pages that smooth-scroll keep up.
+        guard let dy = num(m["dy"]) else { return reply(id, ["ok": false, "error": "bad args"]) }
+        if let x = num(m["x"]), let y = num(m["y"]) { move(x: x, y: y) }
+        var left = Int32(dy.rounded())
+        while left != 0 {
+            let step: Int32 = left > 0 ? min(left, 60) : max(left, -60)
+            CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -step, wheel2: 0, wheel3: 0)?.post(tap: .cghidEventTap)
+            left -= step
+            usleep(12000)
+        }
+        reply(id, ["ok": true])
     case "front":
         let app = NSWorkspace.shared.frontmostApplication
         reply(id, ["ok": true, "name": app?.localizedName ?? "", "bundle": app?.bundleIdentifier ?? ""])

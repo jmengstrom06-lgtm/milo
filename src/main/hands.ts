@@ -348,3 +348,8 @@ export async function chromeWindowCount(): Promise<number> {
     return 1;
   }
 }
+
+/** Scroll the page under (x, y) down by `dy` points (negative = up). False if this helper can't (older build). */
+export async function scrollAt(x: number, y: number, dy: number): Promise<boolean> {
+  return viaNative("scroll", { x: Math.round(x), y: Math.round(y), dy: Math.round(dy) }).catch(() => false);
+}
