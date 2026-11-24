@@ -657,7 +657,7 @@ export type SweepItem = {
   box: { x: number; y: number; width: number; height: number };
   work: string;
   answer: string;
-  input: { kind: "type" | "choose" | "none"; x?: number; y?: number };
+  input: { kind: "type" | "choose" | "select" | "none"; x?: number; y?: number };
 };
 
 const SWEEP_TOOL = {
@@ -687,8 +687,8 @@ const SWEEP_TOOL = {
             input: {
               type: "object",
               description:
-                "Where the answer goes. kind=type: an empty text box/blank you can type into (x,y = point inside it). kind=choose: multiple choice (x,y = the radio button/circle/box of the correct option). kind=none: no field (printed page, PDF, image).",
-              properties: { kind: { type: "string", enum: ["type", "choose", "none"] }, x: { type: "number" }, y: { type: "number" } },
+                "Where the answer goes. kind=type: an empty text box, blank or text area you can type into (x,y = point inside it). kind=choose: multiple choice or a checkbox (x,y = the radio button/circle/box of the correct option; for 'select all that apply' list one question per correct box, labels like '5a', '5b'). kind=select: a dropdown menu (x,y = the dropdown; answer = the exact option text). kind=none: no field (printed page, PDF, image).",
+              properties: { kind: { type: "string", enum: ["type", "choose", "select", "none"] }, x: { type: "number" }, y: { type: "number" } },
               required: ["kind"],
             },
           },

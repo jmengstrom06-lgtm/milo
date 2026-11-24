@@ -1,0 +1,37 @@
+# The worksheet test bench: 10 worksheets (stats, algebra, geometry, chemistry table, biology quiz cards,
+# English dropdowns, history fill-in-the-blank, reading passage, Spanish grid, economics) in a real browser,
+# real AI, the same sweep loop the Mac app runs. Fails under 95% or if Milo claims "all filled" with blanks left.
+# Runs on any change to the worksheet code, and by hand (Actions → sweep-eval → Run workflow).
+name: sweep-eval
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "src/main/sweepCore.ts"
+      - "src/main/brain.ts"
+      - "evals/worksheets.ts"
+      - "evals/run-sweep.ts"
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Worksheet bench (real AI)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: npm run eval:sweep
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sweep-results
+          path: evals/results/sweep/
