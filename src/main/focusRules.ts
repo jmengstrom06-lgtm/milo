@@ -133,7 +133,7 @@ export function parseLockIn(text: string): { minutes?: number; topic?: string } 
     if (mm) minutes = parseInt(mm[1], 10);
   }
   if (/pomodoro/.test(t) && !minutes) minutes = 25;
-  if (minutes !== undefined) minutes = Math.max(5, Math.min(240, minutes));
+  if (minutes !== undefined) minutes = Math.max(1, Math.min(240, minutes));
 
   // Topic: the words after "on" / "for" / "study" that aren't a length of time.
   let topic: string | undefined;

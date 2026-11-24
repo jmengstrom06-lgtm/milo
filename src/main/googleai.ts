@@ -75,7 +75,7 @@ export async function parseEvent(request: string) {
     {
       model: models.fast(),
       max_tokens: 400,
-      system: `${persona()}\nTurn the student's words into one calendar event. Right now it is ${localNow()}. "Tuesday" means the next Tuesday from today.`,
+      system: `${persona()}\nTurn the student's words into one calendar event. Right now it is ${localNow()}. "Tuesday" means the next Tuesday from today.${new Date().getHours() < 4 ? ` It's after midnight and they haven't slept yet, so "tomorrow" means later today (${new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}) and "tonight" means the night that just ended only if they say so.` : ""}`,
       tools: [EVENT_TOOL],
       tool_choice: { type: "auto" },
       messages: [{ role: "user", content: request }],
