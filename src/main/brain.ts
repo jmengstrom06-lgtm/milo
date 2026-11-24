@@ -532,8 +532,8 @@ ${profileText()}
 // Router: decides what the student wants, knowing what's open on screen right now.
 export type RouteKind =
   | "chat" | "look" | "task" | "research" | "move" | "close" | "open_result" | "screen_question" | "kit" | "in_app" | "kit_menu" | "hold" | "drop"
-  | "sweep" | "build" | "quiz" | "brief" | "watch" | "checkwork" | "lockin";
-export type Route = { kind: RouteKind; minutes?: number; mode?: Mode; followUp?: boolean; where?: string; question?: string; on?: boolean; after?: string; app?: string; target?: string; request?: string; failed?: boolean };
+  | "sweep" | "build" | "quiz" | "brief" | "watch" | "checkwork" | "lockin" | "ask";
+export type Route = { kind: RouteKind; choices?: { label: string; say: string }[]; minutes?: number; mode?: Mode; followUp?: boolean; where?: string; question?: string; on?: boolean; after?: string; app?: string; target?: string; request?: string; failed?: boolean };
 export type RouteCtx = {
   researchOpen?: boolean;
   researchTopic?: string;
@@ -554,7 +554,7 @@ const ROUTE_TOOL = {
     properties: {
       kind: {
         type: "string",
-        enum: ["chat", "look", "task", "research", "move", "close", "open_result", "screen_question", "kit", "in_app", "kit_menu", "hold", "drop", "sweep", "build", "quiz", "brief", "watch", "checkwork", "lockin"],
+        enum: ["chat", "look", "task", "research", "move", "close", "open_result", "screen_question", "kit", "in_app", "kit_menu", "hold", "drop", "sweep", "build", "quiz", "brief", "watch", "checkwork", "lockin", "ask"],
         description: [
           "in_app = ONLY when one of Milo's apps is open (see 'Right now'): the request is something to do INSIDE that open app. Sheet: change the data or chart ('make it a box plot', 'add a z-score column', 'sort by score', 'who's above average', 'more bins', 'make another example'). Study: answer the problem, next, hint, another one, harder, explain. Sketch: change the drawing/graph ('shade above 80', 'add labels'). Notes: add to / ask about / quiz on the open note. Planner: change the plan. NOT in_app: closing it, opening a different app, anything outside the app (Chrome, moving, research).",
           "research = a request for information about the world (people, events, news, weather, scores, prices, facts, 'look up', 'tell me about', 'do some research on') when the student did NOT ask for Chrome / a browser / a tab / a website. Shown in Milo's own research box.",
@@ -571,6 +571,7 @@ const ROUTE_TOOL = {
           "sweep = do every question on the page. build = make a small working app/tool/calculator. quiz = quiz me. brief = what's due / daily brief. watch = watch me work (on:false to stop). checkwork = check my work once.",
           "lockin = start a focus session where Milo studies alongside the student and pulls them back when they drift to TikTok, Instagram, YouTube etc.: 'lock in', 'lock in for 45 minutes on stats', 'focus mode', 'help me focus', 'start a pomodoro', 'keep me off my phone while I study', 'I need to grind out this essay'. Set minutes if they gave a length and request = the subject if they named one. on:false to end a running session: 'stop the lock in', 'end focus', 'I'm done studying'.",
           "chat = conversation, or a quick question about a concept ('what is a derivative?'). But 'teach me X' / 'help me learn X' / 'I don't understand X' = kit study (a real lesson with practice).",
+          "ask = ONLY when what they said could reasonably mean two or more DIFFERENT actions and a wrong guess would waste their time or do something they didn't want: 'help me with bio' (start the homework? teach a topic? quiz?), 'make something for stats', 'do it' or 'the essay' with nothing open that explains it. Then set question (one short line, e.g. 'What should we do for bio?') and choices. Do NOT ask when one reading is clearly most likely, when they named the exact thing ('teach me z-scores', 'graph y=x^2', 'open chrome'), for greetings or questions you can just answer, or while one of Milo's apps is open and the request fits it.",
         ].join(" "),
       },
       mode: { type: "string", enum: ["teach", "help", "do"], description: "For look: teach (explain), help (hint), do (solve/complete it)." },
@@ -580,7 +581,12 @@ const ROUTE_TOOL = {
         enum: ["top-left", "top-right", "bottom-left", "bottom-right", "left", "right", "top", "bottom", "center", "away"],
         description: "For move: where Milo should go. 'away' = out of the way / other side.",
       },
-      question: { type: "string", description: "For research: the question, cleaned up (drop filler like 'do some research on')." },
+      question: { type: "string", description: "For research: the question, cleaned up (drop filler like 'do some research on'). For ask: the one-line question to the student." },
+      choices: {
+        type: "array",
+        description: "For ask: 2 or 3 choices, most likely first. label = 2-4 words for a button. say = a complete, unmistakable command Milo can run as if the student said it ('start my bio homework', 'teach me today's bio topic', 'quiz me on bio').",
+        items: { type: "object", properties: { label: { type: "string" }, say: { type: "string" } }, required: ["label", "say"] },
+      },
       on: { type: "boolean", description: "For watch and lockin: true to start, false to stop." },
       minutes: { type: "number", description: "For lockin: session length in minutes, if the student said one ('an hour' = 60)." },
       app: { type: "string", enum: ["study", "sketch", "notes", "sheet", "planner", "pocket"], description: "For kit: which of Milo's apps." },
@@ -627,7 +633,20 @@ export async function classify(text: string, ctx: RouteCtx = {}): Promise<Route>
   }
   if (!r.ok) r = await callTool<Route>(body, ROUTE_TOOL.name);
   if (!r.ok) bb("router", "failed", { text, why: r.text });
-  return r.ok && r.data?.kind ? r.data : { kind: "chat", failed: true };
+  return r.ok && r.data?.kind ? cleanAsk(r.data) : { kind: "chat", failed: true };
+}
+
+/** An "ask" needs 2-3 real choices with runnable commands; otherwise it's just chat. (pure) */
+export function cleanAsk(rt: Route): Route {
+  if (rt.kind !== "ask") return rt;
+  const raw = asArray(rt.choices);
+  const seen = new Set<string>();
+  const choices = (Array.isArray(raw) ? raw : [])
+    .map((c) => ({ label: String((c as { label?: unknown })?.label ?? "").trim().slice(0, 32), say: String((c as { say?: unknown })?.say ?? "").trim().slice(0, 200) }))
+    .filter((c) => c.label && c.say.split(/\s+/).length >= 2 && !seen.has(c.say.toLowerCase()) && seen.add(c.say.toLowerCase()))
+    .slice(0, 3);
+  if (choices.length < 2) return { kind: "chat" };
+  return { kind: "ask", question: (rt.question ?? "").trim().slice(0, 120) || "What do you want me to do?", choices };
 }
 
 // ---------------------------------------------------------------------------

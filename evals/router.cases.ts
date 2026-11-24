@@ -141,4 +141,15 @@ export const CASES: Case[] = [
   { say: "write in my google doc that the meeting is at 5", expect: { kind: "task" } },
   { say: "move to the bottom left and then open your notes", expect: { kind: "move", after: true } },
   { say: "uh, okay, so, open the sheet", expect: { kind: "kit", app: "sheet" } },
+  // ---- ask when unsure: vague asks get buttons, clear asks never do ----------------------------
+  { say: "help me with bio", expect: { kind: "ask" }, note: "start homework, teach, or quiz?" },
+  { say: "make something for stats", expect: { kind: "ask" } },
+  { say: "can you do the essay", expect: { kind: ["ask", "look", "task"] } },
+  { say: "teach me z-scores", expect: { kind: "kit", app: "study" }, note: "clear: never ask" },
+  { say: "I don't get photosynthesis", expect: { kind: "kit", app: "study" } },
+  { say: "make me flashcards for bio", expect: { kind: "kit", app: "study" } },
+  { say: "who won the TCU game last night", expect: { kind: "research" } },
+  { say: "explain number 3", expect: { kind: "look" } },
+  { say: "hey milo how's it going", expect: { kind: "chat" }, note: "greeting: never ask" },
+  { say: "make it a box plot", ctx: SHEET, expect: { kind: "in_app" }, note: "an open app explains it: never ask" },
 ];

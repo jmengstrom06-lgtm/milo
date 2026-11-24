@@ -39,6 +39,9 @@ const SITES: Record<string, [string, string]> = {
   canvas: ["https://canvas.instructure.com", "Canvas"], outlook: ["https://outlook.office.com", "Outlook"],
 };
 
+/** School words: a request about class stuff, never a Mac app named "Bio Assignments". */
+const SCHOOL = /\b(answers?|assignments?|homework|hw|grades?|class(es)?|course|syllabus|quiz(zes)?|exams?|tests?|notes|lecture|worksheet|essay|paper|lab|project|deadlines?|d2l|stats|bio|econ|calc|chem|math|english|history|week|plan|schedule)\b/;
+
 const NEW_DOCS: [RegExp, string, string][] = [
   [/^(a )?(new |blank )?(google )?doc(ument)?$|^(a )?new (google )?docs?$/, "https://docs.new", "a new Google Doc"],
   [/^(a )?(new |blank )?google (spread)?sheets?$|^(a )?new google sheets?$/, "https://sheets.new", "a new Google Sheet"],
@@ -183,8 +186,11 @@ function one(t: string): QuickStep | null {
   if (/^[a-z0-9-]+(\.[a-z0-9-]+)*\.(com|org|edu|net|io|ai|gov|co|us|app|dev|tv|me)(\/\S*)?$/.test(target))
     return { kind: "url", url: `https://${target}`, say: `Going to ${target}` };
   if (APPS[target]) return { kind: "app", app: APPS[target], say: `Opening ${APPS[target].replace(/^Microsoft |\.us$/, "")}!` };
-  // Unknown one-word/two-word names: try it as an app ("open figma").
-  if (/^[a-z0-9 ]{2,24}$/.test(target) && target.split(" ").length <= 2 && !/\b(it|this|that|them)\b/.test(target)) {
+  // Unknown one-word/two-word names: try it as an app ("open figma"). Only after "open/launch", never a website
+  // ("go to the tcu library website") and never school stuff ("pull up my bio assignments", "show me the answers").
+  const verb = t.match(/^(open|launch)\b/);
+  const saidSite = /\b(website|site|web ?page|page)$/.test(o[1].trim());
+  if (verb && !saidSite && /^[a-z0-9 ]{2,24}$/.test(target) && target.split(" ").length <= 2 && !/\b(it|this|that|them)\b/.test(target) && !SCHOOL.test(target)) {
     const name = target.replace(/\b\w/g, (c) => c.toUpperCase());
     return { kind: "app", app: name, say: `Opening ${name}!` };
   }

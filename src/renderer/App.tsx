@@ -20,6 +20,7 @@ import { alertLine, emptyRadar, markWarned, mergeScan, pendingAlerts, upcoming, 
 import RadarCard, { type RadarView } from "./RadarCard";
 import { backNudge, weekNudge, type Nudge } from "./nudges";
 import { checkupLine, type CheckItem } from "../main/checkup";
+import { isSure, LOCKIN_START, pickSpoken } from "./exact";
 import Onboarding, { setupDone } from "./Onboarding";
 import ActivityPanel from "./ActivityPanel";
 import FeedbackPanel from "./FeedbackPanel";
@@ -2488,6 +2489,12 @@ export default function App() {
       return;
     }
     if (offerAnswer(text)) return;
+    // Milo's buttons are up ("help me with bio" → three choices): "the first one" / "quiz me" picks one
+    if (offer && !bubble) {
+      const i = pickSpoken(text, offer.options);
+      if (i >= 0) return pickOffer(offer.options[i]);
+      setOffer(null); // they said something else: drop the buttons and do that
+    }
     // "What's it about?" -> "the french revolution"
     // (a whole new "write a paper on X" is its own request, not the topic of the last one)
     if (paperTopic.current && parse(text, { inLesson: false, awaitingAnswer: false, pendingAsk: false }).kind === "paper") paperTopic.current = null;
@@ -2542,7 +2549,7 @@ export default function App() {
           return;
         }
       }
-      if (/^(let'?s |time to |i (need|want) to |help me )?(lock (me )?in|start (a |the )?(lock[- ]?in|focus (session|mode)|study session|pomodoro)|focus mode|pomodoro|help me focus|study session)\b/.test(lt)) {
+      if (LOCKIN_START.test(lt)) {
         setChatOpen(false);
         if (lockOn) {
           say("We're already locked in.").then(() => setBubble(null));
@@ -2799,12 +2806,7 @@ export default function App() {
     const intent = parse(text, { inLesson, awaitingAnswer, pendingAsk: !!pendingTask.current });
     const nb = notebookRef.current;
     // Unmistakable commands run right away. Everything else: the router decides, knowing what's open.
-    const SURE = ["hush", "yes", "no", "resume", "undo", "activity", "feedback", "paper", "week", "home", "handle", "d2lclass"];
-    const LESSON_SURE = ["close", "goto", "mode", "answer", "show", "copy", "practice", "skip", "repeat", "fill"];
-    const sureSweep = intent.kind === "sweep" && (!!intent.show || !!intent.fill); // "show me the answers" / "fill it in": no doubt
-    // a computer task that names a browser or a website is a web task, not one of Milo's own apps ("the TCU library website")
-    const sureWeb = intent.kind === "task" && /\b(chrome|safari|browser|website|web ?site|web ?page|https?:|[a-z0-9-]+\.(com|edu|org|net|gov|io))\b/i.test(text);
-    if (!SURE.includes(intent.kind) && !sureSweep && !sureWeb && !(inLesson && LESSON_SURE.includes(intent.kind))) {
+    if (!isSure(intent, text, inLesson)) {
       setMood("thinking");
       const r0 = Date.now();
       getRoute(text).then((rt) => {
@@ -2959,6 +2961,16 @@ export default function App() {
   /** Do what the router decided. */
   const applyRoute = (rt: MiloRoute, text: string, spoken: boolean, local: Intent) => {
     switch (rt.kind) {
+      case "ask": {
+        // Not sure what they meant: ask with buttons instead of guessing. Tapping (or saying) one runs it.
+        const options = rt.choices ?? [];
+        setMood("idle");
+        setBubble(null);
+        setOffer({ seen: rt.question ?? "", options });
+        bb("route_ask", { text, options: options.map((o) => o.label) });
+        say(`${rt.question ?? "What do you want me to do?"} ${options.map((o) => o.label).join(", or ")}?`).then(() => setBubble(null));
+        return;
+      }
       case "research":
         startResearch(rt.question?.trim() || text, spoken, !!researchQ && rt.followUp === true);
         return;
