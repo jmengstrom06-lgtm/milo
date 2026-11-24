@@ -2,6 +2,8 @@ import { log as bb } from "./blackbox";
 import { anthropic, limitText, models, NoBrainError } from "./gateway";
 import { profileText } from "./profile";
 import { memoryPrompt, noteTurn } from "./memory";
+import { rulesPrompt } from "./classRules";
+import { loadRules } from "./classRulesStore";
 // Milo's brain: all Anthropic API calls live in the main process,
 // so the API key never touches the renderer.
 
@@ -32,7 +34,7 @@ export function setUserName(name: string) {
   userName = (name || "").slice(0, 40);
 }
 const persona = () => `You are Milo, ${characterDesc}, an animated companion who lives on a college student's computer screen.${userName ? ` The student's name is ${userName}.` : ""}
-You are friendly, sharp and quick. You talk like a smart friend: short, precise, confident. No hype, no cheesy jokes, no exclamation marks everywhere, never like a textbook.${memoryPrompt()}`;
+You are friendly, sharp and quick. You talk like a smart friend: short, precise, confident. No hype, no cheesy jokes, no exclamation marks everywhere, never like a textbook.${memoryPrompt()}${rulesPrompt(loadRules())}`;
 
 const chatPrompt = () => `${persona()}
 You live on the student's Mac. You CAN look at their screen, jump to homework questions and teach them in your notebook,
@@ -1161,4 +1163,34 @@ export function asArray(v: unknown): unknown {
   } catch {
     return v;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Syllabus AI policy (only for classes where the student turned on "follow my syllabus AI rules").
+const POLICY_TOOL = {
+  name: "ai_policy",
+  description: "The class's rule on students using AI, from its syllabus.",
+  input_schema: {
+    type: "object",
+    properties: {
+      level: { type: "string", enum: ["none", "study", "credit", "allowed", "unclear"], description: "none = no AI at all; study = AI only for studying/learning, not for graded work; credit = AI allowed if you say/cite how you used it; allowed = AI allowed; unclear = no policy found or it's ambiguous." },
+      quote: { type: "string", description: "The exact sentence(s) from the syllabus that set the rule, under 40 words. Empty if unclear." },
+    },
+    required: ["level", "quote"],
+  },
+};
+export async function readAiPolicy(src: { text?: string; pdf?: string }): Promise<ApiOk<{ level: string; quote: string }> | ApiErr> {
+  const content: unknown[] = [];
+  if (src.pdf) content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: src.pdf } });
+  content.push({ type: "text", text: `${src.text ? `SYLLABUS:\n"""${src.text.slice(0, 60000)}"""\n\n` : ""}What is this class's rule on students using AI tools (ChatGPT etc.)? Quote it exactly. Look for sections like "AI", "Artificial Intelligence", "ChatGPT", "generative", "academic integrity", "technology use". If there's nothing specific about AI, the level is unclear.` });
+  return callTool<{ level: string; quote: string }>(
+    {
+      max_tokens: 400,
+      system: "You read college syllabi and report the AI-use policy exactly as written. Never guess a rule that isn't in the text.",
+      tools: [POLICY_TOOL],
+      tool_choice: { type: "auto" },
+      messages: [{ role: "user", content }],
+    },
+    POLICY_TOOL.name
+  );
 }

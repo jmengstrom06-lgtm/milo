@@ -35,7 +35,7 @@ async function activeTab(app: string): Promise<{ url: string; title: string }> {
 }
 
 /** Front app, and its focused window's position (points, whole-screen coordinates). */
-async function frontWindow(): Promise<{ app: string; title: string; frame: { x: number; y: number; w: number; h: number } | null }> {
+export async function frontWindow(): Promise<{ app: string; title: string; frame: { x: number; y: number; w: number; h: number } | null }> {
   const r = await native("window", {}, 1500);
   if (r?.ok && typeof r.name === "string") {
     const has = typeof r.x === "number" && typeof r.w === "number";

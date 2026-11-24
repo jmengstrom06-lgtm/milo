@@ -1182,7 +1182,16 @@ export default function App() {
   };
   /** "Write a 5 page paper on…": Milo plans, finds real sources, and writes it into a Google Doc live. */
   const paperTopic = useRef<{ base: string; at: number } | null>(null);
+  /** Optional syllabus rules: if the student asked Milo to follow this class's rules and they say no, say why and stop. */
+  const heldBack = async (act: "check" | "write" | "fill", said: string) => {
+    const r = await window.milo.rules.check(act, said).catch(() => ({ ok: true as const, text: "" }));
+    if (r.ok) return false;
+    setMood("idle");
+    say(r.text || "Your syllabus rules for this class say no to that.").then(() => setBubble(null));
+    return true;
+  };
   const startPaper = async (text: string) => {
+    if (await heldBack("write", text)) return;
     paperTopic.current = null;
     hush();
     setChatOpen(false);
@@ -1809,6 +1818,7 @@ export default function App() {
   /** Fill in or just show, switchable mid-worksheet from the progress bar. */
   const sweepFill = useRef(true);
   const runSweep = async (fillOverride?: boolean) => {
+    if (await heldBack("fill", "")) return;
     runId.current++;
     hush();
     setChatOpen(false);
@@ -2027,6 +2037,7 @@ export default function App() {
   const checkWorkNow = async () => {
     setChatOpen(false);
     hover(false);
+    if (await heldBack("check", "")) return;
     // beta: the rubric-aware check, if the student turned it on
     if ((await window.milo.prefs.get().catch(() => null))?.preflight) return runPreflight();
     setMood("looking");
