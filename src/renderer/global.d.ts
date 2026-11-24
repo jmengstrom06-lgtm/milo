@@ -17,6 +17,7 @@ declare global {
     actions: number;
   };
   type MiloPrefs = { notifyAway: boolean; quiet: boolean; quietFrom: number; quietTo: number; noRecord: string[]; okRecord: string[]; autofill: boolean; preflight: boolean };
+  type MiloCheckItem = { id: string; label: string; ok: boolean | null; detail: string; fix?: { kind: string; label: string } };
   type MiloRuleLevel = "none" | "study" | "credit" | "allowed" | "unclear";
   type MiloRules = Record<string, { course: string; level: MiloRuleLevel; quote: string; readAt: number; source: string }>;
   type MiloPause = { on: boolean; since: number | null; until: number | null };
@@ -229,6 +230,8 @@ declare global {
       };
       d2lOpenClass: (portal: string, course: string, page: string) => Promise<{ ok: boolean; text: string; url?: string }>;
       setContext: (c: { portal?: string; classes?: { name: string; grade: number | null }[] }) => void;
+      checkup: (portal?: string) => Promise<MiloCheckItem[]>;
+      checkupFix: (kind: string) => Promise<{ ok: boolean; text: string }>;
       onBack: (fn: (awayMs: number) => void) => () => void;
       openDropped: (what: { path?: string; url?: string }) => Promise<{ ok: boolean; text?: string }>;
       pathForFile: (f: File) => string;

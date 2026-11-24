@@ -221,6 +221,8 @@ contextBridge.exposeInMainWorld("milo", {
   d2lSubscribeUrl: (portal: string) => ipcRenderer.invoke("milo:d2l-subscribe-url", portal),
   d2lOpenChrome: (url: string) => ipcRenderer.invoke("milo:d2l-open-chrome", url),
   startupCheck: (portal?: string) => ipcRenderer.invoke("milo:startup-check", portal),
+  checkup: (portal?: string) => ipcRenderer.invoke("milo:checkup", portal),
+  checkupFix: (kind: string) => ipcRenderer.invoke("milo:checkup-fix", kind),
   syllabus: (course: string) => ipcRenderer.invoke("milo:syllabus", course),
   exam: (q: { course: string; kind?: string; extra?: string }) => ipcRenderer.invoke("milo:exam", q),
   feedFetch: (url: string) => ipcRenderer.invoke("milo:feed-fetch", url),

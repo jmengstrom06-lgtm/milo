@@ -50,7 +50,7 @@ import { calendarFeedUrl, subscribePageUrl, d2lCheck, keepSignedIn, courses as d
 import { makeExam } from "./exam";
 import { transcribe } from "./ears";
 import { binaryPath, stopNative } from "./native";
-import { account, onAccountChange, sendCode, signOut, startCallbackServer, userId, verifyCode } from "./account";
+import { account, onAccountChange, sendCode, signOut, startCallbackServer, SUPABASE_ANON, SUPABASE_URL, userId, verifyCode } from "./account";
 import { forget, forgetAll, memories, onRemember, remember, syncMemories } from "./memory";
 import { captureError, identify, recentEvents, sendFeedback, startTelemetry, track } from "./telemetry";
 import { allowForSession, backToWork, startFocus, stopFocus } from "./focus";
@@ -67,6 +67,7 @@ import { looksLikeRubric, prefs, setPrefs, type Prefs } from "./prefs";
 import { allowed as ruleAllows, cleanPolicy, holdBackLine, ruleFor, type Act, type Level } from "./classRules";
 import { loadRules, saveRule } from "./classRulesStore";
 import { setStudentContext, type StudentContext } from "./studentContext";
+import { checklist, problems, type FixKind, type Probe } from "./checkup";
 import { syllabusSource } from "./syllabus";
 import { frontWindow } from "./focus";
 import { checkForUpdate, installUpdate, startUpdater, startUpdates, updateReady } from "./updater";
@@ -1470,6 +1471,62 @@ ipcMain.handle("milo:startup-check", async (_e, portal?: string) => {
   }
   bb("startup", "check", { problems: problems.map((p) => p.kind) });
   return { problems };
+});
+/** The checkup: every connection Milo needs, probed for real, as a checklist with one-tap fixes (checkup.ts). */
+async function probeCheckup(portal: string): Promise<Probe> {
+  const mac = process.platform === "darwin";
+  const signedIn = account().signedIn;
+  const devKey = !!process.env.ANTHROPIC_API_KEY;
+  const [aiServer, d2l, google, chromeRunning] = await Promise.all([
+    devKey || !signedIn
+      ? Promise.resolve(null)
+      : fetch(`${SUPABASE_URL}/functions/v1/milo/health`, { headers: { Authorization: `Bearer ${SUPABASE_ANON}`, apikey: SUPABASE_ANON }, signal: AbortSignal.timeout(8000) })
+          .then(async (r) => (r.ok ? !!((await r.json()) as { anthropic?: boolean }).anthropic : false))
+          .catch(() => null),
+    portal ? d2lCheck(portal).then((c) => ({ ok: c.ok, signin: c.signin })).catch(() => ({ ok: false, signin: false })) : Promise.resolve(null),
+    (async () => {
+      await refreshGoogleConfig().catch(() => false);
+      const s = googleStatus();
+      if (!s.connected) return { ready: s.ready, connected: false, works: null, reconnect: false };
+      try {
+        await calendarBusy(1);
+        return { ready: true, connected: true, works: true, reconnect: false };
+      } catch (e) {
+        return { ready: true, connected: true, works: false, reconnect: e instanceof GoogleNotConnected };
+      }
+    })(),
+    mac ? isRunning("Google Chrome").catch(() => false) : Promise.resolve(false),
+  ]);
+  return {
+    devKey,
+    signedIn,
+    aiServer,
+    portal,
+    d2l,
+    google,
+    chrome: { running: !!chromeRunning, extension: bridgeConnected() },
+    perms: mac
+      ? { screen: systemPreferences.getMediaAccessStatus("screen") === "granted", hands: systemPreferences.isTrustedAccessibilityClient(false), mic: systemPreferences.getMediaAccessStatus("microphone") === "granted" }
+      : { screen: true, hands: true, mic: true },
+  };
+}
+ipcMain.handle("milo:checkup", async (_e, portal?: string) => {
+  const items = checklist(await probeCheckup(String(portal ?? "")));
+  const bad = problems(items).map((i) => i.id);
+  track("checkup", { bad: bad.join(",") || "none", n_bad: bad.length });
+  bb("checkup", "ran", { bad });
+  return items;
+});
+/** One-tap fixes that main can do itself (the page handles sign-in and D2L). */
+ipcMain.handle("milo:checkup-fix", async (_e, kind: FixKind) => {
+  track("checkup_fix", { kind });
+  if (kind === "google") return googleConnect();
+  if (kind === "chrome") {
+    await openApp("Google Chrome").catch(() => {});
+    if (!bridgeConnected()) await shell.openPath(extensionDirs()[0]).catch(() => "");
+    return { ok: true, text: bridgeConnected() ? "Chrome's connected." : "Opened Chrome. If the helper still isn't connected, turn on Milo's extension in Chrome (chrome://extensions)." };
+  }
+  return { ok: false, text: "" };
 });
 /** Turn one on: the system prompt if macOS still allows asking, otherwise the exact Settings page. */
 ipcMain.handle("milo:perm-ask", async (_e, kind: string) => {
