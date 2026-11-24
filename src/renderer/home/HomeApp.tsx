@@ -2043,6 +2043,59 @@ function ActList({ acts, title, onAll }: { acts: MiloActivity[]; title: string; 
   );
 }
 
+const RULE_LABEL: Record<MiloRuleLevel, string> = { none: "No AI", study: "AI for studying only", credit: "AI allowed with credit", allowed: "AI allowed", unclear: "Unclear" };
+const RULE_DOES: Record<MiloRuleLevel, string> = {
+  none: "Milo only plans your time and reminds you what's due in this class.",
+  study: "Milo explains, quizzes and makes flashcards, but won't write, fill in or check graded work here.",
+  credit: "Milo does everything. Remember to note that you used AI.",
+  allowed: "Milo does everything here.",
+  unclear: "Milo treats it as studying only until you change it. Worth asking your professor.",
+};
+/** Optional, off by default: "Follow my syllabus AI rules" for this class. */
+function RulesCard({ cls }: { cls: Klass }) {
+  const [rules, setRules] = useState<MiloRules>({});
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    void M.rules.get().then(setRules).catch(() => {});
+  }, []);
+  const r = rules[cls.id];
+  const toggle = async () => {
+    setBusy(true);
+    const res = await M.rules.set({ classId: cls.id, course: cls.name, on: !r, portal: localStorage.getItem("milo.portal") || "" }).catch(() => null);
+    setBusy(false);
+    if (res?.rules) setRules(res.rules);
+  };
+  return (
+    <section className="hb-card" aria-label="Syllabus AI rules">
+      <div className="hb-set">
+        <div>
+          <b>Follow my syllabus AI rules</b>
+          <span>{busy ? "Reading your syllabus…" : r ? RULE_DOES[r.level] : "Off. Milo works like any AI tool here. Turn on and he'll read this class's syllabus and follow its AI policy."}</span>
+        </div>
+        <button role="switch" aria-checked={!!r} aria-label="Follow my syllabus AI rules" disabled={busy} className={`hb-switch ${r ? "on" : ""}`} onClick={() => void toggle()}>
+          <i aria-hidden="true" />
+        </button>
+      </div>
+      {r && !busy && (
+        <div className="hb-rule">
+          <div className="hb-rulerow">
+            <span className={`hb-rulebadge ${r.level}`}>AI: {RULE_LABEL[r.level]}</span>
+            <select aria-label="Change the level" value={r.level} onChange={(e) => void M.rules.level(cls.id, e.target.value as MiloRuleLevel).then(setRules)}>
+              {(Object.keys(RULE_LABEL) as MiloRuleLevel[]).map((l) => (
+                <option key={l} value={l}>
+                  {RULE_LABEL[l]}
+                </option>
+              ))}
+            </select>
+          </div>
+          {r.quote ? <blockquote>“{r.quote}”</blockquote> : <p className="hb-muted">I couldn't find an AI policy in this syllabus.</p>}
+          <p className="hb-muted">From: {r.source}</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function ClassPage({ cls, grade, due, chats, onAsk, onChat }: { cls: Klass; grade: number | null; due: Due[]; chats: Chat[]; onAsk: (t: string) => void; onChat: (id: string) => void }) {
   const [notes, setNotes] = useState<{ id: string; title: string; updated: number }[]>([]);
   const [sets, setSets] = useState<{ id: string; title: string; data: unknown }[]>([]);
@@ -2076,6 +2129,7 @@ function ClassPage({ cls, grade, due, chats, onAsk, onChat }: { cls: Klass; grad
           </div>
         </div>
       </div>
+      <RulesCard cls={cls} />
       <div className="hb-grid2">
         <section className="hb-card">
           <div className="hb-cardhead">

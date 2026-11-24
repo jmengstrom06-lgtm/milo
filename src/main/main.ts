@@ -60,10 +60,14 @@ import { activateApp, click, ensureBrowser, resolveApp, frontApp, isRunning, ope
 import { plan } from "./quick";
 import { research } from "./research";
 import { buildTool } from "./builder";
-import { askScreen , suggestActions, preflightCheck } from "./brain";
+import { askScreen , suggestActions, preflightCheck, readAiPolicy } from "./brain";
 import { createTray, extensionDirs, firstRunDefaults, loadKeys } from "./appshell";
 import { isPaused, PAUSED_TEXT, pauseState, setPause } from "./pause";
 import { looksLikeRubric, prefs, setPrefs, type Prefs } from "./prefs";
+import { allowed as ruleAllows, cleanPolicy, holdBackLine, ruleFor, type Act, type Level } from "./classRules";
+import { loadRules, saveRule } from "./classRulesStore";
+import { syllabusSource } from "./syllabus";
+import { frontWindow } from "./focus";
 import { checkForUpdate, installUpdate, startUpdater, startUpdates, updateReady } from "./updater";
 import { Action, askMilo, classify, RouteCtx, makeQuiz, readBrief, setUserName, sweepPlan, watchCheck, ChatMessage, checkAnswer, locateInCrop, nextActions, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
@@ -1098,6 +1102,53 @@ ipcMain.handle("milo:preflight", async () => {
   track("preflight", { ok: r.ok, rubric: !!rubric, n: r.ok ? r.data.items.length : 0, confirmed: r.ok ? r.data.items.filter((i) => i.status === "confirmed").length : 0 });
   return r.ok ? { ok: true, ...r.data, rubricFrom: rubric ? "clipboard" : null } : r;
 });
+// ---------- Optional: follow a class's syllabus AI rules (off unless the student turns it on) ----------
+ipcMain.handle("milo:rules-get", () => loadRules());
+ipcMain.handle("milo:rules-set", async (_e, q: { classId: string; course: string; on: boolean; portal: string }) => {
+  const id = String(q?.classId ?? "");
+  const course = String(q?.course ?? "").slice(0, 120);
+  if (!id) return { ok: false, text: "No class." };
+  if (!q.on) {
+    saveRule(id, null);
+    track("rules_off", {});
+    return { ok: true, rules: loadRules() };
+  }
+  let level: Level = "unclear";
+  let quote = "";
+  let source = "No syllabus found in D2L";
+  try {
+    const list = q.portal ? await d2lCourses(String(q.portal)) : [];
+    const c = d2lMatch(course, list);
+    const src = c ? await syllabusSource(String(q.portal), c) : null;
+    if (src && (src.text || src.pdf)) {
+      source = src.title;
+      const r = await readAiPolicy({ text: src.text || undefined, pdf: src.pdf });
+      if (r.ok) ({ level, quote } = cleanPolicy(r.data));
+    }
+  } catch (e) {
+    bb("rules", "read_failed", { error: (e as Error).message.slice(0, 120) });
+  }
+  const rules = saveRule(id, { course, level, quote, readAt: Date.now(), source });
+  track("rules_on", { level, found: source !== "No syllabus found in D2L" });
+  return { ok: true, rules };
+});
+/** The student changes a class's level themselves (their call; the quote stays visible). */
+ipcMain.handle("milo:rules-level", (_e, classId: string, level: Level) => {
+  const r = loadRules()[String(classId)];
+  if (!r || !["none", "study", "credit", "allowed", "unclear"].includes(level)) return loadRules();
+  return saveRule(String(classId), { ...r, level, source: `${r.source} (you changed the level)` });
+});
+/** Before Milo fills in, writes or checks work: is the class on screen / named one that follows rules that say no? */
+ipcMain.handle("milo:rules-check", async (_e, act: Act, said: string) => {
+  const rules = loadRules();
+  if (!Object.keys(rules).length) return { ok: true };
+  const w = await frontWindow().catch(() => ({ title: "" }));
+  const r = ruleFor(rules, String(said ?? ""), w.title || "");
+  if (!r || ruleAllows(r.level, act)) return { ok: true };
+  track("rules_held", { act, level: r.level });
+  return { ok: false, text: holdBackLine(r, act) };
+});
+
 /** Something dropped on the frog: open it so Milo can see it (files from Finder, links). */
 ipcMain.handle("milo:open-dropped", async (_e, what: { path?: string; url?: string }) => {
   if (what?.url && /^https?:\/\//i.test(what.url)) {

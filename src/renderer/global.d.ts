@@ -17,6 +17,8 @@ declare global {
     actions: number;
   };
   type MiloPrefs = { notifyAway: boolean; quiet: boolean; quietFrom: number; quietTo: number; noRecord: string[]; okRecord: string[]; autofill: boolean; preflight: boolean };
+  type MiloRuleLevel = "none" | "study" | "credit" | "allowed" | "unclear";
+  type MiloRules = Record<string, { course: string; level: MiloRuleLevel; quote: string; readAt: number; source: string }>;
   type MiloPause = { on: boolean; since: number | null; until: number | null };
   type MiloActivity = {
     id: string;
@@ -219,6 +221,12 @@ declare global {
         | { ok: true; requirements_seen: boolean; items: { status: "confirmed" | "possible" | "unknown"; text: string; quote: string; source: "rubric" | "screen" | "none" }[]; summary: string; rubricFrom: "clipboard" | null }
         | { ok: false; text: string }
       >;
+      rules: {
+        get: () => Promise<MiloRules>;
+        set: (q: { classId: string; course: string; on: boolean; portal: string }) => Promise<{ ok: boolean; text?: string; rules?: MiloRules }>;
+        level: (classId: string, level: MiloRuleLevel) => Promise<MiloRules>;
+        check: (act: "plan" | "study" | "check" | "write" | "fill", said: string) => Promise<{ ok: boolean; text?: string }>;
+      };
       onBack: (fn: (awayMs: number) => void) => () => void;
       openDropped: (what: { path?: string; url?: string }) => Promise<{ ok: boolean; text?: string }>;
       pathForFile: (f: File) => string;

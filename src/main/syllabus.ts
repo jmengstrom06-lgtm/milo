@@ -75,17 +75,11 @@ export function parseScale(text: string): Scale | null {
 const tried = new Map<number, number>(); // course id -> when we last looked (don't hammer D2L)
 
 /** Read this class's syllabus from D2L (once), remember its scale (and weights if asked). */
-export async function learnSyllabus(portal: string, c: Course, wantWeights: boolean): Promise<{ scale: Scale | null; weights: boolean }> {
-  const known = findBook(c.short);
-  if (known?.scheme?.length && (!wantWeights || known.cats.length)) return { scale: known.scheme, weights: !!known.cats.length };
-  if (Date.now() - (tried.get(c.id) ?? 0) < 6 * 3600e3) return { scale: known?.scheme ?? null, weights: !!known?.cats.length };
-  tried.set(c.id, Date.now());
+/** Find a class's syllabus in D2L Content and read it: text (Word/page) or the PDF itself. Null if there isn't one. */
+export async function syllabusSource(portal: string, c: Course): Promise<{ text: string; pdf?: string; title: string; ext: string } | null> {
   const topics = await contentTopics(portal, c).catch(() => []);
   const pick = topics.find((t) => /syllab/i.test(t.Title)) ?? topics.find((t) => /syllab/i.test(t.Url)) ?? topics.find((t) => /course (info|outline|overview)|grading/i.test(t.Title));
-  if (!pick?.Url) {
-    bb("syllabus", "none", { course: c.short });
-    return { scale: null, weights: false };
-  }
+  if (!pick?.Url) return null;
   const ext = (pick.Url.match(/\.(\w+)(?:\?|$)/)?.[1] ?? "").toLowerCase();
   let text = "";
   let pdf: string | undefined;
@@ -96,6 +90,21 @@ export async function learnSyllabus(portal: string, c: Course, wantWeights: bool
     else if (ext === "pdf" || buf.subarray(0, 4).toString() === "%PDF") pdf = b64;
     else text = buf.toString("utf8").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ");
   }
+  return { text, pdf, title: pick.Title, ext };
+}
+
+export async function learnSyllabus(portal: string, c: Course, wantWeights: boolean): Promise<{ scale: Scale | null; weights: boolean }> {
+  const known = findBook(c.short);
+  if (known?.scheme?.length && (!wantWeights || known.cats.length)) return { scale: known.scheme, weights: !!known.cats.length };
+  if (Date.now() - (tried.get(c.id) ?? 0) < 6 * 3600e3) return { scale: known?.scheme ?? null, weights: !!known?.cats.length };
+  tried.set(c.id, Date.now());
+  const src = await syllabusSource(portal, c);
+  if (!src) {
+    bb("syllabus", "none", { course: c.short });
+    return { scale: null, weights: false };
+  }
+  const { text, pdf, title: pickTitle, ext } = src;
+  const pick = { Title: pickTitle };
   let scale = text ? parseScale(text) : null;
   if (scale) setScheme(c.short, scale);
   bb("syllabus", "read", { course: c.short, file: pick.Title.slice(0, 60), type: ext || "page", scale: scale ? scale.map((s) => `${s.letter}${s.min}`).join(" ") : null });
