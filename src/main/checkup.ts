@@ -2,8 +2,8 @@
 // Each item says what's wrong in plain words and offers a one-tap fix, so a task never fails halfway
 // because a connection was quietly broken. The decisions here are pure (tested); main.ts does the probing.
 
-export type CheckId = "ai" | "account" | "d2l" | "google" | "chrome" | "screen" | "hands" | "mic";
-export type FixKind = "sign-in" | "d2l" | "google" | "chrome" | "screen" | "hands" | "mic" | "retry";
+export type CheckId = "paused" | "ai" | "account" | "d2l" | "google" | "chrome" | "screen" | "hands" | "mic";
+export type FixKind = "unpause" | "sign-in" | "d2l" | "google" | "chrome" | "screen" | "hands" | "mic" | "retry";
 export type CheckItem = {
   id: CheckId;
   label: string;
@@ -20,13 +20,15 @@ export type Probe = {
   portal: string;
   d2l: { ok: boolean; signin: boolean } | null; // null = not checked (no portal)
   google: { ready: boolean; connected: boolean; works: boolean | null; reconnect: boolean };
-  chrome: { running: boolean; extension: boolean };
+  chrome: { running: boolean; extension: boolean; windows?: number };
+  paused?: boolean;
   perms: { screen: boolean; hands: boolean; mic: boolean };
 };
 
 /** Turn raw probe results into the checklist the student sees. (pure) */
 export function checklist(p: Probe): CheckItem[] {
   const out: CheckItem[] = [];
+  if (p.paused) out.push({ id: "paused", label: "Milo is paused", ok: false, detail: "He isn't looking, listening or doing anything until you turn him back on.", fix: { kind: "unpause", label: "Turn Milo on" } });
   // the brain
   if (p.devKey) out.push({ id: "ai", label: "Milo's brain", ok: true, detail: "Using this Mac's developer key." });
   else if (!p.signedIn) out.push({ id: "ai", label: "Milo's brain", ok: false, detail: "Sign in to Milo so he can think.", fix: { kind: "sign-in", label: "Sign in" } });
@@ -47,7 +49,7 @@ export function checklist(p: Probe): CheckItem[] {
   out.push(
     p.chrome.extension
       ? { id: "chrome", label: "Chrome helper", ok: true, detail: "Connected. Milo can work in Chrome." }
-      : p.chrome.running
+      : p.chrome.running && (p.chrome.windows ?? 1) > 0
         ? { id: "chrome", label: "Chrome helper", ok: false, detail: "Chrome is open but Milo's helper isn't connected, so he can't work on websites.", fix: { kind: "chrome", label: "Fix it" } }
         : { id: "chrome", label: "Chrome helper", ok: null, detail: "Chrome isn't open. Milo connects when it is.", fix: { kind: "chrome", label: "Open Chrome" } }
   );
@@ -59,7 +61,7 @@ export function checklist(p: Probe): CheckItem[] {
 }
 
 /** Broken things that stop most of Milo working, first. */
-const ORDER: CheckId[] = ["ai", "account", "screen", "hands", "d2l", "google", "chrome", "mic"];
+const ORDER: CheckId[] = ["paused", "ai", "account", "screen", "hands", "d2l", "google", "chrome", "mic"];
 export function problems(items: CheckItem[]): CheckItem[] {
   return items.filter((i) => i.ok === false).sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
 }

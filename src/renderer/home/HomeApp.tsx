@@ -120,16 +120,24 @@ export default function HomeApp() {
   // "Milo, what's next?": the week planner panel (opened from Today, chat, or the desktop frog)
   // the frog's "Fix it" on a checkup heads-up opens Settings, where the checkup list is
   useEffect(() => {
-    try {
-      const t = Number(localStorage.getItem("milo.openSettings") || 0);
-      if (Date.now() - t < 30e3) {
-        localStorage.removeItem("milo.openSettings");
-        setView("settings");
+    const go = () => {
+      try {
+        const t = Number(localStorage.getItem("milo.openToday") || 0);
+        if (Date.now() - t < 30e3) {
+          localStorage.removeItem("milo.openToday");
+          setView("today");
+        }
+      } catch {
+        /* ignore */
       }
-    } catch {
-      /* ignore */
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    };
+    go();
+    window.addEventListener("storage", go); // Home base already open: the frog's "Fix it" still brings you to Today
+    window.addEventListener("focus", go);
+    return () => {
+      window.removeEventListener("storage", go);
+      window.removeEventListener("focus", go);
+    };
   }, []);
   const [weekOpen, setWeek] = useState(() => {
     try {
@@ -385,6 +393,8 @@ export default function HomeApp() {
     else if (k === "d2l") {
       if (portal) M.openUrl(portal.startsWith("http") ? portal : `https://${portal}`);
       else send("Help me connect my school's D2L");
+    } else if (k === "unpause") {
+      await M.pause.set(false).then(setPaused);
     } else if (k === "google" || k === "chrome") {
       const r = await M.checkupFix(k).catch(() => null);
       if (r?.text) setVoiceLines((v) => [...v.slice(-4), { who: "milo", text: r.text }]);
@@ -1228,6 +1238,9 @@ export default function HomeApp() {
             <div className="hb-page hb-rise hb-settings">
               <h1 className="hb-h1">Settings</h1>
 
+              {/* checkup first: "Fix it" lands here, and the Pause switch below must never be the first thing under your finger */}
+              <Checkup all items={check} busy={checking} onFix={(i) => void fixCheck(i)} onRun={() => void runCheckup()} />
+
               <section className={`hb-pause ${paused?.on ? "on" : ""}`} aria-label="Pause Milo">
                 <MiloFrog size={84} mood={paused?.on ? "sleep" : "happy"} outfit={outfit} />
                 <div className="hb-pausetext">
@@ -1267,7 +1280,6 @@ export default function HomeApp() {
                 </button>
               </section>
 
-              <Checkup all items={check} busy={checking} onFix={(i) => void fixCheck(i)} onRun={() => void runCheckup()} />
 
               <section className="hb-card" aria-label="Check this beta">
                 <div className="hb-set">

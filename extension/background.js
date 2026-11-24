@@ -68,6 +68,11 @@ chrome.runtime.onStartup.addListener(connect);
 chrome.runtime.onInstalled.addListener(connect);
 chrome.alarms.create("milo-keepalive", { periodInMinutes: 0.5 });
 chrome.alarms.onAlarm.addListener(connect);
+// Any Chrome activity wakes this worker; reconnect right then instead of waiting for the next alarm.
+chrome.windows.onCreated.addListener(connect);
+chrome.windows.onFocusChanged.addListener(connect);
+chrome.tabs.onActivated.addListener(connect);
+chrome.tabs.onUpdated.addListener((_id, info) => info.status === "loading" && connect());
 connect();
 
 // ---------------------------------------------------------------------------------------------
