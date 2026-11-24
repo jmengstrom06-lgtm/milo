@@ -99,7 +99,10 @@ export const FILL_IN = /\b(fill (it|them|this|everything) in|type (them|it|the a
 const FILL_ONLY = /^(?:just |go ahead and |can you |please )?(?:fill (?:it|them|this|everything) in|type (?:them|it|the answers) in|put the answers in)(?: for me)?$/;
 
 const SWEEP =
-  /\b(do|finish|complete|answer|solve|fill (out|in))\b.*\b(whole|entire|all|every|everything)\b.*\b(worksheet|assignment|homework|page|quiz|questions|problems|them|these|it)?|\b(do|finish|complete|fill out) (this|the|my) (worksheet|assignment|homework|problem set)\b|\bworksheet sweep\b/;
+  /\b(do|finish|complete|answer|solve|fill (out|in))\b.*\b(whole|entire|all|every|everything)\b.*\b(worksheet|assignment|homework|page|quiz|questions|problems|them|these|it)?|\b(do|finish|complete|fill out|fill in|fill|answer|solve) (out |in )?(this|the|my|that) (worksheet|assignment|homework|problem set|practice set|form|quiz|sheet)\b|\bworksheet sweep\b/;
+/** "Put the answers in the boxes", "fill these in", "type them into the boxes": the worksheet, answers typed in. */
+const FILL_BOXES =
+  /\b(fill|filled|type|typed|put|enter|entered|write|written)\b.{0,30}\b(in(to)?|on) (the |these |those |all the |each )?(boxes|blanks|fields|form|worksheet|page)\b|\b(fill|type) (these|those|them|the answers|all of them|everything) (in|out)\b|\bfill (it|this|the worksheet|the form) (in|out)\b/;
 
 const BUILD =
   /^(?:can you |could you |please )?(make|build|create|code|design|whip up|throw together) (me )?(a|an|my|some)?\s*.*\b(calculator|tool|app|tracker|timer|planner|converter|generator|flash ?cards?|game|dashboard|widget|checklist|budget|countdown|stopwatch|scheduler|organizer|randomizer|visualizer|simulator|grapher|graphing)\b/;
@@ -174,7 +177,9 @@ function parseSingle(raw: string, ctx: Ctx): Intent {
   if (!ctx.inLesson && SHOW_ONLY.test(t)) return { kind: "sweep", show: true };
   // "fill it in" / "type them in" on its own: do the worksheet on screen and type the answers in
   if (!ctx.inLesson && FILL_ONLY.test(t)) return { kind: "sweep", fill: true };
-  if (SWEEP.test(t)) return { kind: "sweep", ...(FILL_IN.test(t) ? { fill: true } : {}) };
+  // in a lesson, plain "fill it in" types that one answer; boxes / these / the worksheet = the whole sheet
+  if (FILL_BOXES.test(t) && !SHOW_ONLY.test(t) && (!ctx.inLesson || /\b(boxes|blanks|fields|form|worksheet|these|those|them|all)\b/.test(t))) return { kind: "sweep", fill: true };
+  if (SWEEP.test(t)) return { kind: "sweep", ...(FILL_IN.test(t) || /\bfill\b/.test(t) ? { fill: true } : {}) };
   if (BUILD.test(t) && !/\b(google (doc|sheet|slide)s?|new (tab|window|doc|sheet)|folder|spreadsheet in|document)\b/.test(t)) return { kind: "build", request: text };
 
   if (ctx.pendingAsk) {

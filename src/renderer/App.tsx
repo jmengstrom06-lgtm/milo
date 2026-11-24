@@ -1885,7 +1885,8 @@ export default function App() {
     say(sweepFill.current ? "Reading the whole page." : "Reading the whole page. I'll show you each answer and how I got it, you type it in.").then(() => setBubble(null));
 
     const ask = lastAsk.current; // "...and fill in Jake for the name": the whole request goes with the plan
-    if (fromTop) await window.milo.scrollTop(); // going back over it: start at the top
+    // start at the top so nothing above the fold is missed (worksheets are longer than the screen)
+    if (fromTop || sweepFill.current) await window.milo.scrollTop();
     // one question: lock on, put the answer in (or just show it)
     const doItem = async (it: SweepItem, items: SweepItem[], i: number) => {
       show({ items, index: i, status: "working" });
