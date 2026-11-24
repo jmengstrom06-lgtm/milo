@@ -17,6 +17,7 @@ declare global {
     actions: number;
   };
   type MiloPrefs = { notifyAway: boolean; quiet: boolean; quietFrom: number; quietTo: number; noRecord: string[]; okRecord: string[]; autofill: boolean; preflight: boolean };
+  type MiloRect = { x: number; y: number; width: number; height: number };
   type MiloCheckItem = { id: string; label: string; ok: boolean | null; detail: string; fix?: { kind: string; label: string } };
   type MiloRuleLevel = "none" | "study" | "credit" | "allowed" | "unclear";
   type MiloRules = Record<string, { course: string; level: MiloRuleLevel; quote: string; readAt: number; source: string }>;
@@ -232,6 +233,11 @@ declare global {
       d2lOpenClass: (portal: string, course: string, page: string) => Promise<{ ok: boolean; text: string; url?: string }>;
       setContext: (c: { portal?: string; classes?: { name: string; grade: number | null }[] }) => void;
       checkup: (portal?: string) => Promise<MiloCheckItem[]>;
+      areaSet: (box: MiloRect | null) => Promise<{ ok: boolean }>;
+      onAreaFlash: (fn: (a: { box: MiloRect; label?: string }) => void) => () => void;
+      onAreaCleared: (fn: () => void) => () => void;
+      onTargetAsk: (fn: (a: { question: string; options: { label: string; box: MiloRect }[]; redo: string }) => void) => () => void;
+      onPickArea: (fn: () => void) => () => void;
       checkupFix: (kind: string) => Promise<{ ok: boolean; text: string }>;
       onBack: (fn: (awayMs: number) => void) => () => void;
       openDropped: (what: { path?: string; url?: string }) => Promise<{ ok: boolean; text?: string }>;

@@ -60,7 +60,7 @@ import { activateApp, chromeWindowCount, click, ensureBrowser, resolveApp, front
 import { plan } from "./quick";
 import { research } from "./research";
 import { buildTool } from "./builder";
-import { askScreen , suggestActions, preflightCheck, readAiPolicy } from "./brain";
+import { askScreen, locateTarget, suggestActions, preflightCheck, readAiPolicy } from "./brain";
 import { createTray, extensionDirs, firstRunDefaults, loadKeys } from "./appshell";
 import { isPaused, PAUSED_TEXT, pauseState, setPause } from "./pause";
 import { looksLikeRubric, prefs, setPrefs, type Prefs } from "./prefs";
@@ -68,6 +68,7 @@ import { allowed as ruleAllows, cleanPolicy, holdBackLine, ruleFor, type Act, ty
 import { loadRules, saveRule } from "./classRulesStore";
 import { setStudentContext, type StudentContext } from "./studentContext";
 import { checklist, problems, type FixKind, type Probe } from "./checkup";
+import { clampRect, decideTarget, namesATarget, worthFocusing } from "./areaRules";
 import { syllabusSource } from "./syllabus";
 import { frontWindow } from "./focus";
 import { checkForUpdate, installUpdate, startUpdater, startUpdates, updateReady } from "./updater";
@@ -217,6 +218,105 @@ function toJpeg(img: Electron.NativeImage, max: number) {
   return { b64: out.toJPEG(85).toString("base64"), size, k };
 }
 
+// ---------- which part of the screen ----------------------------------------
+// A box the student dragged > the thing they named ("the stats one") > the window they're working in.
+// Milo still sees the whole screen (so clicks and boxes line up); everything outside the part that matters is dimmed.
+
+type ScreenRect = { x: number; y: number; width: number; height: number }; // screen points
+let pickedArea: { box: ScreenRect; app: string } | null = null;
+let workWindow: { app: string; box: ScreenRect } | null = null;
+const MILO_APP = /^(milo|electron)$/i;
+setInterval(async () => {
+  if (isPaused()) return;
+  const w = await frontWindow().catch(() => null);
+  if (!w?.app || MILO_APP.test(w.app)) return; // clicking Milo shouldn't change what he looks at
+  workWindow = w.frame ? { app: w.app, box: { x: w.frame.x, y: w.frame.y, width: w.frame.w, height: w.frame.h } } : null;
+  if (pickedArea && pickedArea.app && pickedArea.app !== w.app) {
+    pickedArea = null; // moved on to another app: the box no longer means anything
+    overlay?.webContents.send("milo:area-cleared");
+  }
+}, 3000);
+
+/** Overlay (Milo's window) points -> screen points, and back. */
+const overlayToScreen = (b: ScreenRect, wa = screen.getPrimaryDisplay().workArea): ScreenRect => ({ ...b, x: b.x + wa.x, y: b.y + wa.y });
+const screenToOverlay = (b: ScreenRect, wa = screen.getPrimaryDisplay().workArea): ScreenRect => ({ ...b, x: b.x - wa.x, y: b.y - wa.y });
+
+ipcMain.handle("milo:area-set", async (_e, box: ScreenRect | null) => {
+  if (!box || ![box.x, box.y, box.width, box.height].every(Number.isFinite) || box.width < 20 || box.height < 20) {
+    pickedArea = null;
+    return { ok: true };
+  }
+  pickedArea = { box: overlayToScreen(box), app: workWindow?.app ?? "" };
+  bb("area", "picked", { w: Math.round(box.width), h: Math.round(box.height), app: pickedArea.app });
+  track("area_picked", {});
+  return { ok: true };
+});
+
+/**
+ * Where to focus for this request. `said` = what they asked ("help with the stats one"); `named` = try to find it by name.
+ * Returns the focus in SMALL-image pixels, or an ask (two things match) for the page to show as buttons.
+ */
+async function focusFor(
+  shot: Shot,
+  small: { b64: string; size: { width: number; height: number }; k: number },
+  said = "",
+  named = true
+): Promise<{ box: ScreenRect | null; how: string; label?: string } | { ask: { question: string; options: { label: string; box: ScreenRect }[]; redo: string } }> {
+  const k = small.k * shot.pxPerPt;
+  const toPx = (b: ScreenRect) => clampRect({ x: (b.x - shot.bounds.x) * k, y: (b.y - shot.bounds.y) * k, width: b.width * k, height: b.height * k }, small.size.width, small.size.height);
+  const toScreen = (b: ScreenRect) => ({ x: shot.bounds.x + b.x / k, y: shot.bounds.y + b.y / k, width: b.width / k, height: b.height / k });
+  if (pickedArea) return { box: toPx(pickedArea.box), how: "picked" };
+  if (named && said && namesATarget(said)) {
+    const r = await locateTarget(small.b64, small.size, said).catch(() => null);
+    const d = decideTarget(r && r.ok ? r.data : null);
+    bb("area", "named", { said: said.slice(0, 80), kind: d.kind, label: d.kind === "one" ? d.label : undefined });
+    if (d.kind === "one") {
+      overlay?.webContents.send("milo:area-flash", { box: screenToOverlay(toScreen(d.box)), label: d.label });
+      return { box: clampRect(d.box, small.size.width, small.size.height), how: "named", label: d.label };
+    }
+    if (d.kind === "ask") return { ask: { question: "Which one?", options: d.options.map((o) => ({ label: o.label, box: screenToOverlay(toScreen(o.box)) })), redo: said } };
+  }
+  if (workWindow && worthFocusing(workWindow.box, shot.bounds)) return { box: toPx(workWindow.box), how: "window" };
+  return { box: null, how: "screen" };
+}
+
+/** Dim everything outside the focus box (same size picture, so every coordinate still lines up). */
+function dimOutside(img: Electron.NativeImage, box: ScreenRect): Electron.NativeImage {
+  const { width, height } = img.getSize();
+  const buf = Buffer.from(img.toBitmap());
+  const x0 = Math.max(0, Math.round(box.x)), y0 = Math.max(0, Math.round(box.y));
+  const x1 = Math.min(width, Math.round(box.x + box.width)), y1 = Math.min(height, Math.round(box.y + box.height));
+  for (let y = 0; y < height; y++) {
+    const inRow = y >= y0 && y < y1;
+    for (let x = 0; x < width; x++) {
+      if (inRow && x >= x0 && x < x1) continue;
+      const i = (y * width + x) * 4;
+      buf[i] = buf[i] >> 3;
+      buf[i + 1] = buf[i + 1] >> 3;
+      buf[i + 2] = buf[i + 2] >> 3;
+    }
+  }
+  return nativeImage.createFromBitmap(buf, { width, height });
+}
+
+/** The picture for the AI: downscaled, with everything but the part that matters dimmed. */
+async function focusedJpeg(shot: Shot, max: number, said = "", named = true) {
+  const small = toJpeg(shot.full, max);
+  const f = await focusFor(shot, small, said, named);
+  if ("ask" in f) {
+    overlay?.webContents.send("milo:target-ask", f.ask);
+    return { ask: true as const, small };
+  }
+  if (!f.box) return { ask: false as const, small, how: f.how };
+  const { width, height } = small.size;
+  const k = small.k;
+  const resized = k < 1 ? shot.full.resize({ width, height, quality: "best" }) : shot.full;
+  const dimmed = dimOutside(resized, f.box);
+  bb("area", "focus", { how: f.how, label: f.label });
+  return { ask: false as const, small: { ...small, b64: dimmed.toJPEG(85).toString("base64") }, how: f.how, label: f.label };
+}
+const ASKED = { ok: false as const, text: "", asked: true };
+
 // ---------- IPC -------------------------------------------------------------
 
 // The overlay lets clicks pass through except where Milo is. The page says when the mouse is over him
@@ -262,7 +362,10 @@ ipcMain.handle("milo:look", async (_e, mode: Mode, request: string, focus: Box |
   const cap = await captureScreen();
   if (!cap.ok) return cap;
   const { shot } = cap;
-  const small = toJpeg(shot.full, 1568);
+  // a hovered box from the page wins; otherwise the picked area / the named thing / the work window
+  const fj = focus ? { ask: false as const, small: toJpeg(shot.full, 1568) } : await focusedJpeg(shot, 1568, String(request ?? ""));
+  if (fj.ask) return ASKED;
+  const small = fj.small;
   const pxPerPtSmall = small.k * shot.pxPerPt;
   const { bounds, workArea } = shot;
 
@@ -1016,7 +1119,7 @@ ipcMain.handle("milo:sweep-plan", async (_e, skip: string[]) => {
   const cap = await captureScreen();
   if (!cap.ok) return cap;
   const { shot } = cap;
-  const small = toJpeg(shot.full, 1568);
+  const small = (await focusedJpeg(shot, 1568, "", false)).small;
   const k = small.k * shot.pxPerPt;
   const r = await sweepPlan(small.b64, small.size, skip ?? []);
   if (!r.ok) return r;
@@ -1100,7 +1203,7 @@ ipcMain.handle("milo:watch-check", async (_e, force: boolean) => {
   const t = thumb(shot.full);
   if (!force && !changed(lastThumb, t)) return { ok: true, changed: false };
   lastThumb = t;
-  const small = toJpeg(shot.full, 1568);
+  const small = force ? (await focusedJpeg(shot, 1568, "", false)).small : toJpeg(shot.full, 1568);
   const r = await watchCheck(small.b64, small.size);
   if (!r.ok) return r;
   const k = small.k * shot.pxPerPt;
@@ -1121,7 +1224,9 @@ ipcMain.on("milo:watch-reset", () => (lastThumb = null));
 ipcMain.handle("milo:suggest", async (_e, said: string) => {
   const cap = await captureScreen();
   if (!cap.ok) return cap;
-  const small = toJpeg(cap.shot.full, 1280);
+  const fj = await focusedJpeg(cap.shot, 1280, String(said ?? ""));
+  if (fj.ask) return ASKED;
+  const small = fj.small;
   const r = await suggestActions(small.b64, small.size, String(said ?? "").slice(0, 200));
   track("suggest", { ok: r.ok, n: r.ok ? r.data.options.length : 0, ...(r.ok ? {} : { err: r.text.slice(0, 80) }) });
   if (r.ok && !r.data.options.length) bb("suggest", "no_options", { seen: r.data.seen.slice(0, 80) });
@@ -1133,7 +1238,8 @@ ipcMain.handle("milo:preflight", async () => {
   const rubric = looksLikeRubric(clip) ? clip : "";
   const cap = await captureScreen();
   if (!cap.ok) return cap;
-  const small = toJpeg(cap.shot.full, 1568);
+  const fj = await focusedJpeg(cap.shot, 1568, "", false);
+  const small = fj.small;
   const r = await preflightCheck({ jpeg: small.b64, size: small.size, rubric: rubric || undefined });
   track("preflight", { ok: r.ok, rubric: !!rubric, n: r.ok ? r.data.items.length : 0, confirmed: r.ok ? r.data.items.filter((i) => i.status === "confirmed").length : 0 });
   return r.ok ? { ok: true, ...r.data, rubricFrom: rubric ? "clipboard" : null } : r;
@@ -1217,7 +1323,9 @@ ipcMain.handle("milo:open-dropped", async (_e, what: { path?: string; url?: stri
 ipcMain.handle("milo:quiz", async (_e, focus: string) => {
   const cap = await captureScreen();
   if (!cap.ok) return cap;
-  const small = toJpeg(cap.shot.full, 1568);
+  const fj = await focusedJpeg(cap.shot, 1568, String(focus ?? ""));
+  if (fj.ask) return ASKED;
+  const small = fj.small;
   const r = await makeQuiz(small.b64, small.size, 6, focus || "");
   if (!r.ok) return r;
   const questions = (r.data.questions ?? [])
@@ -1416,7 +1524,9 @@ ipcMain.handle("milo:screen-ask", async (_e, question: string) => {
     page = await ext("snapshot", { max: 20 }, 8000).catch(() => null);
   }
   const cap = await captureScreen();
-  const jpeg = cap.ok ? toJpeg(cap.shot.full, 1568).b64 : undefined;
+  const fj = cap.ok ? await focusedJpeg(cap.shot, 1568, q) : null;
+  if (fj?.ask) return ASKED;
+  const jpeg = fj ? fj.small.b64 : undefined;
   if (!jpeg && !page?.text) return { ok: false, text: cap.ok ? "I couldn't see your screen." : cap.text };
   bb("screen", "ask", { q, front, usedPage: !!page?.text, url: page?.url });
   return askScreen(q, { jpeg, pageText: page?.canvasHeavy ? undefined : page?.text, url: page?.url, title: page?.title });
@@ -1741,6 +1851,8 @@ app.whenReady().then(() => {
   });
   // Talk to Milo from anywhere.
   globalShortcut.register("CommandOrControl+Shift+H", () => void openHome(isDev));
+  // Pick an area (like the Mac's ⌘⇧3/4/5 screenshot keys): drag a box over what you need help with.
+  globalShortcut.register("CommandOrControl+Shift+2", () => overlay?.webContents.send("milo:pick-area"));
   globalShortcut.register("CommandOrControl+Shift+Space", () => {
     if (isPaused()) return void openHome(isDev);
     overlay?.webContents.send("milo:talk");

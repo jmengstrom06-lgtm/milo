@@ -1215,3 +1215,50 @@ export async function readAiPolicy(src: { text?: string; pdf?: string; jpeg?: st
     POLICY_TOOL.name
   );
 }
+
+// ---------------------------------------------------------------------------
+// "Help with the stats one": which separate thing on screen did the student mean?
+const TARGET_TOOL = {
+  name: "locate",
+  description: "The separate pieces of work on screen, and which one the student meant.",
+  input_schema: {
+    type: "object",
+    properties: {
+      regions: {
+        type: "array",
+        description: "Each separate thing someone could be working on: a window, one side of a split screen, a pane, a document, a problem set. 1 to 4, biggest first. Ignore menu bars, docks, ads and empty space.",
+        items: {
+          type: "object",
+          properties: {
+            label: { type: "string", description: "1-3 words a student would use, with its side if there's more than one: 'Stats (left)', 'English essay', 'Algebra (right)'." },
+            box: { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" } }, required: ["x", "y", "width", "height"] },
+          },
+          required: ["label", "box"],
+        },
+      },
+      pick: { type: "number", description: "Index of the region the student meant. -1 if two regions fit equally well or none fits." },
+    },
+    required: ["regions", "pick"],
+  },
+};
+export async function locateTarget(jpegBase64: string, size: { width: number; height: number }, said: string): Promise<ApiOk<{ regions: { label: string; box: { x: number; y: number; width: number; height: number } }[]; pick: number }> | ApiErr> {
+  return callTool(
+    {
+      model: models.fast(),
+      max_tokens: 600,
+      system: `You find which part of a student's screen they mean. They said: "${said.slice(0, 200)}". Match by subject (stats vs algebra, math vs English), by side or position (left, right, top), and by app or tab name. Pixel coordinates in the screenshot.`,
+      tools: [TARGET_TOOL],
+      tool_choice: { type: "auto" },
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: jpegBase64 } },
+            { type: "text", text: `Screenshot is ${size.width}x${size.height}. Which part did they mean?` },
+          ],
+        },
+      ],
+    },
+    TARGET_TOOL.name
+  );
+}

@@ -222,6 +222,27 @@ contextBridge.exposeInMainWorld("milo", {
   d2lOpenChrome: (url: string) => ipcRenderer.invoke("milo:d2l-open-chrome", url),
   startupCheck: (portal?: string) => ipcRenderer.invoke("milo:startup-check", portal),
   checkup: (portal?: string) => ipcRenderer.invoke("milo:checkup", portal),
+  areaSet: (box: { x: number; y: number; width: number; height: number } | null) => ipcRenderer.invoke("milo:area-set", box),
+  onAreaFlash: (fn: (a: { box: { x: number; y: number; width: number; height: number }; label?: string }) => void) => {
+    const h = (_e: unknown, a: { box: { x: number; y: number; width: number; height: number }; label?: string }) => fn(a);
+    ipcRenderer.on("milo:area-flash", h);
+    return () => ipcRenderer.removeListener("milo:area-flash", h);
+  },
+  onAreaCleared: (fn: () => void) => {
+    const h = () => fn();
+    ipcRenderer.on("milo:area-cleared", h);
+    return () => ipcRenderer.removeListener("milo:area-cleared", h);
+  },
+  onTargetAsk: (fn: (a: { question: string; options: { label: string; box: { x: number; y: number; width: number; height: number } }[]; redo: string }) => void) => {
+    const h = (_e: unknown, a: { question: string; options: { label: string; box: { x: number; y: number; width: number; height: number } }[]; redo: string }) => fn(a);
+    ipcRenderer.on("milo:target-ask", h);
+    return () => ipcRenderer.removeListener("milo:target-ask", h);
+  },
+  onPickArea: (fn: () => void) => {
+    const h = () => fn();
+    ipcRenderer.on("milo:pick-area", h);
+    return () => ipcRenderer.removeListener("milo:pick-area", h);
+  },
   checkupFix: (kind: string) => ipcRenderer.invoke("milo:checkup-fix", kind),
   syllabus: (course: string) => ipcRenderer.invoke("milo:syllabus", course),
   exam: (q: { course: string; kind?: string; extra?: string }) => ipcRenderer.invoke("milo:exam", q),

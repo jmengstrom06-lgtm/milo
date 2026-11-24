@@ -11,6 +11,11 @@ import { plan as quickPlan } from "../main/quick";
 export const LOCKIN_START =
   /^(let'?s |time to |i (need|want) to |help me )?(lock (me )?in|start (a |the )?(lock[- ]?in|focus (session|mode)|study session|pomodoro)|focus mode|pomodoro|help me focus|study session)\b/;
 
+/** "Let me pick", "pick an area", "select this part": open the drag box. */
+export const PICK_AREA = /^(?:milo,?\s*)?(?:let me (?:pick|choose|select|show you)(?: (?:an? |the )?(?:area|part|spot|section|box))?|(?:pick|select|choose|draw|mark) (?:an? |the |this )?(?:area|part|spot|section|region|box)(?: of (?:my|the) screen)?|(?:only )?look (?:only )?at this part|pick area)[\s.!?]*$/i;
+/** "Look at the whole screen again", "forget the box": drop the picked area. */
+export const CLEAR_AREA = /^(?:milo,?\s*)?(?:(?:look at|use) (?:the |my )?(?:whole|entire|full) screen(?: again)?|forget (?:the |that |my )?(?:area|box|part)|clear (?:the |my )?(?:area|box))[\s.!?]*$/i;
+
 /** Commands that run right away without asking the AI router. Everything else, the router decides. */
 const SURE = new Set(["hush", "yes", "no", "resume", "undo", "activity", "feedback", "paper", "week", "home", "handle", "d2lclass", "checkwork"]);
 const LESSON_SURE = new Set(["close", "goto", "mode", "answer", "show", "copy", "practice", "skip", "repeat", "fill"]);
@@ -33,6 +38,8 @@ const DEFAULT_STATE: DecideState = { kitOpen: null, researchOpen: false, toolOpe
 export function whereGoes(raw: string): string {
   const text = raw.trim();
   const lower = text.toLowerCase().replace(/[.!?]+$/, "").trim();
+  if (PICK_AREA.test(lower)) return "pick_area";
+  if (CLEAR_AREA.test(lower)) return "clear_area";
   if (lectureCommand(text)?.do === "start") return "lecture";
   if (/^(undo what you (just )?did|take (that|it) back|cancel what you (just )?did|undo( that| it| this| the last (thing|one))?)$/.test(lower)) return "undo";
   if (/^(open|show|go to|pull up)( my| the)? (home|home ?base|dashboard)$/.test(lower)) return "home";
