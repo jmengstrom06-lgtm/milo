@@ -33,7 +33,15 @@ if (location.hash === "#home") {
     )
   );
 } else {
-  void Promise.all([import("./App"), import("@fontsource/caveat/500.css"), import("@fontsource/caveat/700.css"), import("./styles.css")]).then(([m]) =>
+  void Promise.all([
+    import("./App"),
+    import("@fontsource/caveat/500.css"),
+    import("@fontsource/caveat/700.css"),
+    import("@fontsource/plus-jakarta-sans/500.css"),
+    import("@fontsource/plus-jakarta-sans/600.css"),
+    import("@fontsource/plus-jakarta-sans/700.css"),
+    import("./styles.css"),
+  ]).then(([m]) =>
     root.render(
       <React.StrictMode>
         <m.default />
