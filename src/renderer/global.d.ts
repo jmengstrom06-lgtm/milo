@@ -91,6 +91,7 @@ declare global {
     kind: "type" | "choose" | "none";
     point: { x: number; y: number } | null;
     screen: { x: number; y: number } | null;
+    later?: boolean; // too close to the bottom edge: do it after the next scroll
   };
   type MiloBox = { x: number; y: number; width: number; height: number };
   type Err = { ok: false; text: string };
@@ -325,7 +326,8 @@ declare global {
       stopResearch: () => void;
       openUrl: (url: string) => void;
       onResearch: (cb: (ev: ResearchEvent) => void) => () => void;
-      sweepPlan: (skip: string[]) => Promise<{ ok: true; items: SweepItem[]; more: boolean } | Err>;
+      sweepPlan: (skip: string[], extra?: string, name?: string) => Promise<{ ok: true; items: SweepItem[]; more: boolean } | Err>;
+      scrollTop: () => Promise<{ ok: true } | Err>;
       sweepFill: (item: SweepItem) => Promise<{ ok: true } | Err>;
       scrollPage: () => Promise<{ ok: true } | Err>;
       build: (req: string) => Promise<boolean>;

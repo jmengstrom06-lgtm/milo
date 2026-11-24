@@ -703,14 +703,18 @@ const SWEEP_TOOL = {
 export async function sweepPlan(
   jpegBase64: string,
   size: { width: number; height: number },
-  skip: string[]
+  skip: string[],
+  extra = "",
+  name = ""
 ): Promise<ApiOk<{ questions: SweepItem[]; more_below: boolean }> | ApiErr> {
   return callTool(
     {
       max_tokens: 6000,
       system: `${persona()}
 You are completing a student's worksheet that is open on their screen. Find every visible question that still needs an answer, solve each one carefully, and say exactly where its answer goes. Coordinates are pixels in the screenshot. Be precise with input points: the center of the empty field, or the center of the correct option's radio button/checkbox.
-Skip questions that already have an answer filled in.${skip.length ? ` Also skip these, already done: ${skip.join(", ")}.` : ""}`,
+Skip questions that already have an answer filled in (typed text, or a selected radio/checkbox).${skip.length ? ` Also skip these, already done: ${skip.join(", ")}.` : ""}
+Fields like Name, Date or Class at the top count as questions ONLY if the student asked for them or the field is required: use label "Name" etc. and the value they gave${name ? ` (the student's name is ${name})` : ""}.${extra ? `
+What the student asked: "${extra}". If they say an answer is wrong or name questions to redo, include those even if they are filled in, and re-solve them carefully.` : ""}`,
       tools: [SWEEP_TOOL],
       tool_choice: { type: "auto" },
       messages: [

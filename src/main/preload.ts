@@ -285,7 +285,8 @@ contextBridge.exposeInMainWorld("milo", {
     ipcRenderer.on("milo:research-event", l);
     return () => ipcRenderer.removeListener("milo:research-event", l);
   },
-  sweepPlan: (skip: string[]) => ipcRenderer.invoke("milo:sweep-plan", skip),
+  sweepPlan: (skip: string[], extra?: string, name?: string) => ipcRenderer.invoke("milo:sweep-plan", skip, extra, name),
+  scrollTop: () => ipcRenderer.invoke("milo:scroll-top"),
   sweepFill: (item: unknown) => ipcRenderer.invoke("milo:sweep-fill", item),
   scrollPage: () => ipcRenderer.invoke("milo:scroll-page"),
   build: (req: string) => ipcRenderer.invoke("milo:build", req),

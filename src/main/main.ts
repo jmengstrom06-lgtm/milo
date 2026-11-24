@@ -329,9 +329,11 @@ const ASKED = { ok: false as const, text: "", asked: true };
 let pageClickable = false;
 let overFrog = false;
 let frogRect: { x: number; y: number; width: number; height: number } | null = null;
+let handsBusy = 0; // while Milo clicks/types for you, his own window must never catch the click
 function applyClickable() {
   if (!overlay || overlay.isDestroyed()) return;
-  if (pageClickable || overFrog) overlay.setIgnoreMouseEvents(false);
+  if (handsBusy > 0) overlay.setIgnoreMouseEvents(true, { forward: true });
+  else if (pageClickable || overFrog) overlay.setIgnoreMouseEvents(false);
   else overlay.setIgnoreMouseEvents(true, { forward: true });
 }
 ipcMain.on("milo:set-clickable", (_e, clickable: boolean) => {
@@ -1119,15 +1121,16 @@ async function doTask(task: string) {
 }
 
 // ---------- worksheet sweep -------------------------------------------------------------
-ipcMain.handle("milo:sweep-plan", async (_e, skip: string[]) => {
+ipcMain.handle("milo:sweep-plan", async (_e, skip: string[], extra?: string, name?: string) => {
   const cap = await captureScreen();
   if (!cap.ok) return cap;
   const { shot } = cap;
   const small = (await focusedJpeg(shot, 1568, "", false)).small;
   const k = small.k * shot.pxPerPt;
-  const r = await sweepPlan(small.b64, small.size, skip ?? []);
+  const r = await sweepPlan(small.b64, small.size, skip ?? [], String(extra ?? "").slice(0, 400), String(name ?? "").slice(0, 40));
   if (!r.ok) return r;
   const { bounds, workArea } = shot;
+  const bottom = workArea.y + workArea.height - 70; // a box this close to the edge is often half hidden: do it after scrolling
   const toOverlay = (x: number, y: number) => ({ x: bounds.x + x / k - workArea.x, y: bounds.y + y / k - workArea.y });
   const items = (r.data.questions ?? [])
     .filter((q) => q && q.box && q.answer)
@@ -1143,6 +1146,7 @@ ipcMain.handle("milo:sweep-plan", async (_e, skip: string[]) => {
         kind: hasPt ? q.input.kind : "none",
         point: inOverlay, // overlay coords (for Milo to hop to)
         screen: hasPt ? { x: bounds.x + q.input.x! / k, y: bounds.y + q.input.y! / k } : null, // for the click
+        later: hasPt && bounds.y + q.input.y! / k > bottom,
       };
     });
   return { ok: true, items, more: !!r.data.more_below };
@@ -1152,25 +1156,47 @@ ipcMain.handle(
   "milo:sweep-fill",
   async (_e, item: { kind: string; screen: { x: number; y: number } | null; answer: string }) => {
     if (!item.screen) return { ok: true };
+    handsBusy++;
     overlay?.setFocusable(false);
     overlay?.blur();
-    overlay?.setIgnoreMouseEvents(true, { forward: true });
+    applyClickable();
     try {
+      await sleep(60);
       await click(item.screen.x, item.screen.y);
+      await sleep(item.kind === "type" ? 150 : 220); // let a radio/checkbox register before moving on
       if (item.kind === "type") {
-        await sleep(150);
         await pressKeys("cmd+a"); // replace anything already in the box
         await typeText(item.answer);
+        await sleep(80);
       }
       return { ok: true };
     } catch (err) {
       return { ok: false, text: (err as Error).message };
     } finally {
+      handsBusy = Math.max(0, handsBusy - 1);
+      applyClickable();
       overlay?.setFocusable(true);
     }
   }
 );
 
+/** Back to the top of the page (for the final "did I miss anything?" pass). */
+ipcMain.handle("milo:scroll-top", async () => {
+  handsBusy++;
+  overlay?.setFocusable(false);
+  overlay?.blur();
+  try {
+    await pressKeys("escape");
+    await pressKeys("cmd+up");
+    await sleep(700);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, text: (err as Error).message };
+  } finally {
+    handsBusy = Math.max(0, handsBusy - 1);
+    overlay?.setFocusable(true);
+  }
+});
 ipcMain.handle("milo:scroll-page", async () => {
   overlay?.setFocusable(false);
   overlay?.blur();

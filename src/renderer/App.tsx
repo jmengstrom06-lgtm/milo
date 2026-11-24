@@ -134,7 +134,9 @@ export default function App() {
   const [bubble, setBubble] = useState<string | null>(null);
   // "Handle this": what Milo saw + 2-3 things he can do, as tappable chips by the frog
   const [offer, setOffer] = useState<{ seen: string; options: { label: string; say: string }[] } | null>(null);
-  const chipsRef = useRef<typeof offer>(null); // the buttons on screen right now (cleared the instant one is picked)
+  const chipsRef = useRef<typeof offer>(null);
+  const lastAsk = useRef("");
+  const sweepDoneAt = useRef(0); // when the last worksheet finished (so "you missed 7" goes back over it) // the student's newest request, word for word (the worksheet sweep reads it for "put Jake for the name") // the buttons on screen right now (cleared the instant one is picked)
   useEffect(() => {
     chipsRef.current = offer;
   }, [offer]);
@@ -1854,7 +1856,7 @@ export default function App() {
   // ---- Worksheet Sweep: every question, solved and filled in --------------------------
   /** Fill in or just show, switchable mid-worksheet from the progress bar. */
   const sweepFill = useRef(true);
-  const runSweep = async (fillOverride?: boolean) => {
+  const runSweep = async (fillOverride?: boolean, fromTop = false) => {
     if (await heldBack("fill", "")) return;
     runId.current++;
     hush();
@@ -1882,8 +1884,38 @@ export default function App() {
     show({ fill: sweepFill.current });
     say(sweepFill.current ? "Reading the whole page." : "Reading the whole page. I'll show you each answer and how I got it, you type it in.").then(() => setBubble(null));
 
-    for (let page = 0; page < 3; page++) {
-      const plan = await window.milo.sweepPlan(results.map((r) => r.label));
+    const ask = lastAsk.current; // "...and fill in Jake for the name": the whole request goes with the plan
+    if (fromTop) await window.milo.scrollTop(); // going back over it: start at the top
+    // one question: lock on, put the answer in (or just show it)
+    const doItem = async (it: SweepItem, items: SweepItem[], i: number) => {
+      show({ items, index: i, status: "working" });
+      setBox(it.box);
+      setLocked(true);
+      sfx.lock();
+      await moveTo({ x: it.box.x + it.box.width + 12, y: it.box.y - MILO_H * 0.35 }, "jump");
+      setMood("writing");
+      await sleep(900); // time to read the work card
+      let filled = false;
+      if (sweepFill.current && it.kind !== "none" && it.screen) {
+        setMood("pointing");
+        const r = await window.milo.sweepFill(it);
+        filled = r.ok;
+        if (r.ok) sfx.tick();
+      }
+      const prev = results.findIndex((r) => r.label === it.label);
+      if (prev >= 0) results[prev] = { label: it.label, answer: it.answer, filled };
+      else results.push({ label: it.label, answer: it.answer, filled });
+      show({});
+      await sleep(250);
+    };
+
+    for (let page = 0; page < 5; page++) {
+      // skip only what was really done; a box too close to the bottom waits for the next scroll
+      const plan = await window.milo.sweepPlan(
+        results.map((r) => r.label),
+        ask,
+        name
+      );
       if (sweepStop.current) return show({ status: "stopped" });
       if (!plan.ok) {
         setMood("idle");
@@ -1896,46 +1928,61 @@ export default function App() {
         setBubble(null);
         return setSweep(null);
       }
-      for (let i = 0; i < items.length; i++) {
+      const now = items.filter((it) => !it.later);
+      for (let i = 0; i < now.length; i++) {
         if (sweepStop.current) return show({ status: "stopped" });
-        const it = items[i];
-        show({ items, index: i, status: "working" });
-        // 1) lock onto the question
-        setBox(it.box);
-        setLocked(true);
-        sfx.lock();
-        await moveTo({ x: it.box.x + it.box.width + 12, y: it.box.y - MILO_H * 0.35 }, "jump");
-        setMood("writing");
-        await sleep(900); // time to read the work card
-        if (sweepStop.current) return show({ status: "stopped" });
-        // 2) put the answer in
-        let filled = false;
-        if (sweepFill.current && it.kind !== "none" && it.screen) {
-          setMood("pointing");
-          const r = await window.milo.sweepFill(it);
-          filled = r.ok;
-          if (r.ok) sfx.tick();
-        }
-        results.push({ label: it.label, answer: it.answer, filled });
-        show({});
-        await sleep(250);
+        await doItem(now[i], items, items.indexOf(now[i]));
       }
-      if (!plan.more) break;
+      if (!plan.more && now.length === items.length) break;
       show({ status: "scrolling" });
       setBox(null);
       await window.milo.scrollPage();
     }
+
+    // Did I miss anything? Back to the top and look for questions that still have no answer, then fix them.
+    const missed: string[] = [];
+    if (sweepFill.current && results.some((r) => r.filled) && !sweepStop.current) {
+      show({ status: "scanning" });
+      setBox(null);
+      say("Double-checking I got everything.").then(() => setBubble(null));
+      await window.milo.scrollTop();
+      for (let page = 0; page < 4; page++) {
+        const plan = await window.milo.sweepPlan([], ask, name);
+        if (sweepStop.current || !plan.ok) break;
+        const blanks = plan.items.filter((it) => !it.later && it.kind !== "none");
+        bb("sweep_verify", { page, blanks: blanks.map((b) => b.label) });
+        for (let i = 0; i < blanks.length; i++) {
+          if (sweepStop.current) break;
+          await doItem(blanks[i], plan.items, plan.items.indexOf(blanks[i]));
+        }
+        // a second look at the same spot: anything still blank there didn't take
+        if (blanks.length) {
+          const again = await window.milo.sweepPlan([], ask, name);
+          if (again.ok) for (const it of again.items) if (!it.later && blanks.some((b) => b.label === it.label) && !missed.includes(it.label)) missed.push(it.label);
+        }
+        if (!plan.more) break;
+        await window.milo.scrollPage();
+      }
+      for (const m of missed) {
+        const r = results.find((x) => x.label === m);
+        if (r) r.filled = false;
+      }
+    }
+
     setBox(null);
     show({ status: "done" });
+    sweepDoneAt.current = Date.now();
     moveTo(home(), "jump");
-    setMood("celebrating");
-    sfx.success();
     const filled = results.filter((r) => r.filled).length;
+    setMood(missed.length ? "idle" : "celebrating");
+    if (!missed.length) sfx.success();
+    // say only what's true: what's in, and what still needs them
     await say(
-      `Done. ${results.length} question${results.length === 1 ? "" : "s"}` +
-        (filled ? `, ${filled} filled in` : "") +
-        (results.length - filled ? `, ${results.length - filled} shown on screen` : "") +
-        "."
+      !sweepFill.current
+        ? `Done. ${results.length} answer${results.length === 1 ? "" : "s"} on screen for you to type in.`
+        : missed.length
+          ? `Filled ${filled} of ${results.length}. I couldn't get ${missed.length === 1 ? "number" : "numbers"} ${missed.join(" and ")} to stick. Can you fill ${missed.length === 1 ? "that one" : "those"} in? The answers are on the card.`
+          : `Done. All ${filled} filled in. Give it a quick look before you submit.`
     );
     setBubble(null);
     setMood("happy");
@@ -2496,6 +2543,13 @@ export default function App() {
   routeRef.current = (raw: string, spoken = true) => {
     // Filler ("uh", "cool", "okay") never decides anything. Curly quotes from speech-to-text become plain ones.
     const text = stripFiller(raw.replace(/[’‘]/g, "'").replace(/[“”]/g, '"'));
+    lastAsk.current = text;
+    // Right after a worksheet: "you missed 7 and 8", "number 4 is wrong", "you didn't put my name" = go back over it
+    if (Date.now() - sweepDoneAt.current < 15 * 60e3 && /\b(didn'?t|did not|missed|forgot|skipped|wrong|incorrect|look (back|over)|go back|fix|redo|again)\b/i.test(text) && /\b(number|question|name|answer|blank|\d+|those|them|it)\b/i.test(text)) {
+      bb("route_instant", { text, kind: "sweep_redo" });
+      void runSweep(true, true);
+      return;
+    }
     // Home base shows what you said to the frog; typed there = answered quietly there, spoken = out loud
     if (!fromHome.current) {
       window.milo.home.echo("heard", text);
