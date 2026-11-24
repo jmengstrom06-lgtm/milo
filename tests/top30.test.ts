@@ -39,6 +39,8 @@ const TOP30: [string, string, string[]][] = [
   ["web task", "instant:task", ["open chrome and go to youtube.com", "go to the tcu library website"]],
   ["mac app", "app", ["open spotify", "quit spotify"]],
   ["home base", "home", ["open home base", "show my dashboard"]],
+  ["pick an area", "pick_area", ["pick an area", "let me pick", "select this part", "let me show you the part", "only look at this part"]],
+  ["whole screen again", "clear_area", ["look at the whole screen again", "forget the box"]],
   ["Milo's apps", "fast:open_kit", ["open your notes", "open sheets", "open the planner"]],
   ["profile", "profile", ["my major is finance", "my school email is jake@tcu.edu"]],
   ["teach / research / make (AI decides)", "router", ["teach me z-scores", "I don't get photosynthesis", "make me flashcards for bio", "graph y = x squared", "who won the TCU game last night", "explain number 3", "help me with bio"]],

@@ -1638,7 +1638,7 @@ export default function HomeApp() {
                 <div className="hb-set">
                   <div>
                     <b>Shortcuts</b>
-                    <span>Talk to Milo: ⌘⇧Space · Look at my screen: ⌘⇧Y · Open Home base: ⌘⇧H · Search: ⌘K</span>
+                    <span>Talk to Milo: ⌘⇧Space · Look at my screen: ⌘⇧Y · Pick an area: ⌘⇧2 · Open Home base: ⌘⇧H · Search: ⌘K</span>
                   </div>
                 </div>
                 <div className="hb-set">

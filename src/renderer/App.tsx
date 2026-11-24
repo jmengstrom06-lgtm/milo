@@ -20,7 +20,8 @@ import { alertLine, emptyRadar, markWarned, mergeScan, pendingAlerts, upcoming, 
 import RadarCard, { type RadarView } from "./RadarCard";
 import { backNudge, weekNudge, type Nudge } from "./nudges";
 import { checkupLine, type CheckItem } from "../main/checkup";
-import { isSure, LOCKIN_START, pickSpoken } from "./exact";
+import { CLEAR_AREA, isSure, LOCKIN_START, PICK_AREA, pickSpoken } from "./exact";
+import AreaPicker, { AreaFlash } from "./AreaPicker";
 import Onboarding, { setupDone } from "./Onboarding";
 import ActivityPanel from "./ActivityPanel";
 import FeedbackPanel from "./FeedbackPanel";
@@ -147,7 +148,11 @@ export default function App() {
 
   const [chatOpen, setChatOpen] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([]);
-  const [chatMore, setChatMore] = useState(false); // the chat's settings list (instead of a wall of chips)
+  const [chatMore, setChatMore] = useState(false);
+  // "Pick an area": the drag box, the request to run after it (if any), and a quick outline of what Milo is looking at
+  const [picking, setPicking] = useState<{ then?: string } | null>(null);
+  const [areaFlash, setAreaFlash] = useState<{ box: MiloRect; label?: string; id: number } | null>(null);
+  const targetOpts = useRef<{ label: string; box: MiloRect }[]>([]); // the chat's settings list (instead of a wall of chips)
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [voice, setVoice] = useState(true);
@@ -518,6 +523,7 @@ export default function App() {
       const r = await window.milo.look(m, request, focus);
       if (id !== runId.current) return;
       setBusy(false);
+      if (!r.ok && (r as { asked?: boolean }).asked) return void setMood("idle"); // "Which one?" buttons are up
 
       if (!r.ok) {
         setMood("idle");
@@ -1299,6 +1305,7 @@ export default function App() {
     say("Let me look.").then(() => undefined);
     const r = await window.milo.suggest(said || "handle this");
     setMood("idle");
+    if (!r.ok && (r as { asked?: boolean }).asked) return; // "Which one?" buttons are up
     // couldn't see the screen (permission, paused): say so. Anything else (the AI stumbled): still offer the basics.
     if (!r.ok && /screen|paused|permission|privacy/i.test(r.text || "")) {
       say(r.text).then(() => setBubble(null));
@@ -1323,6 +1330,27 @@ export default function App() {
     say(`${r.seen ? `${r.seen} ` : ""}Want me to ${r.options[0].label.toLowerCase()}?`).then(() => setBubble(null));
   };
   const pickOffer = (o: { label: string; say: string }) => {
+    // "Which one?" buttons: remember that part of the screen, then do what they asked
+    const area = o.say.match(/^__area:(\d+):(.*)$/s);
+    if (area) {
+      chipsRef.current = null;
+      setOffer(null);
+      hover(false);
+      const t = targetOpts.current[Number(area[1])];
+      bb("area_pick_chip", { label: o.label });
+      if (t)
+        void window.milo.areaSet(t.box).then(() => {
+          setAreaFlash({ box: t.box, label: t.label, id: Date.now() });
+          routeRef.current(area[2], false);
+        });
+      return;
+    }
+    if (o.say.startsWith("__pick:")) {
+      chipsRef.current = null;
+      setOffer(null);
+      setPicking({ then: o.say.slice(7) || undefined });
+      return;
+    }
     chipsRef.current = null; // before routing: the chosen command must never be read as picking a button again
     setOffer(null);
     hover(false);
@@ -2339,6 +2367,7 @@ export default function App() {
     setBubble("Writing your quiz…");
     const r = await window.milo.quiz(focus);
     setBubble(null);
+    if (!r.ok && (r as { asked?: boolean }).asked) return void setMood("idle");
     if (!r.ok || !r.questions.length) {
       setMood("idle");
       await say(r.ok ? "I couldn't find enough material on screen to quiz you on." : r.text);
@@ -2484,6 +2513,18 @@ export default function App() {
         );
         return;
       }
+    }
+    if (PICK_AREA.test(text.trim())) {
+      bb("route_instant", { text, kind: "pick_area" });
+      setChatOpen(false);
+      setPicking({});
+      return;
+    }
+    if (CLEAR_AREA.test(text.trim())) {
+      bb("route_instant", { text, kind: "clear_area" });
+      void window.milo.areaSet(null);
+      say("Okay, I'll look at your whole window again.").then(() => setBubble(null));
+      return;
     }
     {
       const lc = lectureCommand(text);
@@ -3135,6 +3176,7 @@ export default function App() {
     setMood("looking");
     setBubble("Reading your screen…");
     const r = await window.milo.screenAsk(question);
+    if (!r.ok && (r as { asked?: boolean }).asked) return void setMood("idle");
     setMessages((m) => [...m, { role: "user", content: question }, { role: "assistant", content: r.text }]);
     setMood(r.ok ? "happy" : "thinking");
     await say(r.text);
@@ -3655,6 +3697,50 @@ export default function App() {
     setTimeout(() => inputRef.current?.focus(), 50);
     setMessages((m) => (m.length ? m : [{ role: "assistant", content: "Hey! I'm Milo. Stuck on something? Hit Look at my screen, or just ask." }]));
   }, [hover]);
+
+  // ---- "which part of the screen": named-thing outline, "Which one?" buttons, the picker shortcut ----
+  useEffect(() => window.milo.onAreaFlash((a) => setAreaFlash({ ...a, id: Date.now() })), []);
+  useEffect(() => window.milo.onPickArea(() => setPicking({})), []);
+  useEffect(
+    () =>
+      window.milo.onTargetAsk((a) => {
+        targetOpts.current = a.options;
+        setMood("idle");
+        setBubble(null);
+        setChatOpen(false);
+        setOffer({
+          seen: a.question,
+          options: [...a.options.map((o, i) => ({ label: o.label, say: `__area:${i}:${a.redo}` })), { label: "Pick an area", say: `__pick:${a.redo}` }],
+        });
+        void say(`${a.question} ${a.options.map((o) => o.label).join(", or ")}?`).then(() => setBubble(null));
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+  useEffect(() => {
+    if (!areaFlash) return;
+    const t = window.setTimeout(() => setAreaFlash(null), 1900);
+    return () => window.clearTimeout(t);
+  }, [areaFlash]);
+  const areaPicked = (b: MiloRect) => {
+    const then = picking?.then;
+    setPicking(null);
+    hover(false);
+    void window.milo.areaSet(b).then(() => {
+      setAreaFlash({ box: b, id: Date.now() });
+      if (then) return routeRef.current(then, false);
+      // no request yet: ask what to do with it
+      setOffer({
+        seen: "Got it. What should I do here?",
+        options: [
+          { label: "Help with this", say: "handle this" },
+          { label: "Check it", say: "check my work" },
+          { label: "Teach me", say: "teach me this" },
+          { label: "Do it", say: "do this for me" },
+        ],
+      });
+    });
+  };
 
   const closeChat = () => {
     setChatOpen(false);
@@ -4275,6 +4361,7 @@ export default function App() {
               ["👀", "Handle this", "I look and offer options", () => void handleThis("handle this")],
               ["🗓️", "What's next?", "Fix my week", () => routeRef.current("what's next", false)],
               ["✅", "Check this", "Find mistakes in my work", () => routeRef.current("check my work", false)],
+              ["⬚", "Pick an area", "Drag a box over what you need (⌘⇧2)", () => setPicking({})],
               ["💬", "Chat", "Ask me anything", () => openChat()],
               ["🏠", "Home base", "Everything in one place", () => void window.milo.home.open()],
             ] as const
@@ -4478,6 +4565,8 @@ export default function App() {
         }}
       />
 
+      {picking && <AreaPicker onDone={areaPicked} onCancel={() => (setPicking(null), hover(false))} hover={hover} />}
+      {areaFlash && !picking && <AreaFlash key={areaFlash.id} box={areaFlash.box} label={areaFlash.label} />}
       {chatOpen && (
         <div className="mc" style={chatStyle} onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)} onMouseLeave={() => hover(false)}>
           {/* header: who, how he's doing, and three quiet buttons */}

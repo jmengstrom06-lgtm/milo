@@ -1993,3 +1993,24 @@ button.mc__row:hover { background: var(--mc-raise); }
 .mc__foot button { border: 0; background: transparent; color: var(--mc-text2); font-size: 12px; font-weight: 500; padding: 4px 6px; border-radius: 6px; }
 .mc__foot button:hover { background: var(--mc-raise); color: var(--mc-text); }
 .mc__foot .mc__quit:hover { color: #ff8a8e; }
+
+/* ===== Pick an area ===== */
+.ap { position: fixed; inset: 0; z-index: 80; cursor: crosshair; touch-action: none; }
+.ap__shade { position: absolute; background: rgba(8, 6, 14, 0.55); pointer-events: none; }
+.ap__box { position: absolute; border: 2px solid #a78bfa; border-radius: 6px; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35), 0 0 24px rgba(139, 92, 246, 0.35); cursor: move; }
+.ap__h { position: absolute; width: 14px; height: 14px; background: #fff; border: 2px solid #8b5cf6; border-radius: 50%; }
+.ap__h--n, .ap__h--s { left: calc(50% - 7px); cursor: ns-resize; }
+.ap__h--e, .ap__h--w { top: calc(50% - 7px); cursor: ew-resize; }
+.ap__h--n { top: -8px; } .ap__h--s { bottom: -8px; } .ap__h--e { right: -8px; } .ap__h--w { left: -8px; }
+.ap__h--ne { top: -8px; right: -8px; cursor: nesw-resize; } .ap__h--sw { bottom: -8px; left: -8px; cursor: nesw-resize; }
+.ap__h--nw { top: -8px; left: -8px; cursor: nwse-resize; } .ap__h--se { bottom: -8px; right: -8px; cursor: nwse-resize; }
+.ap__tip { position: absolute; padding: 5px 10px; border-radius: 8px; background: #13111a; color: #ededef; border: 1px solid #2e2939; font: 600 12px "Plus Jakarta Sans", -apple-system, sans-serif; pointer-events: none; white-space: nowrap; }
+.ap__bar { position: absolute; display: flex; gap: 6px; padding: 5px; border-radius: 12px; background: #13111a; border: 1px solid #2e2939; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4); cursor: default; }
+.ap__bar button { border: 0; border-radius: 8px; padding: 8px 14px; font: 600 12.5px "Plus Jakarta Sans", -apple-system, sans-serif; cursor: pointer; }
+.ap__cancel { background: transparent; color: #a1a1aa; }
+.ap__cancel:hover { background: #1a1722; color: #ededef; }
+.ap__go { background: #8b5cf6; color: #fff; }
+.ap__go:hover { background: #7c4def; }
+.ap-flash { position: fixed; z-index: 30; border: 2px solid #a78bfa; border-radius: 8px; box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.18); pointer-events: none; animation: apFlash 1.8s ease-out forwards; }
+.ap-flash span { position: absolute; top: -26px; left: -2px; padding: 3px 8px; border-radius: 6px; background: #8b5cf6; color: #fff; font: 600 11.5px "Plus Jakarta Sans", -apple-system, sans-serif; white-space: nowrap; }
+@keyframes apFlash { 0% { opacity: 0; } 12% { opacity: 1; } 75% { opacity: 1; } 100% { opacity: 0; } }
