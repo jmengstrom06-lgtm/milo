@@ -80,3 +80,12 @@ describe("open a D2L class page directly", () => {
   it("assignments", () => expect(parse("pull up my stats assignments", c)).toEqual({ kind: "d2lclass", course: "stats", page: "assignments" }));
   it.each(["open chrome", "open my notes", "show me the answers", "open home base"])("%s is not a D2L class", (t) => expect(parse(t, c).kind).not.toBe("d2lclass"));
 });
+
+import { TOPIC_WORDS } from "../src/main/classes";
+describe("topic tells the class", () => {
+  it("stats topics", () => {
+    expect(TOPIC_WORDS.stats!.test("quiz me on z-scores")).toBe(true);
+    expect(TOPIC_WORDS.stats!.test("explain confidence intervals")).toBe(true);
+  });
+  it("english topics aren't stats", () => expect(TOPIC_WORDS.stats!.test("quiz me on the narrator in the yellow wallpaper")).toBe(false));
+});

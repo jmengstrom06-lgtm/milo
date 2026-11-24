@@ -64,6 +64,17 @@ export const SUBJECT_WORDS: Record<Subject, RegExp> = {
   other: /$^/,
 };
 
+/** Topics that clearly belong to one subject ("quiz me on z-scores" is stats even with English open). */
+export const TOPIC_WORDS: Partial<Record<Subject, RegExp>> = {
+  stats: /\b(z[- ]?scores?|t[- ]?tests?|p[- ]?values?|standard deviation|variance|regression|correlation|normal (curve|distribution)|confidence intervals?|hypothesis test(s|ing)?|sampling distributions?|binomial|chi[- ]?square|anova|percentiles?|box ?plots?|histograms?)\b/i,
+  math: /\b(derivatives?|integrals?|limits?|polynomials?|quadratic|logarithms?|matrices|matrix|vectors?|sine|cosine|equations?)\b/i,
+  science: /\b(cells?|enzymes?|dna|rna|mitosis|meiosis|photosynthesis|atoms?|molecules?|moles?|reactions?|plate tectonics|rocks?|minerals?|newton|velocity|acceleration|evolution|ecosystems?)\b/i,
+  english: /\b(thesis|metaphor|symbolism|themes?|narrator|poems?|novel|mla|rhetorical|literary devices?)\b/i,
+  history: /\b(civil war|revolution|constitution|amendments?|empire|treaty|world war|cold war|supreme court|federalism)\b/i,
+  business: /\b(supply and demand|elasticity|gdp|inflation|break[- ]even|balance sheet|marketing mix|opportunity cost)\b/i,
+  cs: /\b(recursion|big[- ]?o|linked lists?|arrays?|binary search|algorithms?|loops?)\b/i,
+};
+
 /** Which class is this request about? An explicit mention wins, otherwise the active class. */
 /** Only a class the text actually names (code, name, or subject + "class"); never falls back to the active class. */
 export function classNamed(text: string): Klass | null {
@@ -93,6 +104,12 @@ export function classFor(request: string): Klass | null {
     if (code && new RegExp(`\\b${code[1]}\\s*${code[2]}\\b`).test(t)) return c;
   }
   for (const c of s.classes) if (c.subject !== "other" && SUBJECT_WORDS[c.subject].test(t) && /\b(class|course|for|in|my)\b/.test(t)) return c;
+  // the topic itself says which class (only if exactly one of their classes is that subject)
+  for (const subj of Object.keys(TOPIC_WORDS) as Subject[]) {
+    if (!TOPIC_WORDS[subj]!.test(t)) continue;
+    const hits = s.classes.filter((c) => c.subject === subj);
+    if (hits.length === 1) return hits[0];
+  }
   return s.classes.find((c) => c.id === s.active) ?? null;
 }
 
