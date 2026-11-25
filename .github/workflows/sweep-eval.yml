@@ -5,6 +5,13 @@
 name: sweep-eval
 on:
   workflow_dispatch:
+    inputs:
+      only:
+        description: "Sheet ids, comma separated (empty = all)"
+        default: ""
+      repeat:
+        description: "Run each sheet this many times"
+        default: "1"
   pull_request:
     paths:
       - "src/main/sweepCore.ts"
@@ -29,6 +36,8 @@ jobs:
       - name: Worksheet bench (real AI)
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SWEEP_ONLY: ${{ github.event.inputs.only }}
+          SWEEP_REPEAT: ${{ github.event.inputs.repeat }}
         run: npm run eval:sweep
       - uses: actions/upload-artifact@v4
         if: always()
