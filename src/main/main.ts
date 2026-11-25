@@ -655,6 +655,7 @@ async function openDoc(said = "", picked?: string): Promise<{ id: string; title:
   const r = await findDoc(said);
   if (r.doc) return { id: r.doc.id, title: r.doc.title };
   if (r.choices.length > 1) return { ask: `You have ${r.choices.length} Google Docs open. Which one?`, docs: r.choices.slice(0, 4).map((c) => ({ id: c.id, title: c.title })) };
+  if (r.elsewhere) return { ask: `I can see your doc, but it's open inside ${r.elsewhere}, where I can't reach it. Open it in Chrome or Safari, or copy its link, and ask me again.`, docs: [] };
   return null;
 }
 const NO_DOC = "I don't see a Google Doc open in Chrome or Safari. Open your paper in Google Docs, or copy its link, then ask me again. (A Word file: open it in Google Docs first.)";

@@ -12,37 +12,51 @@ export type DocTab = { id: string; title: string; browser: string; frontWindow: 
 
 const CHROMIUM = ["Google Chrome", "Arc", "Brave Browser", "Microsoft Edge", "Dia", "Chromium", "Vivaldi"];
 
-function osa(script: string, timeout = 6000): Promise<{ out: string; err: string }> {
+function osa(script: string, timeout = 6000, lang: "AppleScript" | "JavaScript" = "JavaScript"): Promise<{ out: string; err: string }> {
   return new Promise((resolve) =>
-    execFile("osascript", ["-e", script], { timeout }, (err, out, se) => resolve({ out: String(out ?? "").trim(), err: err ? String(se || err.message).slice(0, 160) : "" }))
+    execFile("osascript", ["-l", lang, "-e", script], { timeout }, (err, out, se) => resolve({ out: String(out ?? "").trim(), err: err ? String(se || err.message).slice(0, 160) : "" }))
   );
 }
 
-/** AppleScript that lists Google Docs tabs without launching the browser. One line per tab: window, active, url, title. */
+/** JavaScript for Automation (not AppleScript: AppleScript can't even compile for a browser that isn't installed,
+ *  and "tab" means a browser tab inside a tell block). Lists Google Docs tabs without launching anything.
+ *  One line per tab: window number, active?, url, title. */
 export function tabScript(app: string): string {
   const safari = app === "Safari";
-  return `if application "${app}" is running then
-  tell application "${app}"
-    set out to ""
-    set wi to 0
-    repeat with w in windows
-      set wi to wi + 1
-      try
-        ${safari ? "set ai to index of current tab of w" : "set ai to active tab index of w"}
-      on error
-        set ai to 0
-      end try
-      set ti to 0
-      repeat with t in tabs of w
-        set ti to ti + 1
-        set u to URL of t
-        if u contains "docs.google.com/document/" then set out to out & wi & tab & (ti = ai) & tab & u & tab & (${safari ? "name" : "title"} of t) & linefeed
-      end repeat
-    end repeat
-    return out
-  end tell
-end if`;
+  return `(() => {
+  let a;
+  try { a = Application(${JSON.stringify(app)}); if (!a.running()) return ""; } catch (e) { return ""; }
+  const out = [];
+  a.windows().forEach((w, wi) => {
+    let ai = 0;
+    try { ai = ${safari ? "w.currentTab().index()" : "w.activeTabIndex()"}; } catch (e) {}
+    let tabs = [];
+    try { tabs = w.tabs(); } catch (e) {}
+    tabs.forEach((t, ti) => {
+      let u = "";
+      try { u = t.url() || ""; } catch (e) {}
+      if (u.indexOf("docs.google.com/document/") < 0) return;
+      let name = "";
+      try { name = ${safari ? "t.name()" : "t.title()"} || ""; } catch (e) {}
+      out.push([wi + 1, ti + 1 === ai, u, name].join("\\t"));
+    });
+  });
+  return out.join("\\n");
+})()`;
 }
+
+/** Any window, in any app, whose title says Google Docs (the doc is open somewhere we can't read tabs from,
+ *  like a browser built into another app). Returns "App: title" lines. */
+const WINDOW_SCRIPT = `(() => {
+  const se = Application("System Events");
+  const out = [];
+  se.processes.whose({ backgroundOnly: false })().forEach((p) => {
+    let names = [];
+    try { names = p.windows.name(); } catch (e) {}
+    names.forEach((n) => { if (n && /Google Docs/.test(n)) out.push(p.name() + "\\t" + n); });
+  });
+  return out.join("\\n");
+})()`;
 
 /** Parse the script's lines. (pure) */
 export function parseTabs(browser: string, out: string): DocTab[] {
@@ -73,7 +87,7 @@ export function pickDoc(tabs: DocTab[], said: string): { pick: DocTab | null; ch
 }
 
 /** Every open Google Doc + the clipboard link, then the one they mean. */
-export async function findDoc(said: string): Promise<{ doc: DocTab | null; choices: DocTab[]; why: string }> {
+export async function findDoc(said: string): Promise<{ doc: DocTab | null; choices: DocTab[]; why: string; elsewhere?: string }> {
   const tabs: DocTab[] = [];
   const errors: Record<string, string> = {};
   await Promise.all(
@@ -94,6 +108,14 @@ export async function findDoc(said: string): Promise<{ doc: DocTab | null; choic
   const clipId = docIdFrom(clipboard.readText().trim());
   if (clipId && !tabs.some((x) => x.id === clipId)) tabs.push({ id: clipId, title: "the doc link you copied", browser: "clipboard", frontWindow: false, active: false });
   const r = pickDoc(tabs, said);
-  bb("writing", "doc_lookup", { found: tabs.length, why: r.why, pick: r.pick?.title?.slice(0, 60) ?? null, browsers: [...new Set(tabs.map((t) => t.browser))], errors });
-  return { doc: r.pick, choices: r.choices, why: r.why };
+  // Nothing in a browser: is a Google Doc open somewhere else (another app's built-in browser)? Say where.
+  let elsewhere: string | undefined;
+  if (!r.pick && !r.choices.length) {
+    const w = await osa(WINDOW_SCRIPT, 5000);
+    if (w.err) errors["windows"] = w.err;
+    const first = w.out.split("\n").find(Boolean);
+    if (first) elsewhere = first.split("\t")[0];
+  }
+  bb("writing", "doc_lookup", { found: tabs.length, why: r.why, pick: r.pick?.title?.slice(0, 60) ?? null, browsers: [...new Set(tabs.map((t) => t.browser))], elsewhere: elsewhere ?? null, errors });
+  return { doc: r.pick, choices: r.choices, why: r.why, elsewhere };
 }

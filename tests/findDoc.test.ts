@@ -11,7 +11,7 @@ describe("finding the paper", () => {
     expect(t.length).toBe(2);
     expect(t[0]).toMatchObject({ id: ID1, title: "Milo Test Paper - Should College Students Work Part-Time", frontWindow: true, active: true });
   });
-  it("never launches a browser that isn't open", () => expect(tabScript("Safari")).toMatch(/^if application "Safari" is running then/));
+  it("never launches a browser that isn't open", () => expect(tabScript("Safari")).toMatch(/if \(!a.running\(\)\) return ""/));
   it("one doc open = that one, wherever it is", () => expect(pickDoc([D("a", "Essay", { browser: "Safari" })], "edit my paper").pick?.id).toBe("a"));
   it("the one they named wins", () => {
     const r = pickDoc([D("a", "Bio Lab Report", { active: true, frontWindow: true }), D("b", "Milo Test Paper - Should College Students Work")], "I have a Google Doc paper open, it's a Milo test paper, fix grammar");
@@ -28,4 +28,25 @@ describe("finding the paper", () => {
     expect(r.choices.length).toBe(2);
   });
   it("the same doc in two tabs counts once", () => expect(pickDoc([D("a", "Essay"), D("a", "Essay", { browser: "Safari" })], "").pick?.id).toBe("a"));
+});
+
+describe("the browser script really runs", () => {
+  const fake = (running: boolean) => () => ({
+    running: () => running,
+    windows: () => [
+      { activeTabIndex: () => 2, currentTab: () => ({ index: () => 2 }), tabs: () => [
+        { url: () => "https://example.com", title: () => "x", name: () => "x" },
+        { url: () => `https://docs.google.com/document/d/${ID1}/edit`, title: () => "Milo Test Paper - Google Docs", name: () => "Milo Test Paper - Google Docs" },
+      ] },
+    ],
+  });
+  for (const b of ["Google Chrome", "Safari"]) {
+    it(b, () => {
+      // eslint-disable-next-line no-new-func
+      const out = new Function("Application", `return ${tabScript(b)}`)(fake(true)) as string;
+      expect(parseTabs(b, out)).toEqual([{ id: ID1, title: "Milo Test Paper", browser: b, frontWindow: true, active: true }]);
+      expect(new Function("Application", `return ${tabScript(b)}`)(fake(false))).toBe("");
+      expect(new Function("Application", `return ${tabScript(b)}`)(() => { throw new Error("not installed"); })).toBe("");
+    });
+  }
 });

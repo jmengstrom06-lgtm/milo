@@ -132,6 +132,7 @@ export async function runSelfTest(win: BrowserWindow) {
     }
     results.push(res);
     log(`${pass ? "PASS" : "FAIL"} ${id} ${r.detail}`);
+    try { writeReport(false); } catch { /* keep testing */ }
     await reset();
   }
 
@@ -148,6 +149,12 @@ export async function runSelfTest(win: BrowserWindow) {
     off();
     return;
   }
+  // A stuck test must never leave a muted test copy of Milo running: write what we have and quit.
+  setTimeout(() => {
+    log("Stopped: the test ran over its time limit. The report has everything that finished.");
+    try { writeReport(true); } catch { /* ignore */ }
+    quitAfterTest();
+  }, Number(process.env.MILO_TEST_MINUTES || (process.env.MILO_TEST_ONLY ? 12 : 60)) * 60e3);
   await sleep(2500); // let him finish waking up (greeting, brief)
   await js("window.__milo.quietEars()"); // the real mic stays off so room noise can't join the test
   // First-run setup stays out of the way during the test (and comes back afterward if it wasn't finished).
@@ -164,6 +171,175 @@ export async function runSelfTest(win: BrowserWindow) {
   const pillText = `(document.querySelector('.lib-saved__btn')?.textContent || '')`;
   const chip = (c: { code: string; name: string }) =>
     js(`[...document.querySelectorAll('.cls-chip')].find((e) => e.textContent.includes(${JSON.stringify(label(c))}))?.click()`);
+
+  // ======================= STUDENT WRITING (Q): your real Google + D2L, checked for real =======================
+  // MILO_TEST_ONLY=Q runs just these. Makes one test Google Doc ("Milo test – safe to delete"), never posts to D2L.
+  {
+    const gsT = (() => { try { return googleStatus(); } catch { return { connected: false }; } })();
+    const ESSAY = [
+      "Social Media and Teen Sleep",
+      "Social media have changed how teenagers spend there nights. Many students scrolls on their phones until well past midnight, and this effects how much they sleep.",
+      "According to the CDC, about 72% of high school students do not get enough sleep on school nights. This is a big problem because sleep is important for learning and it is also important for mood and it is also important for health in general.",
+      "One reason is the blue light from screens. Blue light makes it harder for the brain to release melatonin, which is the hormone that tells your body its time to sleep.",
+      'As one researcher put it, "the bedroom has become a 24-hour entertainment center." Schools and parents should encourage students to put phones away an hour before bed.',
+    ].join("\n");
+    const clean = (s: string) => s.replace(/\s+/g, " ").trim();
+    let docId = "";
+    let original = "";
+    let firstEdits: Parameters<typeof undoEdits>[1] = [];
+    if (!gsT.connected) {
+      results.push({ id: "Q0", cat: "Writing", name: "Google connected (for the paper tests)", score: 0, pass: false, detail: "Google isn't connected. Connect it in Milo, then run again." });
+    } else {
+      await test("Q1", "Writing", "Edit my paper: fixes real mistakes inside a real Google Doc", async () => {
+        const d = await docsCreate(`Milo test – safe to delete ${new Date().toLocaleString()}`, ESSAY);
+        docId = d.id;
+        original = await docsText(docId);
+        const t0 = Date.now();
+        const r = await editPaper(docId, "edit my paper");
+        if (!r.ok) return { score: 0, detail: `no edits: ${r.text}` };
+        firstEdits = r.applied;
+        const now = await docsText(docId);
+        const fixed = [/their nights/.test(now), !/students scrolls/.test(now), !/this effects/.test(now), /it['’]s time|it is time/.test(now)].filter(Boolean).length;
+        const quote = now.includes("the bedroom has become a 24-hour entertainment center.");
+        return { ms: Date.now() - t0, score: (fixed / 4) * (quote ? 1 : 0.5), detail: `${r.applied.length} edits landed in ${((Date.now() - t0) / 1000).toFixed(0)}s, ${fixed}/4 planted mistakes fixed, quote ${quote ? "kept" : "CHANGED"}` };
+      });
+      await test("Q2", "Writing", "Undo all puts the doc back exactly", async () => {
+        if (!docId) return { score: 0, detail: "no test doc (Q1 failed)" };
+        if (!firstEdits.length) return { score: 0, detail: "nothing to undo (Q1 made no changes)" };
+        const t0 = Date.now();
+        const u = await undoEdits(docId, firstEdits);
+        const back = await docsText(docId);
+        const same = clean(back) === clean(original);
+        if (same) return { ms: Date.now() - t0, score: 1, detail: `all ${u.undone} edits undone, doc matches the original exactly` };
+        const a = clean(original).split(" "), b = clean(back).split(" ");
+        const i = a.findIndex((w, k) => w !== b[k]);
+        return { score: 0, detail: `${u.undone}/${firstEdits.length} undone; first difference: "${a.slice(Math.max(0, i - 3), i + 4).join(" ")}" vs "${b.slice(Math.max(0, i - 3), i + 4).join(" ")}"` };
+      });
+      await test("Q3", "Writing", "Edit my intro: only the intro changes", async () => {
+        if (!docId) return { score: 0, detail: "no test doc" };
+        const before = (await docsText(docId)).split("\n");
+        const r = await editPaper(docId, "make my intro stronger");
+        if (!r.ok) return { score: 0.5, detail: `no edits: ${r.text}` };
+        const after = (await docsText(docId)).split("\n");
+        const changedRows = before.map((l, i) => (clean(l) !== clean(after[i] ?? "") ? i : -1)).filter((i) => i >= 0);
+        await undoEdits(docId, r.applied);
+        const ok = changedRows.length > 0 && changedRows.every((i) => i <= 1);
+        return { score: ok ? 1 : 0, detail: ok ? `${r.applied.length} edits, all in the intro, undone after` : `changed lines ${changedRows.join(",")}` };
+      });
+      await test("Q4", "Writing", "Sources: real citations + Works Cited page, then removed cleanly", async () => {
+        if (!docId) return { score: 0, detail: "no test doc" };
+        const before = await docsText(docId);
+        const t0 = Date.now();
+        const r = await citePaper(docId, "find 3 sources for my paper", 3);
+        if (!r.ok) return { score: 0, detail: `no sources: ${r.text}` };
+        const ms = Date.now() - t0;
+        const now = await docsText(docId);
+        const hasList = /Works Cited|References/.test(now) && r.addedList;
+        const dois = r.sources.filter((s) => s.doi || s.url).length;
+        const inText = r.placed;
+        // take it all back
+        if (r.listText) await removeBlock(docId, r.listText);
+        if (r.applied.length) await undoEdits(docId, r.applied);
+        const back = await docsText(docId);
+        const clean2 = clean(back) === clean(before);
+        const score = (hasList ? 0.35 : 0) + (inText > 0 ? 0.25 : 0) + (dois === r.sources.length ? 0.2 : 0) + (clean2 ? 0.2 : 0);
+        return { ms, score, detail: `${r.sources.length} sources (${r.style}), ${inText} in-text citations, list ${hasList ? "added" : "MISSING"}, ${clean2 ? "removed cleanly" : "doc NOT back to before after removing"} (${(ms / 1000).toFixed(0)}s)` };
+      });
+    }
+
+    // ---- The way a student really does it: doc open in a browser, request said out loud ----
+    if (gsT.connected) {
+      for (const [id, browser, phrase] of [
+        ["Q9", "Safari", "Hey Milo, I have a Google Doc paper open, it's the Milo test paper. Um, look through it, find the grammar mistakes and make it sound better."],
+        ["QA", "Google Chrome", "look through my essay and fix the spelling and grammar"],
+      ] as const) {
+        await test(id, "Writing", `Said out loud, doc open in ${browser}: finds it and edits it`, async () => {
+          const d = await docsCreate(`Milo test – safe to delete ${new Date().toLocaleString()}`, ESSAY);
+          await new Promise<void>((res) => execFile("open", ["-a", browser, d.url], () => res()));
+          await sleep(6000); // the doc loads in the browser
+          const before = await docsText(d.id);
+          const t0 = Date.now();
+          await reset();
+          await hear(phrase);
+          let after = before;
+          while (Date.now() - t0 < 90000) {
+            await sleep(2000);
+            after = await docsText(d.id);
+            if (clean(after) !== clean(before) && Date.now() - t0 > 8000) break;
+          }
+          const look = events.find((e) => e.line.startsWith("writing/doc_lookup"))?.line ?? "no lookup logged";
+          const route = events.find((e) => e.line.startsWith("ipc/route"))?.line.match(/"kind":"(\w+)"/)?.[1] ?? "?";
+          const fixed = clean(after) !== clean(before);
+          return { ms: Date.now() - t0, score: fixed ? 1 : 0, detail: fixed ? `routed to ${route}, found the doc, edited it in ${((Date.now() - t0) / 1000).toFixed(0)}s` : `doc NOT changed. route: ${route}. ${look.slice(0, 220)}` };
+        });
+      }
+    }
+
+    // ---- Discussions: read your real D2L, draft only (never posts) ----
+    const portalT = await js<string>("localStorage.getItem('milo.portal') || ''").catch(() => "");
+    await test("Q6", "Writing", "Discussion: finds a real D2L discussion and drafts a post + replies (no posting)", async () => {
+      if (!portalT) return { score: 0, detail: "no school site set up" };
+      for (let i = 0; i < 60 && !bridgeConnected(); i++) await sleep(250); // Chrome's extension reconnects after Milo starts
+      const chk = await d2lCheck(portalT);
+      if (!chk.ok) return { score: 0, detail: `D2L: ${chk.text} (Chrome extension ${chk.chrome ? "connected" : "NOT connected"})` };
+      const all = await d2lCourses(portalT);
+      const t0 = Date.now();
+      let found: { course: (typeof all)[number]; topics: Awaited<ReturnType<typeof discussionTopics>> } | null = null;
+      for (const c of all) {
+        const ts = (await discussionTopics(portalT, c).catch(() => [])).filter((t) => !t.locked);
+        if (ts.length) { found = { course: c, topics: ts }; break; }
+      }
+      if (!found) return { score: 0.6, detail: `none of your ${all.length} classes has an open discussion right now (nothing to test)` };
+      const me = await myUserId(portalT).catch(() => null);
+      const topic = pickTopic(found.topics, new Set(), "")!;
+      const posts = await topicPosts(portalT, found.course, topic).catch(() => [] as DPost[]);
+      const voice = posts.filter((p) => me && p.userId === me && p.text.split(/\s+/).length > 40).map((p) => p.text).slice(0, 3);
+      const d = await draftDiscussion({ course: found.course.name, topic, posts, me, voice, ask: `do my discussion post for ${found.course.short}` });
+      if ("error" in d) return { score: 0, detail: `couldn't draft: ${d.error}` };
+      const req = requirementsOf(topic.prompt);
+      const n = d.body.split(/\s+/).length;
+      const others = posts.filter((p) => !p.parentId && p.userId !== me).length;
+      const wantReplies = Math.min(req.replies, others);
+      const okWords = !req.minWords || n >= req.minWords;
+      const okReplies = d.replies.length >= wantReplies && d.replies.every((r) => posts.some((p) => p.id === r.parentId));
+      return { ms: Date.now() - t0, score: (okWords ? 0.5 : 0) + (okReplies ? 0.5 : 0), detail: `${found.course.short} · "${topic.name}" · ${posts.length} posts read · ${n} words (needs ${req.minWords || "any"}) · ${d.replies.length}/${req.replies} replies to real classmates · your voice: ${voice.length ? "yes" : "no past posts"} · NOT posted` };
+    });
+
+    // ---- Readings: a long PDF, split and read ----
+    await test("Q7", "Writing", "Reading: a 150-page PDF becomes notes, flashcards and a quiz", async () => {
+      const { PDFDocument, StandardFonts } = await import("pdf-lib");
+      const pdf = await PDFDocument.create();
+      const font = await pdf.embedFont(StandardFonts.Helvetica);
+      const topics = ["the cell membrane is a phospholipid bilayer with hydrophilic heads and hydrophobic tails", "passive transport needs no ATP and moves substances down their concentration gradient", "active transport uses ATP; the sodium-potassium pump moves 3 sodium out and 2 potassium in", "osmosis is the diffusion of water across a selectively permeable membrane", "in a hypotonic solution water enters the cell and it may lyse", "cholesterol keeps animal cell membranes from becoming too fluid or too rigid"];
+      for (let i = 0; i < 150; i++) {
+        const p = pdf.addPage([612, 792]);
+        p.drawText(`Chapter 4, page ${i + 1}`, { x: 60, y: 730, size: 14, font });
+        const t = topics[i % topics.length];
+        for (let l = 0; l < 20; l++) p.drawText(`${l === 0 ? "Key idea: " : ""}${t}.`.slice(0, 95), { x: 60, y: 690 - l * 28, size: 11, font });
+      }
+      const bytes = await pdf.save();
+      const t0 = Date.now();
+      const r = await readThis({ pdf: bytes, name: "Milo test reading.pdf" }, "make notes and a quiz");
+      if (!r.ok) return { score: 0, detail: `failed: ${r.text}` };
+      if (r.noteId) removeNote(r.noteId);
+      if (r.studyId) deleteItem(r.studyId);
+      const ms = Date.now() - t0;
+      const good = r.pages === 150 && r.terms >= 4 && r.cards >= 8 && r.quiz.length >= 6;
+      return { ms, score: good ? 1 : 0.4, detail: `${r.pages} pages in ${(ms / 1000).toFixed(0)}s: ${r.terms} terms, ${r.cards} flashcards, ${r.quiz.length} quiz questions, ${r.alerts} test alerts` };
+    });
+    await test("Q8", "Writing", "Reading: your newest real PDF from Downloads", async () => {
+      const dl = path.join(app.getPath("home"), "Downloads");
+      let files: string[] = [];
+      try { files = fs.readdirSync(dl).filter((f) => /\.pdf$/i.test(f)).map((f) => path.join(dl, f)).sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs); } catch { /* no access */ }
+      if (!files.length) return { score: 0.6, detail: "no PDF in Downloads (skipped)" };
+      const t0 = Date.now();
+      const r = await readThis({ file: files[0] }, "make notes and a quiz");
+      if (!r.ok) return { score: 0, detail: `${path.basename(files[0])}: ${r.text}` };
+      if (r.noteId) removeNote(r.noteId);
+      if (r.studyId) deleteItem(r.studyId);
+      return { ms: Date.now() - t0, score: r.cards > 0 && r.quiz.length > 0 ? 1 : 0.4, detail: `${path.basename(files[0])}: ${r.pages || "?"} pages, ${r.terms} terms, ${r.cards} cards, ${r.quiz.length} quiz Qs in ${((Date.now() - t0) / 1000).toFixed(0)}s` };
+    });
+  }
 
   // ======================= SPEED =======================
   await test("S1", "Speed", "'What can you do?' opens his apps", async () => {
@@ -722,175 +898,6 @@ export async function runSelfTest(win: BrowserWindow) {
     }
   }
 
-  // ======================= STUDENT WRITING (Q): your real Google + D2L, checked for real =======================
-  // MILO_TEST_ONLY=Q runs just these. Makes one test Google Doc ("Milo test – safe to delete"), never posts to D2L.
-  {
-    const gsT = (() => { try { return googleStatus(); } catch { return { connected: false }; } })();
-    const ESSAY = [
-      "Social Media and Teen Sleep",
-      "Social media have changed how teenagers spend there nights. Many students scrolls on their phones until well past midnight, and this effects how much they sleep.",
-      "According to the CDC, about 72% of high school students do not get enough sleep on school nights. This is a big problem because sleep is important for learning and it is also important for mood and it is also important for health in general.",
-      "One reason is the blue light from screens. Blue light makes it harder for the brain to release melatonin, which is the hormone that tells your body its time to sleep.",
-      'As one researcher put it, "the bedroom has become a 24-hour entertainment center." Schools and parents should encourage students to put phones away an hour before bed.',
-    ].join("\n");
-    const clean = (s: string) => s.replace(/\s+/g, " ").trim();
-    let docId = "";
-    let original = "";
-    let firstEdits: Parameters<typeof undoEdits>[1] = [];
-    if (!gsT.connected) {
-      results.push({ id: "Q0", cat: "Writing", name: "Google connected (for the paper tests)", score: 0, pass: false, detail: "Google isn't connected. Connect it in Milo, then run again." });
-    } else {
-      await test("Q1", "Writing", "Edit my paper: fixes real mistakes inside a real Google Doc", async () => {
-        const d = await docsCreate(`Milo test – safe to delete ${new Date().toLocaleString()}`, ESSAY);
-        docId = d.id;
-        original = await docsText(docId);
-        const t0 = Date.now();
-        const r = await editPaper(docId, "edit my paper");
-        if (!r.ok) return { score: 0, detail: `no edits: ${r.text}` };
-        firstEdits = r.applied;
-        const now = await docsText(docId);
-        const fixed = [/their nights/.test(now), !/students scrolls/.test(now), !/this effects/.test(now), /it['’]s time|it is time/.test(now)].filter(Boolean).length;
-        const quote = now.includes("the bedroom has become a 24-hour entertainment center.");
-        return { ms: Date.now() - t0, score: (fixed / 4) * (quote ? 1 : 0.5), detail: `${r.applied.length} edits landed in ${((Date.now() - t0) / 1000).toFixed(0)}s, ${fixed}/4 planted mistakes fixed, quote ${quote ? "kept" : "CHANGED"}` };
-      });
-      await test("Q2", "Writing", "Undo all puts the doc back exactly", async () => {
-        if (!docId) return { score: 0, detail: "no test doc (Q1 failed)" };
-        if (!firstEdits.length) return { score: 0, detail: "nothing to undo (Q1 made no changes)" };
-        const t0 = Date.now();
-        const u = await undoEdits(docId, firstEdits);
-        const back = await docsText(docId);
-        const same = clean(back) === clean(original);
-        if (same) return { ms: Date.now() - t0, score: 1, detail: `all ${u.undone} edits undone, doc matches the original exactly` };
-        const a = clean(original).split(" "), b = clean(back).split(" ");
-        const i = a.findIndex((w, k) => w !== b[k]);
-        return { score: 0, detail: `${u.undone}/${firstEdits.length} undone; first difference: "${a.slice(Math.max(0, i - 3), i + 4).join(" ")}" vs "${b.slice(Math.max(0, i - 3), i + 4).join(" ")}"` };
-      });
-      await test("Q3", "Writing", "Edit my intro: only the intro changes", async () => {
-        if (!docId) return { score: 0, detail: "no test doc" };
-        const before = (await docsText(docId)).split("\n");
-        const r = await editPaper(docId, "make my intro stronger");
-        if (!r.ok) return { score: 0.5, detail: `no edits: ${r.text}` };
-        const after = (await docsText(docId)).split("\n");
-        const changedRows = before.map((l, i) => (clean(l) !== clean(after[i] ?? "") ? i : -1)).filter((i) => i >= 0);
-        await undoEdits(docId, r.applied);
-        const ok = changedRows.length > 0 && changedRows.every((i) => i <= 1);
-        return { score: ok ? 1 : 0, detail: ok ? `${r.applied.length} edits, all in the intro, undone after` : `changed lines ${changedRows.join(",")}` };
-      });
-      await test("Q4", "Writing", "Sources: real citations + Works Cited page, then removed cleanly", async () => {
-        if (!docId) return { score: 0, detail: "no test doc" };
-        const before = await docsText(docId);
-        const t0 = Date.now();
-        const r = await citePaper(docId, "find 3 sources for my paper", 3);
-        if (!r.ok) return { score: 0, detail: `no sources: ${r.text}` };
-        const ms = Date.now() - t0;
-        const now = await docsText(docId);
-        const hasList = /Works Cited|References/.test(now) && r.addedList;
-        const dois = r.sources.filter((s) => s.doi || s.url).length;
-        const inText = r.placed;
-        // take it all back
-        if (r.listText) await removeBlock(docId, r.listText);
-        if (r.applied.length) await undoEdits(docId, r.applied);
-        const back = await docsText(docId);
-        const clean2 = clean(back) === clean(before);
-        const score = (hasList ? 0.35 : 0) + (inText > 0 ? 0.25 : 0) + (dois === r.sources.length ? 0.2 : 0) + (clean2 ? 0.2 : 0);
-        return { ms, score, detail: `${r.sources.length} sources (${r.style}), ${inText} in-text citations, list ${hasList ? "added" : "MISSING"}, ${clean2 ? "removed cleanly" : "doc NOT back to before after removing"} (${(ms / 1000).toFixed(0)}s)` };
-      });
-    }
-
-    // ---- The way a student really does it: doc open in a browser, request said out loud ----
-    if (gsT.connected) {
-      for (const [id, browser, phrase] of [
-        ["Q9", "Safari", "Hey Milo, I have a Google Doc paper open, it's the Milo test paper. Um, look through it, find the grammar mistakes and make it sound better."],
-        ["QA", "Google Chrome", "look through my essay and fix the spelling and grammar"],
-      ] as const) {
-        await test(id, "Writing", `Said out loud, doc open in ${browser}: finds it and edits it`, async () => {
-          const d = await docsCreate(`Milo test – safe to delete ${new Date().toLocaleString()}`, ESSAY);
-          await new Promise<void>((res) => execFile("open", ["-a", browser, d.url], () => res()));
-          await sleep(6000); // the doc loads in the browser
-          const before = await docsText(d.id);
-          const t0 = Date.now();
-          await reset();
-          await hear(phrase);
-          let after = before;
-          while (Date.now() - t0 < 90000) {
-            await sleep(2000);
-            after = await docsText(d.id);
-            if (clean(after) !== clean(before) && Date.now() - t0 > 8000) break;
-          }
-          const look = events.find((e) => e.line.startsWith("writing/doc_lookup"))?.line ?? "no lookup logged";
-          const route = events.find((e) => e.line.startsWith("ipc/route"))?.line.match(/"kind":"(\w+)"/)?.[1] ?? "?";
-          const fixed = clean(after) !== clean(before);
-          return { ms: Date.now() - t0, score: fixed ? 1 : 0, detail: fixed ? `routed to ${route}, found the doc, edited it in ${((Date.now() - t0) / 1000).toFixed(0)}s` : `doc NOT changed. route: ${route}. ${look.slice(0, 220)}` };
-        });
-      }
-    }
-
-    // ---- Discussions: read your real D2L, draft only (never posts) ----
-    const portalT = await js<string>("localStorage.getItem('milo.portal') || ''").catch(() => "");
-    await test("Q6", "Writing", "Discussion: finds a real D2L discussion and drafts a post + replies (no posting)", async () => {
-      if (!portalT) return { score: 0, detail: "no school site set up" };
-      for (let i = 0; i < 60 && !bridgeConnected(); i++) await sleep(250); // Chrome's extension reconnects after Milo starts
-      const chk = await d2lCheck(portalT);
-      if (!chk.ok) return { score: 0, detail: `D2L: ${chk.text} (Chrome extension ${chk.chrome ? "connected" : "NOT connected"})` };
-      const all = await d2lCourses(portalT);
-      const t0 = Date.now();
-      let found: { course: (typeof all)[number]; topics: Awaited<ReturnType<typeof discussionTopics>> } | null = null;
-      for (const c of all) {
-        const ts = (await discussionTopics(portalT, c).catch(() => [])).filter((t) => !t.locked);
-        if (ts.length) { found = { course: c, topics: ts }; break; }
-      }
-      if (!found) return { score: 0.6, detail: `none of your ${all.length} classes has an open discussion right now (nothing to test)` };
-      const me = await myUserId(portalT).catch(() => null);
-      const topic = pickTopic(found.topics, new Set(), "")!;
-      const posts = await topicPosts(portalT, found.course, topic).catch(() => [] as DPost[]);
-      const voice = posts.filter((p) => me && p.userId === me && p.text.split(/\s+/).length > 40).map((p) => p.text).slice(0, 3);
-      const d = await draftDiscussion({ course: found.course.name, topic, posts, me, voice, ask: `do my discussion post for ${found.course.short}` });
-      if ("error" in d) return { score: 0, detail: `couldn't draft: ${d.error}` };
-      const req = requirementsOf(topic.prompt);
-      const n = d.body.split(/\s+/).length;
-      const others = posts.filter((p) => !p.parentId && p.userId !== me).length;
-      const wantReplies = Math.min(req.replies, others);
-      const okWords = !req.minWords || n >= req.minWords;
-      const okReplies = d.replies.length >= wantReplies && d.replies.every((r) => posts.some((p) => p.id === r.parentId));
-      return { ms: Date.now() - t0, score: (okWords ? 0.5 : 0) + (okReplies ? 0.5 : 0), detail: `${found.course.short} · "${topic.name}" · ${posts.length} posts read · ${n} words (needs ${req.minWords || "any"}) · ${d.replies.length}/${req.replies} replies to real classmates · your voice: ${voice.length ? "yes" : "no past posts"} · NOT posted` };
-    });
-
-    // ---- Readings: a long PDF, split and read ----
-    await test("Q7", "Writing", "Reading: a 150-page PDF becomes notes, flashcards and a quiz", async () => {
-      const { PDFDocument, StandardFonts } = await import("pdf-lib");
-      const pdf = await PDFDocument.create();
-      const font = await pdf.embedFont(StandardFonts.Helvetica);
-      const topics = ["the cell membrane is a phospholipid bilayer with hydrophilic heads and hydrophobic tails", "passive transport needs no ATP and moves substances down their concentration gradient", "active transport uses ATP; the sodium-potassium pump moves 3 sodium out and 2 potassium in", "osmosis is the diffusion of water across a selectively permeable membrane", "in a hypotonic solution water enters the cell and it may lyse", "cholesterol keeps animal cell membranes from becoming too fluid or too rigid"];
-      for (let i = 0; i < 150; i++) {
-        const p = pdf.addPage([612, 792]);
-        p.drawText(`Chapter 4, page ${i + 1}`, { x: 60, y: 730, size: 14, font });
-        const t = topics[i % topics.length];
-        for (let l = 0; l < 20; l++) p.drawText(`${l === 0 ? "Key idea: " : ""}${t}.`.slice(0, 95), { x: 60, y: 690 - l * 28, size: 11, font });
-      }
-      const bytes = await pdf.save();
-      const t0 = Date.now();
-      const r = await readThis({ pdf: bytes, name: "Milo test reading.pdf" }, "make notes and a quiz");
-      if (!r.ok) return { score: 0, detail: `failed: ${r.text}` };
-      if (r.noteId) removeNote(r.noteId);
-      if (r.studyId) deleteItem(r.studyId);
-      const ms = Date.now() - t0;
-      const good = r.pages === 150 && r.terms >= 4 && r.cards >= 8 && r.quiz.length >= 6;
-      return { ms, score: good ? 1 : 0.4, detail: `${r.pages} pages in ${(ms / 1000).toFixed(0)}s: ${r.terms} terms, ${r.cards} flashcards, ${r.quiz.length} quiz questions, ${r.alerts} test alerts` };
-    });
-    await test("Q8", "Writing", "Reading: your newest real PDF from Downloads", async () => {
-      const dl = path.join(app.getPath("home"), "Downloads");
-      let files: string[] = [];
-      try { files = fs.readdirSync(dl).filter((f) => /\.pdf$/i.test(f)).map((f) => path.join(dl, f)).sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs); } catch { /* no access */ }
-      if (!files.length) return { score: 0.6, detail: "no PDF in Downloads (skipped)" };
-      const t0 = Date.now();
-      const r = await readThis({ file: files[0] }, "make notes and a quiz");
-      if (!r.ok) return { score: 0, detail: `${path.basename(files[0])}: ${r.text}` };
-      if (r.noteId) removeNote(r.noteId);
-      if (r.studyId) deleteItem(r.studyId);
-      return { ms: Date.now() - t0, score: r.cards > 0 && r.quiz.length > 0 ? 1 : 0.4, detail: `${path.basename(files[0])}: ${r.pages || "?"} pages, ${r.terms} terms, ${r.cards} cards, ${r.quiz.length} quiz Qs in ${((Date.now() - t0) / 1000).toFixed(0)}s` };
-    });
-  }
-
   // ======================= FIRST MINUTE: the offer after setup (N) =======================
   // "Want to start on X? Together, or I can do it myself." N3/N4 really open Chrome / start a job: test:new:computer only.
   {
@@ -1344,7 +1351,8 @@ export async function runSelfTest(win: BrowserWindow) {
   await js(`(() => { const k = "milo.gameplans"; try { const xs = JSON.parse(localStorage.getItem(k) || "[]"); localStorage.setItem(k, JSON.stringify(xs.filter((x) => x.at < ${libStart}))); } catch {} })()`).catch(() => {});
   off();
 
-  // ---------- score + report ----------
+  // ---------- score + report (rewritten after every check, so a stuck test still leaves a report) ----------
+  function writeReport(final: boolean) {
   // MILO_TEST_ONLY: drop "not set up" rows from sections that weren't asked for
   const only = (process.env.MILO_TEST_ONLY || "").split(",").map((x) => x.trim()).filter(Boolean);
   if (only.length) {
@@ -1379,8 +1387,11 @@ export async function runSelfTest(win: BrowserWindow) {
   fs.writeFileSync(path.join(dir, "report.md"), md);
   fs.writeFileSync(path.join(dir, "report.json"), JSON.stringify({ total, passed, count: results.length, results }, null, 2));
   fs.writeFileSync(path.join(root, "LATEST.txt"), stamp + "\n");
+  if (!final) return;
   console.log("\n" + md.split("## Failures")[0]);
   console.log(`[milo-test] Full report: test-results/${stamp}/report.md`);
+  }
+  writeReport(true);
 }
 
 export const selfTestOn = () => process.env.MILO_TEST === "1";
