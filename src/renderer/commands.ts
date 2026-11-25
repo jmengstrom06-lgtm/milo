@@ -106,6 +106,10 @@ const FILL_ONLY = /^(?:just |go ahead and |can you |please )?(?:fill (?:it|them|
 /** Writing help on their own work. Exported for tests. */
 export const EDIT_PAPER =
   /^(?:can you |could you |please |help me |go ahead and |i need you to |i want you to )?(?:edit|proofread|proof read|revise|polish|improve|tighten(?: up)?|clean up|smooth out|fix(?: up)?(?: the (?:grammar|spelling|flow|wording|typos)(?: in| of| on)?)?|rework|reword|shorten|cut|trim|make)\s+(?:my|this|the)\s+(?:[a-z]+\s+)?(?:paper|essay|draft|doc|document|intro(?:duction)?|conclusion|thesis|report|writing|response|personal statement)\b/;
+/** Said the long way: "I have a paper open… there are grammar mistakes… fix all of it". A paper/essay/draft
+ *  plus a fixing word, in one request (new papers were already caught above). */
+export const EDIT_PAPER_TALK =
+  /\b(?:my|this|the|a)\s+(?:[a-z]+\s+)?(?:paper|essay|draft|personal statement)\b(?=[\s\S]*\b(?:fix|correct|proofread|proof read|edit|revise|polish|grammar|spelling|typos|mistakes|errors|run.?on|wording|flow)\b)|\b(?:fix|correct|proofread|edit|revise|polish)\b[^.?!]{0,40}\b(?:my|this|the)\s+(?:[a-z]+\s+)?(?:paper|essay|draft)\b/;
 export const CITE_PAPER =
   /\b(?:find|get|add|give me|look up|search for)\b[^.]{0,20}\b(?:sources|citations|references|articles|scholarly|research)\b[^.]{0,25}\b(?:for|to|in|on|into)\s+(?:my|this|the)\s+(?:[a-z]+\s+){0,2}(?:paper|essay|doc|document|report|draft|project)\b|^(?:cite|add citations to|add in.?text citations to)\s+(?:my|this|the)\s+(?:paper|essay|doc|draft|report)\b|^(?:add|make)\s+(?:a |the |my )?(?:works cited|references|reference list|bibliography)(?: page| list)?\b/;
 export const CITE_PAGE = /^(?:cite|make (?:me )?a citation for|give me (?:a |the )?citation for)\s+(?:this|this page|this article|this website|this site|that)\b/;
@@ -175,6 +179,7 @@ function parseSingle(raw: string, ctx: Ctx): Intent {
     if (CITE_PAGE.test(t)) return { kind: "cite_page", text };
     if (CITE_PAPER.test(t)) return { kind: "cite", text };
     if (EDIT_PAPER.test(t) && !/\b(write|start)\b/.test(t.split(" ")[0])) return { kind: "edit_paper", text };
+    if (EDIT_PAPER_TALK.test(t) && !/\b(write|draft|start|outline)\s+(?:me\s+)?(?:a|an|my)\b/.test(t) && !/\bsources?|citations?|works cited\b/.test(t)) return { kind: "edit_paper", text };
     if (DISCUSSION.test(t)) return { kind: "discussion", text };
     if (READING.test(t)) return { kind: "reading", text };
   }

@@ -90,4 +90,4 @@ export const timer = () => {
   return () => Date.now() - t;
 };
 
-log("main", "session_start", { platform: process.platform, arch: process.arch, electron: process.versions.electron, node: process.versions.node });
+log("main", "session_start", { version: (() => { try { return require("electron").app.getVersion(); } catch { return "?"; } })(), platform: process.platform, arch: process.arch, electron: process.versions.electron, node: process.versions.node });
