@@ -35,6 +35,7 @@ function start(): ChildProcessWithoutNullStreams | null {
     return null;
   }
   const p = spawn(bin, [], { stdio: ["pipe", "pipe", "pipe"] });
+  const startedAt = Date.now();
   let buf = "";
   p.stdout.setEncoding("utf8");
   p.stdout.on("data", (chunk: string) => {
@@ -65,8 +66,12 @@ function start(): ChildProcessWithoutNullStreams | null {
       w.resolve(null);
       pending.delete(id);
     }
+    // Only a helper that dies again right away is broken. One that ran a while and then quit (macOS reclaims
+    // idle processes) just starts fresh on the next request, however many times that happens.
+    const ranMs = Date.now() - startedAt;
+    if (ranMs > 60e3) crashes = 0;
     if (++crashes >= 3) broken = true;
-    bb("hands", "native_exit", { code, crashes });
+    bb("hands", "native_exit", { code, crashes, ranS: Math.round(ranMs / 1000) });
   });
   p.on("error", (e) => {
     broken = true;
