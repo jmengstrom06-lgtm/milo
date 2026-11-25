@@ -81,6 +81,12 @@ function add(t: Tally, model: string, u: Usage, cost: number, image: boolean) {
 export function record(model: string, u: Usage | undefined, image: boolean) {
   if (!u) return;
   load();
+  if (DEV()) {
+    // test runs (npm run test:*) share the installed app's data folder: they must not use up the student's day
+    add(session, model, u, costOf(model, u), image);
+    for (const m of meters.values()) add(m, model, u, costOf(model, u), image);
+    return;
+  }
   if (day.date !== today()) day = { date: today(), t: blank() };
   const c = costOf(model, u);
   add(day.t, model, u, c, image);
@@ -103,6 +109,7 @@ export const readMeter = (id: string): Tally => ({ ...(meters.get(id) ?? blank()
 // ---------- guardrails ----------
 // While developing and testing (npm run dev / test:*), limits are high so testing doesn't hit them.
 const DEV = () => process.env.MILO_DEV === "1";
+const ownKey = () => !!process.env.ANTHROPIC_API_KEY;
 const SOFT = () => Number(process.env.MILO_SOFT_BUDGET || (DEV() ? 15 : 0.6));
 const HARD = () => Number(process.env.MILO_HARD_BUDGET || (DEV() ? 30 : 1.5));
 export function spentToday() {
@@ -117,6 +124,7 @@ export function budget(): Budget {
 let warned: Budget = "ok";
 /** Called before each AI call: which model to really use, or a refusal. */
 export function guard(model: string, hasImage: boolean, kind: "chat" | "work"): { model: string; refuse?: string } {
+  if (ownKey()) return { model }; // a developer's own AI key on this Mac: they pay, no daily limit
   const b = budget();
   if (b !== warned) {
     warned = b;
