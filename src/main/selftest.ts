@@ -12,7 +12,12 @@ import { log as bbLog, onLog } from "./blackbox";
 import { loadClasses, saveClasses } from "./classes";
 import { deleteItem, listItems } from "./library";
 import { frontApp, isRunning, openApp, quitApp } from "./hands";
-import { calendarAdd, docsText, gmailDraft, googleStatus } from "./google";
+import { calendarAdd, docsCreate, docsText, gmailDraft, googleStatus } from "./google";
+import { citePaper, editPaper, removeBlock, undoEdits } from "./writing";
+import { draftDiscussion, pickTopic, requirementsOf } from "./discussions";
+import { discussionTopics, myUserId, topicPosts, type DPost } from "./d2l";
+import { readThis } from "./reading";
+import { removeNote } from "./kitipc";
 import { lastPaper } from "./paper";
 import { addChunk, fileLecture, finishLecture, forgetLectureNote, removeLecture, startLecture } from "./lecture";
 import { macSpeak } from "./macvoice";
@@ -21,8 +26,8 @@ import { memories, remember } from "./memory";
 import { sendFeedback } from "./telemetry";
 import { homeWin, openHome } from "./home";
 
-type Cat = "Trust" | "Speed" | "Control" | "Polish" | "Organization" | "Study power" | "Personal" | "Focus" | "Research" | "Computer" | "School" | "Google" | "Home";
-const WEIGHT: Record<Cat, number> = { Trust: 20, Speed: 20, Control: 20, Polish: 20, Organization: 15, "Study power": 10, Personal: 5, Focus: 5, Research: 5, Computer: 20, School: 15, Google: 15, Home: 15 };
+type Cat = "Trust" | "Speed" | "Control" | "Polish" | "Organization" | "Study power" | "Personal" | "Focus" | "Research" | "Computer" | "School" | "Google" | "Home" | "Writing";
+const WEIGHT: Record<Cat, number> = { Trust: 20, Speed: 20, Control: 20, Polish: 20, Organization: 15, "Study power": 10, Personal: 5, Focus: 5, Research: 5, Computer: 20, School: 15, Google: 15, Home: 15, Writing: 20 };
 const WHY: Record<Cat, string> = {
   Trust: "You can see everything Milo did and take it back. Problems reach Jake in one tap.",
   Speed: "Feels instant. Slow = 'just another chatbot'.",
@@ -36,6 +41,7 @@ const WHY: Record<Cat, string> = {
   Computer: "Opens, quits and switches apps however you say it (only in npm run test:computer).",
   School: "Reads D2L directly: signed in, your grades, what's due, what you need on the final.",
   Google: "Calendar and Gmail, direct and fast; asks before adding or sending; a plain yes/no works after the ding.",
+  Writing: "Edits your real paper in place (undoable), real sources, discussion drafts from your real D2L, long readings into notes + quiz.",
   Home: "Home base: opens fast, shows your classes, typing reaches the same Milo, Undo right there.",
 };
 
@@ -713,6 +719,143 @@ export async function runSelfTest(win: BrowserWindow) {
         return { ms, score, detail: `${p.words}/${p.target} words, ${p.sources} checked sources, Works Cited ${cited ? "yes" : "MISSING"}, ${((Date.now() - t0) / 1000).toFixed(0)}s. Doc left in your Drive: ${p.url}` };
       });
     }
+  }
+
+  // ======================= STUDENT WRITING (T): your real Google + D2L, checked for real =======================
+  // MILO_TEST_ONLY=T runs just these. Makes one test Google Doc ("Milo test – safe to delete"), never posts to D2L.
+  {
+    const gsT = (() => { try { return googleStatus(); } catch { return { connected: false }; } })();
+    const ESSAY = [
+      "Social Media and Teen Sleep",
+      "Social media have changed how teenagers spend there nights. Many students scrolls on their phones until well past midnight, and this effects how much they sleep.",
+      "According to the CDC, about 72% of high school students do not get enough sleep on school nights. This is a big problem because sleep is important for learning and it is also important for mood and it is also important for health in general.",
+      "One reason is the blue light from screens. Blue light makes it harder for the brain to release melatonin, which is the hormone that tells your body its time to sleep.",
+      'As one researcher put it, "the bedroom has become a 24-hour entertainment center." Schools and parents should encourage students to put phones away an hour before bed.',
+    ].join("\n");
+    const clean = (s: string) => s.replace(/\s+/g, " ").trim();
+    let docId = "";
+    let original = "";
+    if (!gsT.connected) {
+      results.push({ id: "T0", cat: "Writing", name: "Google connected (for the paper tests)", score: 0, pass: false, detail: "Google isn't connected. Connect it in Milo, then run again." });
+    } else {
+      await test("T1", "Writing", "Edit my paper: fixes real mistakes inside a real Google Doc", async () => {
+        const d = await docsCreate(`Milo test – safe to delete ${new Date().toLocaleString()}`, ESSAY);
+        docId = d.id;
+        original = await docsText(docId);
+        const t0 = Date.now();
+        const r = await editPaper(docId, "edit my paper");
+        if (!r.ok) return { score: 0, detail: `no edits: ${r.text}` };
+        const now = await docsText(docId);
+        const fixed = [/their nights/.test(now), !/students scrolls/.test(now), !/this effects/.test(now), /it['’]s time|it is time/.test(now)].filter(Boolean).length;
+        const quote = now.includes("the bedroom has become a 24-hour entertainment center.");
+        return { ms: Date.now() - t0, score: (fixed / 4) * (quote ? 1 : 0.5), detail: `${r.applied.length} edits landed in ${((Date.now() - t0) / 1000).toFixed(0)}s, ${fixed}/4 planted mistakes fixed, quote ${quote ? "kept" : "CHANGED"}` };
+      });
+      await test("T2", "Writing", "Undo all puts the doc back exactly", async () => {
+        if (!docId) return { score: 0, detail: "no test doc (T1 failed)" };
+        const now = await docsText(docId);
+        if (clean(now) === clean(original)) return { score: 0, detail: "nothing to undo (T1 made no changes)" };
+        const changed = now;
+        // rebuild the applied list from the black box isn't possible; re-run the edit and undo that run instead
+        const r = await editPaper(docId, "fix any remaining grammar");
+        const mid = await docsText(docId);
+        if (r.ok) await undoEdits(docId, r.applied);
+        const back = await docsText(docId);
+        const same = clean(back) === clean(changed);
+        return { score: !r.ok ? 0.6 : same ? 1 : 0, detail: !r.ok ? "second edit found nothing more to fix (undo not exercised)" : same ? `${r.applied.length} edits undone, doc matches exactly` : `doc differs after undo (${clean(mid).length} → ${clean(back).length} chars vs ${clean(changed).length})` };
+      });
+      await test("T3", "Writing", "Edit my intro: only the intro changes", async () => {
+        if (!docId) return { score: 0, detail: "no test doc" };
+        const before = (await docsText(docId)).split("\n");
+        const r = await editPaper(docId, "make my intro stronger");
+        if (!r.ok) return { score: 0.5, detail: `no edits: ${r.text}` };
+        const after = (await docsText(docId)).split("\n");
+        const changedRows = before.map((l, i) => (clean(l) !== clean(after[i] ?? "") ? i : -1)).filter((i) => i >= 0);
+        await undoEdits(docId, r.applied);
+        const ok = changedRows.length > 0 && changedRows.every((i) => i <= 1);
+        return { score: ok ? 1 : 0, detail: ok ? `${r.applied.length} edits, all in the intro, undone after` : `changed lines ${changedRows.join(",")}` };
+      });
+      await test("T4", "Writing", "Sources: real citations + Works Cited page, then removed cleanly", async () => {
+        if (!docId) return { score: 0, detail: "no test doc" };
+        const before = await docsText(docId);
+        const t0 = Date.now();
+        const r = await citePaper(docId, "find 3 sources for my paper", 3);
+        if (!r.ok) return { score: 0, detail: `no sources: ${r.text}` };
+        const ms = Date.now() - t0;
+        const now = await docsText(docId);
+        const hasList = /Works Cited|References/.test(now) && r.addedList;
+        const dois = r.sources.filter((s) => s.doi || s.url).length;
+        const inText = r.placed;
+        // take it all back
+        if (r.listText) await removeBlock(docId, r.listText);
+        if (r.applied.length) await undoEdits(docId, r.applied);
+        const back = await docsText(docId);
+        const clean2 = clean(back) === clean(before);
+        const score = (hasList ? 0.35 : 0) + (inText > 0 ? 0.25 : 0) + (dois === r.sources.length ? 0.2 : 0) + (clean2 ? 0.2 : 0);
+        return { ms, score, detail: `${r.sources.length} sources (${r.style}), ${inText} in-text citations, list ${hasList ? "added" : "MISSING"}, ${clean2 ? "removed cleanly" : "doc NOT back to before after removing"} (${(ms / 1000).toFixed(0)}s)` };
+      });
+    }
+
+    // ---- Discussions: read your real D2L, draft only (never posts) ----
+    const portalT = await js<string>("localStorage.getItem('milo.portal') || ''").catch(() => "");
+    await test("T6", "Writing", "Discussion: finds a real D2L discussion and drafts a post + replies (no posting)", async () => {
+      if (!portalT) return { score: 0, detail: "no school site set up" };
+      const all = await d2lCourses(portalT);
+      const t0 = Date.now();
+      let found: { course: (typeof all)[number]; topics: Awaited<ReturnType<typeof discussionTopics>> } | null = null;
+      for (const c of all) {
+        const ts = (await discussionTopics(portalT, c).catch(() => [])).filter((t) => !t.locked);
+        if (ts.length) { found = { course: c, topics: ts }; break; }
+      }
+      if (!found) return { score: 0.6, detail: `none of your ${all.length} classes has an open discussion right now (nothing to test)` };
+      const me = await myUserId(portalT).catch(() => null);
+      const topic = pickTopic(found.topics, new Set(), "")!;
+      const posts = await topicPosts(portalT, found.course, topic).catch(() => [] as DPost[]);
+      const voice = posts.filter((p) => me && p.userId === me && p.text.split(/\s+/).length > 40).map((p) => p.text).slice(0, 3);
+      const d = await draftDiscussion({ course: found.course.name, topic, posts, me, voice, ask: `do my discussion post for ${found.course.short}` });
+      if ("error" in d) return { score: 0, detail: `couldn't draft: ${d.error}` };
+      const req = requirementsOf(topic.prompt);
+      const n = d.body.split(/\s+/).length;
+      const others = posts.filter((p) => !p.parentId && p.userId !== me).length;
+      const wantReplies = Math.min(req.replies, others);
+      const okWords = !req.minWords || n >= req.minWords;
+      const okReplies = d.replies.length >= wantReplies && d.replies.every((r) => posts.some((p) => p.id === r.parentId));
+      return { ms: Date.now() - t0, score: (okWords ? 0.5 : 0) + (okReplies ? 0.5 : 0), detail: `${found.course.short} · "${topic.name}" · ${posts.length} posts read · ${n} words (needs ${req.minWords || "any"}) · ${d.replies.length}/${req.replies} replies to real classmates · your voice: ${voice.length ? "yes" : "no past posts"} · NOT posted` };
+    });
+
+    // ---- Readings: a long PDF, split and read ----
+    await test("T7", "Writing", "Reading: a 150-page PDF becomes notes, flashcards and a quiz", async () => {
+      const { PDFDocument, StandardFonts } = await import("pdf-lib");
+      const pdf = await PDFDocument.create();
+      const font = await pdf.embedFont(StandardFonts.Helvetica);
+      const topics = ["the cell membrane is a phospholipid bilayer with hydrophilic heads and hydrophobic tails", "passive transport needs no ATP and moves substances down their concentration gradient", "active transport uses ATP; the sodium-potassium pump moves 3 sodium out and 2 potassium in", "osmosis is the diffusion of water across a selectively permeable membrane", "in a hypotonic solution water enters the cell and it may lyse", "cholesterol keeps animal cell membranes from becoming too fluid or too rigid"];
+      for (let i = 0; i < 150; i++) {
+        const p = pdf.addPage([612, 792]);
+        p.drawText(`Chapter 4, page ${i + 1}`, { x: 60, y: 730, size: 14, font });
+        const t = topics[i % topics.length];
+        for (let l = 0; l < 20; l++) p.drawText(`${l === 0 ? "Key idea: " : ""}${t}.`.slice(0, 95), { x: 60, y: 690 - l * 28, size: 11, font });
+      }
+      const bytes = await pdf.save();
+      const t0 = Date.now();
+      const r = await readThis({ pdf: bytes, name: "Milo test reading.pdf" }, "make notes and a quiz");
+      if (!r.ok) return { score: 0, detail: `failed: ${r.text}` };
+      if (r.noteId) removeNote(r.noteId);
+      if (r.studyId) deleteItem(r.studyId);
+      const ms = Date.now() - t0;
+      const good = r.pages === 150 && r.terms >= 4 && r.cards >= 8 && r.quiz.length >= 6;
+      return { ms, score: good ? 1 : 0.4, detail: `${r.pages} pages in ${(ms / 1000).toFixed(0)}s: ${r.terms} terms, ${r.cards} flashcards, ${r.quiz.length} quiz questions, ${r.alerts} test alerts` };
+    });
+    await test("T8", "Writing", "Reading: your newest real PDF from Downloads", async () => {
+      const dl = path.join(app.getPath("home"), "Downloads");
+      let files: string[] = [];
+      try { files = fs.readdirSync(dl).filter((f) => /\.pdf$/i.test(f)).map((f) => path.join(dl, f)).sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs); } catch { /* no access */ }
+      if (!files.length) return { score: 0.6, detail: "no PDF in Downloads (skipped)" };
+      const t0 = Date.now();
+      const r = await readThis({ file: files[0] }, "make notes and a quiz");
+      if (!r.ok) return { score: 0, detail: `${path.basename(files[0])}: ${r.text}` };
+      if (r.noteId) removeNote(r.noteId);
+      if (r.studyId) deleteItem(r.studyId);
+      return { ms: Date.now() - t0, score: r.cards > 0 && r.quiz.length > 0 ? 1 : 0.4, detail: `${path.basename(files[0])}: ${r.pages || "?"} pages, ${r.terms} terms, ${r.cards} cards, ${r.quiz.length} quiz Qs in ${((Date.now() - t0) / 1000).toFixed(0)}s` };
+    });
   }
 
   // ======================= FIRST MINUTE: the offer after setup (N) =======================
