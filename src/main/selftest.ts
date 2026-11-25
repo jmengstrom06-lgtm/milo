@@ -5,6 +5,7 @@
 
 import { app, type BrowserWindow } from "electron";
 import fs from "node:fs";
+import { execFile } from "node:child_process";
 import path from "node:path";
 import { calendarFeedUrl, courses as d2lCourses, d2lCheck, gradeSheet as d2lSheet, lastChromeAnswer, resetChromeWait } from "./d2l";
 import { bridgeConnected } from "./bridge";
@@ -794,6 +795,34 @@ export async function runSelfTest(win: BrowserWindow) {
         const score = (hasList ? 0.35 : 0) + (inText > 0 ? 0.25 : 0) + (dois === r.sources.length ? 0.2 : 0) + (clean2 ? 0.2 : 0);
         return { ms, score, detail: `${r.sources.length} sources (${r.style}), ${inText} in-text citations, list ${hasList ? "added" : "MISSING"}, ${clean2 ? "removed cleanly" : "doc NOT back to before after removing"} (${(ms / 1000).toFixed(0)}s)` };
       });
+    }
+
+    // ---- The way a student really does it: doc open in a browser, request said out loud ----
+    if (gsT.connected) {
+      for (const [id, browser, phrase] of [
+        ["Q9", "Safari", "Hey Milo, I have a Google Doc paper open, it's the Milo test paper. Um, look through it, find the grammar mistakes and make it sound better."],
+        ["QA", "Google Chrome", "look through my essay and fix the spelling and grammar"],
+      ] as const) {
+        await test(id, "Writing", `Said out loud, doc open in ${browser}: finds it and edits it`, async () => {
+          const d = await docsCreate(`Milo test – safe to delete ${new Date().toLocaleString()}`, ESSAY);
+          await new Promise<void>((res) => execFile("open", ["-a", browser, d.url], () => res()));
+          await sleep(6000); // the doc loads in the browser
+          const before = await docsText(d.id);
+          const t0 = Date.now();
+          await reset();
+          await hear(phrase);
+          let after = before;
+          while (Date.now() - t0 < 90000) {
+            await sleep(2000);
+            after = await docsText(d.id);
+            if (clean(after) !== clean(before) && Date.now() - t0 > 8000) break;
+          }
+          const look = events.find((e) => e.line.startsWith("writing/doc_lookup"))?.line ?? "no lookup logged";
+          const route = events.find((e) => e.line.startsWith("ipc/route"))?.line.match(/"kind":"(\w+)"/)?.[1] ?? "?";
+          const fixed = clean(after) !== clean(before);
+          return { ms: Date.now() - t0, score: fixed ? 1 : 0, detail: fixed ? `routed to ${route}, found the doc, edited it in ${((Date.now() - t0) / 1000).toFixed(0)}s` : `doc NOT changed. route: ${route}. ${look.slice(0, 220)}` };
+        });
+      }
     }
 
     // ---- Discussions: read your real D2L, draft only (never posts) ----
