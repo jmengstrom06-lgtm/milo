@@ -23,6 +23,7 @@
     "doctor": "node scripts/log-doctor.js",
     "test:jobs": "npm run build:hands && npm run build:main && concurrently -k -s command-electron -n vite,electron \"vite\" \"wait-on tcp:127.0.0.1:5173 && cross-env MILO_DEV=1 MILO_TEST_JOBS=1 electron .\"",
     "test:new": "npm run build:hands && npm run build:main && concurrently -k -s command-electron -n vite,electron \"vite\" \"wait-on tcp:127.0.0.1:5173 && cross-env MILO_DEV=1 MILO_TEST=1 MILO_TEST_ONLY=Y,V,X,U,B,N,L,G0 electron .\"",
+    "test:writing": "npm run build:hands && npm run build:main && concurrently -k -s command-electron -n vite,electron \"vite\" \"wait-on tcp:127.0.0.1:5173 && cross-env MILO_DEV=1 MILO_TEST=1 MILO_TEST_ONLY=T electron .\"",
     "test:home": "npm run build:hands && npm run build:main && concurrently -k -s command-electron -n vite,electron \"vite\" \"wait-on tcp:127.0.0.1:5173 && cross-env MILO_DEV=1 MILO_TEST=1 MILO_TEST_ONLY=Z electron .\"",
     "test:pick": "npm run build:hands && npm run build:main && concurrently -k -s command-electron -n vite,electron \"vite\" \"wait-on tcp:127.0.0.1:5173 && cross-env MILO_DEV=1 MILO_TEST=1 MILO_TEST_COMPUTER=1 electron .\"",
     "test:new:computer": "npm run build:hands && npm run build:main && concurrently -k -s command-electron -n vite,electron \"vite\" \"wait-on tcp:127.0.0.1:5173 && cross-env MILO_DEV=1 MILO_TEST=1 MILO_TEST_COMPUTER=1 MILO_TEST_ONLY=Y,V,X,U,B,N,L,G0 electron .\"",
