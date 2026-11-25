@@ -49,7 +49,7 @@ function load() {
   loaded = true;
   try {
     const d = JSON.parse(fs.readFileSync(file(), "utf8"));
-    if (d?.date === today() && d.t) day = { date: d.date, t: { ...blank(), ...d.t } };
+    if (d?.date === today() && d.t && d.v === 2) day = { date: d.date, t: { ...blank(), ...d.t } };
   } catch {
     /* first run */
   }
@@ -60,7 +60,7 @@ function save() {
   saveTimer = setTimeout(() => {
     saveTimer = null;
     try {
-      fs.writeFileSync(file(), JSON.stringify(day));
+      fs.writeFileSync(file(), JSON.stringify({ ...day, v: 2 }));
     } catch {
       /* not fatal */
     }
@@ -132,7 +132,8 @@ export function guard(model: string, hasImage: boolean, kind: "chat" | "work"): 
   }
   if (b === "ok") return { model };
   const fast = process.env.MILO_FAST_MODEL || "claude-haiku-5-5";
-  if (b === "hard" && kind === "work") return { model, refuse: "I've done a ton of heavy lifting today, so big jobs are paused until tomorrow. I can still chat and help you study." };
+  // the small model is never refused: it routes requests and answers quick things, and costs almost nothing
+  if (b === "hard" && kind === "work" && !/haiku/i.test(model)) return { model, refuse: "I've done a ton of heavy lifting today, so big jobs are paused until tomorrow. I can still chat and help you study." };
   // over the soft line: the small model handles everything it can (pictures still need the big one)
   if (!hasImage && !/haiku/i.test(model)) return { model: fast };
   return { model };

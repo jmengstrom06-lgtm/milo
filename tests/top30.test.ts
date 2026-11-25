@@ -110,3 +110,17 @@ describe("math out loud", () => {
     expect(stripMath("$\\left(a\\right) \\le b$")).toBe("(a) ≤ b");
   });
 });
+
+import { parse as parseLong } from "../src/renderer/commands";
+describe("edit my paper, said the long way", () => {
+  it.each([
+    "I have a paper open called Milo Test Paper. There's a bunch of grammar mistakes like spelling and stuff. I want you to look through it and fix all of it, please.",
+    "I have a paper open in my Google Docs. I want you to look through it and look for any grammar mistakes and correct them",
+    "can you go through my essay and fix the spelling",
+    "look through the paper and find any grammar or mistakes and correct them",
+  ])("%s", (s) => expect((parseLong(s, {} as never) as { kind: string }).kind).toBe("edit_paper"));
+  it.each([
+    ["write a paper on the french revolution", "paper"],
+    ["find 5 sources for my paper", "cite"],
+  ])("%s", (s, k) => expect((parseLong(s, {} as never) as { kind: string }).kind).toBe(k));
+});
