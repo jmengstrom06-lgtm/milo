@@ -141,6 +141,16 @@ export const CASES: Case[] = [
   { say: "write in my google doc that the meeting is at 5", expect: { kind: "task" } },
   { say: "move to the bottom left and then open your notes", expect: { kind: "move", after: true } },
   { say: "uh, okay, so, open the sheet", expect: { kind: "kit", app: "sheet" } },
+  // ---- writing help on their own work --------------------------------------------------------
+  { say: "can you look over my essay and make it flow better", expect: { kind: "edit_paper" } },
+  { say: "my paper is like 200 words too long, trim it", expect: { kind: "edit_paper" } },
+  { say: "I need 5 scholarly sources for my research paper", expect: { kind: "cite" } },
+  { say: "make my works cited page", expect: { kind: "cite" } },
+  { say: "I have to reply to two classmates on the psych discussion board", expect: { kind: "discussion" } },
+  { say: "answer this week's discussion for history", expect: { kind: "discussion" } },
+  { say: "I have 60 pages to read for history tonight, help", expect: { kind: ["reading", "ask"] } },
+  { say: "summarize this article for me", expect: { kind: ["reading", "screen_question"] } },
+  { say: "write a 3 page essay on the french revolution", expect: { kind: ["task", "chat", "kit"] }, note: "a NEW paper is the paper flow (keyword rule), never edit_paper" },
   // ---- ask when unsure: vague asks get buttons, clear asks never do ----------------------------
   { say: "help me with bio", expect: { kind: "ask" }, note: "start homework, teach, or quiz?" },
   { say: "make something for stats", expect: { kind: "ask" } },

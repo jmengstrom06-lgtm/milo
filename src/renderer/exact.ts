@@ -17,7 +17,7 @@ export const PICK_AREA = /^(?:milo,?\s*)?(?:let me (?:pick|choose|select|show yo
 export const CLEAR_AREA = /^(?:milo,?\s*)?(?:(?:look at|use) (?:the |my )?(?:whole|entire|full) screen(?: again)?|forget (?:the |that |my )?(?:area|box|part)|clear (?:the |my )?(?:area|box))[\s.!?]*$/i;
 
 /** Commands that run right away without asking the AI router. Everything else, the router decides. */
-const SURE = new Set(["hush", "yes", "no", "resume", "undo", "activity", "feedback", "paper", "week", "home", "handle", "d2lclass", "checkwork"]);
+const SURE = new Set(["hush", "yes", "no", "resume", "undo", "activity", "feedback", "paper", "week", "home", "handle", "d2lclass", "checkwork", "edit_paper", "cite", "cite_page", "discussion", "reading"]);
 const LESSON_SURE = new Set(["close", "goto", "mode", "answer", "show", "copy", "practice", "skip", "repeat", "fill"]);
 const WEB = /\b(chrome|safari|browser|website|web ?site|web ?page|https?:|[a-z0-9-]+\.(com|edu|org|net|gov|io))\b/i;
 

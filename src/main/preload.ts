@@ -212,6 +212,18 @@ contextBridge.exposeInMainWorld("milo", {
   },
   paper: (request: string, name?: string) => ipcRenderer.invoke("milo:paper", request, name),
   paperStop: () => ipcRenderer.invoke("milo:paper-stop"),
+  paperEdit: (ask: string) => ipcRenderer.invoke("milo:paper-edit", ask),
+  paperUndo: (docId: string, edits: unknown[]) => ipcRenderer.invoke("milo:paper-undo", docId, edits),
+  paperCite: (ask: string) => ipcRenderer.invoke("milo:paper-cite", ask),
+  citePage: (ask: string) => ipcRenderer.invoke("milo:cite-page", ask),
+  discussionDraft: (q: unknown) => ipcRenderer.invoke("milo:discussion-draft", q),
+  discussionPost: (q: unknown) => ipcRenderer.invoke("milo:discussion-post", q),
+  readThis: (q: { path?: string; ask: string; portal?: string }) => ipcRenderer.invoke("milo:read-this", q),
+  onWritingLive: (fn: (p: { stage: string; text: string; i?: number; n?: number }) => void) => {
+    const h = (_e: unknown, p: { stage: string; text: string; i?: number; n?: number }) => fn(p);
+    ipcRenderer.on("milo:writing-live", h);
+    return () => ipcRenderer.removeListener("milo:writing-live", h);
+  },
   onPaperProgress: (fn: (p: unknown) => void) => {
     const l = (_e: unknown, p: unknown) => fn(p);
     ipcRenderer.on("milo:paper-progress", l);

@@ -447,3 +447,76 @@ export async function fileBase64(portal: string, url: string, maxBytes = 12e6): 
   )) as string | null;
   return b64;
 }
+
+// ---------- discussions ----------
+export type DTopic = { forumId: number; topicId: number; forum: string; name: string; prompt: string; due: string | null; end: string | null; locked: boolean };
+export type DPost = { id: number; parentId: number | null; userId: number; who: string; subject: string; text: string; at: string };
+const strip = (html = "") =>
+  html
+    .replace(/<(br|\/p|\/div|\/li)[^>]*>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+/** Who the student is in D2L (to find their own past posts, and topics they haven't posted in). */
+export async function myUserId(portal: string): Promise<number | null> {
+  const me = await api<{ Identifier?: string }>(portal, `/d2l/api/lp/${LP}/users/whoami`).catch(() => null);
+  return me?.Identifier ? Number(me.Identifier) : null;
+}
+/** Every discussion topic in a course, with its prompt. */
+export async function discussionTopics(portal: string, c: Course): Promise<DTopic[]> {
+  type F = { ForumId: number; Name: string; IsHidden?: boolean };
+  type T = { TopicId: number; Name: string; Description?: { Text?: string; Html?: string }; DueDate?: string | null; EndDate?: string | null; IsLocked?: boolean; IsHidden?: boolean };
+  const forums = (await api<F[]>(portal, `/d2l/api/le/${LE}/${c.id}/discussions/forums/`)).filter((f) => !f.IsHidden);
+  const out: DTopic[] = [];
+  for (const f of forums.slice(0, 15)) {
+    const topics = await api<T[]>(portal, `/d2l/api/le/${LE}/${c.id}/discussions/forums/${f.ForumId}/topics/`).catch(() => [] as T[]);
+    for (const t of topics) if (!t.IsHidden) out.push({ forumId: f.ForumId, topicId: t.TopicId, forum: f.Name, name: t.Name, prompt: strip(t.Description?.Html || t.Description?.Text || ""), due: t.DueDate ?? null, end: t.EndDate ?? null, locked: !!t.IsLocked });
+  }
+  return out;
+}
+export async function topicPosts(portal: string, c: Course, t: Pick<DTopic, "forumId" | "topicId">): Promise<DPost[]> {
+  type P = { PostId: number; ParentPostId?: number | null; PostingUserId?: number; PostingUserDisplayName?: string; Subject?: string; Message?: { Text?: string; Html?: string }; DatePosted?: string; IsDeleted?: boolean };
+  const posts = await api<P[]>(portal, `/d2l/api/le/${LE}/${c.id}/discussions/forums/${t.forumId}/topics/${t.topicId}/posts/`);
+  return posts
+    .filter((p) => !p.IsDeleted)
+    .map((p) => ({ id: p.PostId, parentId: p.ParentPostId ?? null, userId: p.PostingUserId ?? 0, who: p.PostingUserDisplayName ?? "", subject: p.Subject ?? "", text: strip(p.Message?.Html || p.Message?.Text || ""), at: p.DatePosted ?? "" }));
+}
+export const topicUrl = (portal: string, ou: number, topicId: number) => `${originOf(portal)}/d2l/le/${ou}/discussions/topics/${topicId}/View`;
+
+/** Post to a topic (only ever after the student says yes). Through Milo's own signed-in D2L page, which has the
+ *  session's anti-forgery token. Null = couldn't (not signed in there): the caller hands the student the draft instead. */
+export async function postToTopic(portal: string, ou: number, t: Pick<DTopic, "forumId" | "topicId">, post: { subject: string; html: string; parentId?: number | null }): Promise<{ postId: number } | null> {
+  const w = await d2lPage(portal).catch(() => null);
+  if (!w) return null;
+  const path = `/d2l/api/le/${LE}/${ou}/discussions/forums/${t.forumId}/topics/${t.topicId}/posts/`;
+  const body = { ParentPostId: post.parentId ?? null, Subject: post.subject.slice(0, 200), Message: { Content: post.html, Type: "Html" }, IsAnonymous: false };
+  const r = (await w.webContents
+    .executeJavaScript(
+      `(() => { const x = localStorage.getItem("XSRF.Token") || ""; return fetch(${JSON.stringify(path)}, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json", Accept: "application/json", "X-Csrf-Token": x }, body: ${JSON.stringify(JSON.stringify(body))} }).then(async (r) => ({ s: r.status, b: await r.text() })); })()`,
+      true
+    )
+    .catch(() => null)) as { s: number; b: string } | null;
+  bb("d2l", "post", { status: r?.s ?? 0 });
+  if (!r || r.s !== 200) return null;
+  try {
+    return { postId: Number(JSON.parse(r.b).PostId) };
+  } catch {
+    return { postId: 0 };
+  }
+}
+/** Take a post back (Undo). */
+export async function deletePost(portal: string, ou: number, t: Pick<DTopic, "forumId" | "topicId">, postId: number): Promise<boolean> {
+  const w = await d2lPage(portal).catch(() => null);
+  if (!w) return false;
+  const path = `/d2l/api/le/${LE}/${ou}/discussions/forums/${t.forumId}/topics/${t.topicId}/posts/${postId}`;
+  const s = (await w.webContents
+    .executeJavaScript(`(() => { const x = localStorage.getItem("XSRF.Token") || ""; return fetch(${JSON.stringify(path)}, { method: "DELETE", credentials: "include", headers: { "X-Csrf-Token": x } }).then((r) => r.status); })()`, true)
+    .catch(() => 0)) as number;
+  return s === 200;
+}

@@ -22,7 +22,7 @@ function osa(script: string, timeout = 2500): Promise<string> {
 }
 
 /** The active tab's URL and title in a browser (empty if the browser isn't scriptable). */
-async function activeTab(app: string): Promise<{ url: string; title: string }> {
+export async function activeTab(app: string): Promise<{ url: string; title: string }> {
   const a = app.replace(/"/g, "");
   let script = "";
   if (/^safari$/i.test(a)) script = `tell application "Safari" to return (URL of current tab of front window) & "\n" & (name of current tab of front window)`;

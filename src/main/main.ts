@@ -46,7 +46,14 @@ import { feedUrl } from "./school";
 import { checkMath, isQuantitative, type MathVerdict } from "./mathcheck";
 import { askForecast, setFinalWeight } from "./grades";
 import { addScore, gradeNow, readSyllabus } from "./gradebook";
-import { calendarFeedUrl, subscribePageUrl, d2lCheck, keepSignedIn, courses as d2lCourses, dueSoon as d2lDue, gradeSheet as d2lSheet, matchCourse as d2lMatch, links as d2lLinks, SignInNeeded } from "./d2l";
+import { calendarFeedUrl, subscribePageUrl, d2lCheck, keepSignedIn, courses as d2lCourses, dueSoon as d2lDue, gradeSheet as d2lSheet, matchCourse as d2lMatch, links as d2lLinks, SignInNeeded, courses, matchCourse, discussionTopics, topicPosts, myUserId, postToTopic, deletePost, topicUrl, fileBase64, type Course, type DTopic, type DPost } from "./d2l";
+import { editPaper, undoEdits, citePaper, removeBlock } from "./writing";
+import { docIdFrom } from "./docEdit";
+import { draftDiscussion, pickTopic, requirementsOf, toHtml, type Draft } from "./discussions";
+import { readThis } from "./reading";
+import { citeLine, styleOf } from "./citations";
+import { callTool } from "./brain";
+import { models } from "./gateway";
 import { makeExam } from "./exam";
 import { transcribe } from "./ears";
 import { binaryPath, stopNative } from "./native";
@@ -70,7 +77,7 @@ import { setStudentContext, type StudentContext } from "./studentContext";
 import { checklist, problems, type FixKind, type Probe } from "./checkup";
 import { clampRect, decideTarget, namesATarget, worthFocusing } from "./areaRules";
 import { syllabusSource } from "./syllabus";
-import { frontWindow } from "./focus";
+import { activeTab, frontWindow } from "./focus";
 import { checkForUpdate, installUpdate, startUpdater, startUpdates, updateReady } from "./updater";
 import { Action, askMilo, classify, RouteCtx, makeQuiz, readBrief, setUserName, sweepPlan, watchCheck, ChatMessage, checkAnswer, locateInCrop, nextActions, setCharacter, makePractice, Mode, teachFromScreen, TeachResult } from "./brain";
 
@@ -635,6 +642,225 @@ const draftEntries = new Map<string, string>(); // draft id -> timeline entry (s
 // ---------- Papers: plan, real sources, written live into a Google Doc ----------
 let paperRunning = false;
 let paperStop = false;
+// ---------- writing help on the student's REAL work: edit, cite, discuss, read ----------
+const toOverlay = (ch: string, v: unknown) => {
+  overlay?.webContents.send(ch, v);
+  toHome(ch, v);
+};
+/** The Google Doc open in Chrome right now (the paper they mean). */
+async function openDoc(): Promise<{ id: string; title: string } | null> {
+  const t = await activeTab("Google Chrome").catch(() => ({ url: "", title: "" }));
+  const id = docIdFrom(t.url);
+  return id ? { id, title: t.title.replace(/ - Google Docs$/, "") } : null;
+}
+const NO_DOC = "Open your paper in Google Docs (in Chrome), then ask me again. If it's a Word file, open it in Google Docs first: File, then Open with Google Docs.";
+let writingBusy = false;
+ipcMain.handle("milo:paper-edit", async (_e, ask: string) => {
+  if (!googleStatus().connected) return { ok: false, connect: true, text: "Connect Google first so I can edit your doc. Say “connect Google.”" };
+  if (writingBusy) return { ok: false, text: "I'm still working on the last one. One sec." };
+  const doc = await openDoc();
+  if (!doc) return { ok: false, text: NO_DOC };
+  writingBusy = true;
+  try {
+    const clip = clipboard.readText().trim();
+    const rubric = /\brubric\b/i.test(String(ask)) && looksLikeRubric(clip) ? clip : "";
+    toOverlay("milo:writing-live", { stage: "reading", text: `Reading “${doc.title}”…` });
+    const r = await editPaper(doc.id, String(ask ?? ""), {
+      rubric,
+      live: (e, i, n) => toOverlay("milo:writing-live", { stage: "editing", text: `${e.why}`, i: i + 1, n }),
+    });
+    track("paper_edit", { ok: r.ok, n: r.ok ? r.applied.length : 0, rubric: !!rubric });
+    if (!r.ok) return r;
+    const actId = did({
+      kind: "doc",
+      title: `Edited “${r.title}”: ${r.applied.length} change${r.applied.length === 1 ? "" : "s"}`,
+      detail: r.applied.slice(0, 12).map((a) => `• ${a.why}`).join("\n"),
+      link: `https://docs.google.com/document/d/${doc.id}/edit`,
+      undo: { type: "doc_edits", data: { docId: doc.id, edits: r.applied } },
+      proof: { level: "confirmed", how: `Google Docs accepted ${r.applied.length} edits.` },
+    });
+    return { ...r, docId: doc.id, actId, rubric: !!rubric };
+  } catch (e) {
+    const m = (e as Error).message;
+    return { ok: false, text: e instanceof GoogleNotConnected ? "Connect Google again, then ask me." : /403|404/.test(m) ? "I can't open that doc with your Google account. Make sure it's yours (or shared with you to edit)." : "Something went wrong editing the doc. Try again." };
+  } finally {
+    writingBusy = false;
+  }
+});
+/** Undo some of the edits (the card's per-edit undo) or all of them. */
+ipcMain.handle("milo:paper-undo", async (_e, docId: string, edits: { find: string; replace: string; why: string }[]) => {
+  try {
+    return await undoEdits(String(docId), Array.isArray(edits) ? edits : []);
+  } catch {
+    return { ok: false, undone: 0 };
+  }
+});
+activity.onUndo("doc_edits", async (d) => void (await undoEdits(String(d.docId), (d.edits as { find: string; replace: string; why: string }[]) ?? [])));
+activity.onUndo("doc_cite", async (d) => {
+  await undoEdits(String(d.docId), (d.edits as { find: string; replace: string; why: string }[]) ?? []);
+  await removeBlock(String(d.docId), String(d.list ?? ""));
+});
+ipcMain.handle("milo:paper-cite", async (_e, ask: string) => {
+  if (!googleStatus().connected) return { ok: false, connect: true, text: "Connect Google first so I can add sources to your doc. Say “connect Google.”" };
+  if (writingBusy) return { ok: false, text: "I'm still working on the last one. One sec." };
+  const doc = await openDoc();
+  if (!doc) return { ok: false, text: NO_DOC };
+  writingBusy = true;
+  try {
+    const n = Math.max(2, Math.min(10, Number(String(ask).match(/\b(\d{1,2})\s+(?:sources|citations|references|articles)/i)?.[1] ?? 5)));
+    toOverlay("milo:writing-live", { stage: "reading", text: `Reading “${doc.title}”…` });
+    const r = await citePaper(doc.id, String(ask ?? ""), n, (t) => toOverlay("milo:writing-live", { stage: "searching", text: t }));
+    track("paper_cite", { ok: r.ok, n: r.ok ? r.sources.length : 0, placed: r.ok ? r.placed : 0 });
+    if (!r.ok) return r;
+    did({
+      kind: "doc",
+      title: `Added ${r.sources.length} sources to “${doc.title}” (${r.style})`,
+      detail: r.sources.map((s) => `• ${s.title}`).join("\n"),
+      link: `https://docs.google.com/document/d/${doc.id}/edit`,
+      undo: { type: "doc_cite", data: { docId: doc.id, edits: r.applied, list: r.listText } },
+      proof: { level: "confirmed", how: `Each source came from a database or a page that loaded. Google Docs accepted the changes.` },
+    });
+    return { ...r, docId: doc.id };
+  } catch (e) {
+    return { ok: false, text: e instanceof GoogleNotConnected ? "Connect Google again, then ask me." : "I couldn't add sources this time. Try again." };
+  } finally {
+    writingBusy = false;
+  }
+});
+
+// "Cite this in APA": the page open in Chrome -> one citation, copied.
+ipcMain.handle("milo:cite-page", async (_e, ask: string) => {
+  const tab = await activeTab("Google Chrome").catch(() => ({ url: "", title: "" }));
+  if (!/^https?:/.test(tab.url)) return { ok: false, text: "Open the page or article in Chrome, then say “cite this.”" };
+  const style = styleOf(String(ask ?? ""));
+  const page = bridgeConnected() ? ((await ext("snapshot", { max: 6000 }, 10000).catch(() => null)) as { text?: string } | null) : null;
+  type M = { title: string; authors: string[]; site: string; date: string };
+  const r = await callTool<M>(
+    {
+      model: models.fast(),
+      max_tokens: 400,
+      system: "Read the start of a web page and pull out its citation details exactly as shown. Empty strings when something isn't shown. Never guess an author or date.",
+      tools: [{ name: "meta", description: "Citation details.", input_schema: { type: "object", properties: { title: { type: "string" }, authors: { type: "array", items: { type: "string" } }, site: { type: "string" }, date: { type: "string", description: "YYYY-MM-DD, YYYY-MM or YYYY" } }, required: ["title", "authors", "site", "date"] } }],
+      tool_choice: { type: "auto" },
+      messages: [{ role: "user", content: `URL: ${tab.url}\nTab title: ${tab.title}\n\n${(page?.text ?? "").slice(0, 5000)}` }],
+    },
+    "meta"
+  );
+  const m: M = r.ok ? r.data : { title: tab.title, authors: [], site: "", date: "" };
+  const doi = (page?.text ?? "").match(/\b10\.\d{4,9}\/[^\s"<>]+/)?.[0];
+  const line = citeLine({ kind: doi ? "article" : "web", title: m.title || tab.title, authors: m.authors ?? [], site: m.site, date: m.date, doi, url: tab.url }, style);
+  clipboard.writeText(line);
+  did({ kind: "web", title: `Made a ${style} citation for “${(m.title || tab.title).slice(0, 80)}”`, detail: line, noUndo: "It's just copied to your clipboard." });
+  return { ok: true, line, style };
+});
+
+// Discussion posts: drafted from the real prompt + classmates' posts, posted only on yes.
+type DiscCtx = { portal: string; course: Course; topic: DTopic; posts: DPost[]; me: number | null; voice: string[] };
+let disc: DiscCtx | null = null;
+ipcMain.handle("milo:discussion-draft", async (_e, q: { portal: string; ask: string; change?: string; previous?: Draft; name?: string }) => {
+  const portal = String(q?.portal ?? "");
+  if (!portal) return { ok: false, text: "Connect your school's D2L first, then ask me." };
+  try {
+    if (!q.change || !disc) {
+      const all = await courses(portal);
+      // which class: named, or the one open in Chrome
+      const tab = await activeTab("Google Chrome").catch(() => ({ url: "", title: "" }));
+      const ouInTab = Number(tab.url.match(/\/d2l\/(?:le|home)\/(?:[a-z]+\/)?(\d{4,})/)?.[1] ?? tab.url.match(/ou=(\d{4,})/)?.[1] ?? 0);
+      const course = matchCourse(String(q.ask), all) ?? all.find((c) => c.id === ouInTab) ?? null;
+      if (!course) return { ok: false, text: `Which class? Say it like “do my discussion post for ${all[0]?.short ?? "bio"}.”` };
+      toOverlay("milo:writing-live", { stage: "reading", text: `Opening ${course.short} discussions…` });
+      const topics = await discussionTopics(portal, course);
+      if (!topics.length) return { ok: false, text: `${course.short} doesn't have any discussion topics I can see.` };
+      const me = await myUserId(portal);
+      // topics they already posted in + their own past posts (to write in their voice)
+      const mine = new Set<number>();
+      const voice: string[] = [];
+      const topicInTab = Number(tab.url.match(/discussions\/topics\/(\d+)/)?.[1] ?? 0);
+      const candidates = topics.filter((t) => !t.locked).slice(0, 8);
+      for (const t of candidates) {
+        const ps = await topicPosts(portal, course, t).catch(() => [] as DPost[]);
+        const own = ps.filter((p) => me && p.userId === me);
+        if (own.some((p) => !p.parentId)) mine.add(t.topicId);
+        for (const p of own) if (p.text.split(/\s+/).length > 40 && voice.length < 3) voice.push(p.text);
+      }
+      const topic = topics.find((t) => t.topicId === topicInTab) ?? pickTopic(topics, mine, String(q.ask));
+      if (!topic) return { ok: false, text: `I don't see an open discussion in ${course.short} right now.` };
+      toOverlay("milo:writing-live", { stage: "reading", text: `Reading “${topic.name}” and your classmates' posts…` });
+      const posts = await topicPosts(portal, course, topic).catch(() => [] as DPost[]);
+      disc = { portal, course, topic, posts, me, voice };
+    }
+    const d = disc!;
+    toOverlay("milo:writing-live", { stage: "writing", text: q.change ? "Rewriting it…" : "Writing your post…" });
+    const r = await draftDiscussion({ course: d.course.name, topic: d.topic, posts: d.posts, me: d.me, voice: d.voice, ask: String(q.ask ?? ""), name: q.name, change: q.change, previous: q.previous });
+    if ("error" in r) return { ok: false, text: "I couldn't write that one. Try again." };
+    const req = requirementsOf(d.topic.prompt);
+    const already = d.me ? d.posts.some((p) => p.userId === d.me && !p.parentId) : false;
+    track("discussion_draft", { replies: r.replies.length, words: r.body.split(/\s+/).length, minWords: req.minWords, voice: d.voice.length, change: !!q.change });
+    return { ok: true, draft: r, course: d.course.short, topic: d.topic.name, prompt: d.topic.prompt.slice(0, 600), due: d.topic.due ?? d.topic.end, req, already, url: topicUrl(d.portal, d.course.id, d.topic.topicId), voice: d.voice.length > 0 };
+  } catch (e) {
+    if (e instanceof SignInNeeded) return { ok: false, signin: true, text: "Your D2L sign-in ran out. Sign in to D2L in Chrome and ask me again." };
+    return { ok: false, text: "I couldn't open the discussion. Try again." };
+  }
+});
+ipcMain.handle("milo:discussion-post", async (_e, q: { subject: string; body: string; replies: { parentId: number; to: string; body: string }[] }) => {
+  const d = disc;
+  if (!d) return { ok: false, text: "Ask me to draft it again first." };
+  const posted: number[] = [];
+  const main = await postToTopic(d.portal, d.course.id, d.topic, { subject: String(q.subject), html: toHtml(String(q.body)) });
+  if (!main) {
+    // couldn't post from here: open the topic in Chrome with the post ready to paste
+    clipboard.writeText(String(q.body));
+    void ext("new_tab", { url: topicUrl(d.portal, d.course.id, d.topic.topicId) }, 15000).catch(() => shell.openExternal(topicUrl(d.portal, d.course.id, d.topic.topicId)));
+    return { ok: false, pasted: true, text: "I opened the discussion and copied your post. Click “Start a new thread”, paste it (⌘V) and post." };
+  }
+  posted.push(main.postId);
+  for (const rp of (q.replies ?? []).slice(0, 5)) {
+    const r = await postToTopic(d.portal, d.course.id, d.topic, { subject: `RE: ${String(q.subject).slice(0, 140)}`, html: toHtml(rp.body), parentId: rp.parentId });
+    if (r) posted.push(r.postId);
+  }
+  did({
+    kind: "web",
+    title: `Posted in ${d.course.short}: “${d.topic.name}”${posted.length > 1 ? ` + ${posted.length - 1} repl${posted.length > 2 ? "ies" : "y"}` : ""}`,
+    detail: String(q.body).slice(0, 400),
+    link: topicUrl(d.portal, d.course.id, d.topic.topicId),
+    undo: { type: "discussion_delete", data: { portal: d.portal, ou: d.course.id, forumId: d.topic.forumId, topicId: d.topic.topicId, ids: posted } },
+    proof: { level: "confirmed", how: `D2L saved ${posted.length} post${posted.length > 1 ? "s" : ""} and gave each an ID.` },
+  });
+  track("discussion_post", { posts: posted.length });
+  return { ok: true, posted: posted.length, url: topicUrl(d.portal, d.course.id, d.topic.topicId) };
+});
+activity.onUndo("discussion_delete", async (d) => {
+  for (const id of (d.ids as number[]) ?? []) await deletePost(String(d.portal), Number(d.ou), { forumId: Number(d.forumId), topicId: Number(d.topicId) }, Number(id));
+});
+
+// Readings -> notes, flashcards and a quiz
+ipcMain.handle("milo:read-this", async (_e, q: { path?: string; ask: string; portal?: string }) => {
+  const progress = (t: string) => toOverlay("milo:writing-live", { stage: "reading", text: t });
+  try {
+    if (q?.path) return await readThis({ file: String(q.path) }, String(q.ask ?? ""), progress);
+    // what's open: a PDF in Chrome (D2L or anywhere), or a web page's text
+    const tab = await activeTab("Google Chrome").catch(() => ({ url: "", title: "" }));
+    const portal = String(q?.portal ?? "");
+    const isPdf = /\.pdf(\?|#|$)/i.test(tab.url) || /\/content\/enforced\/|viewContent|\/d2l\/le\/content\/.*\/viewContent/i.test(tab.url);
+    if (isPdf) {
+      progress("Getting the file…");
+      let b64: string | null = null;
+      if (portal && tab.url.startsWith(new URL(/^https?:/.test(portal) ? portal : `https://${portal}`).origin)) b64 = await fileBase64(portal, tab.url, 120e6).catch(() => null);
+      if (!b64) {
+        const r = await fetch(tab.url, { signal: AbortSignal.timeout(30000) }).catch(() => null);
+        if (r?.ok && /pdf/i.test(r.headers.get("content-type") ?? "")) b64 = Buffer.from(await r.arrayBuffer()).toString("base64");
+      }
+      if (b64) return await readThis({ pdf: new Uint8Array(Buffer.from(b64, "base64")), name: tab.title || "the reading" }, String(q.ask ?? ""), progress);
+    }
+    const page = bridgeConnected() ? ((await ext("snapshot", { max: 400000 }, 15000).catch(() => null)) as { text?: string; title?: string } | null) : null;
+    if (page?.text && page.text.length > 400) return await readThis({ text: page.text, name: page.title || tab.title }, String(q.ask ?? ""), progress);
+    return { ok: false, text: "Drop the reading on me (a PDF or Word file), or open it in Chrome and say “read this.”" };
+  } catch (e) {
+    bb("reading", "failed", { error: (e as Error).message.slice(0, 120) });
+    return { ok: false, text: "I couldn't read that. Try again." };
+  }
+});
+
 ipcMain.handle("milo:paper-stop", () => (paperStop = true));
 ipcMain.handle("milo:paper", async (_e, request: string, studentName?: string) => {
   const ask = parsePaperAsk(String(request ?? ""));
