@@ -18,9 +18,15 @@ describe("finding the paper", () => {
     expect(r.pick?.id).toBe("b");
   });
   it("nothing named = the tab in front", () => expect(pickDoc([D("a", "Lab Report"), D("b", "History Essay", { active: true, frontWindow: true })], "edit my paper").pick?.id).toBe("b"));
-  it("can't tell = asks with choices", () => {
+  it("a doc in front in Safari AND Chrome: the browser you were last in wins", () => {
+    const tabs = [D("a", "Milo test 5:37", { active: true, frontWindow: true, browser: "Safari" }), D("b", "Milo test 5:37", { active: true, frontWindow: true })];
+    expect(pickDoc(tabs, "look through my essay", ["Milo", "Google Chrome", "Safari", "Finder"]).pick?.id).toBe("b");
+    expect(pickDoc(tabs, "look through my essay", ["Safari", "Google Chrome"]).pick?.id).toBe("a");
+  });
+  it("two browsers, no idea which is in front = asks", () => {
     const r = pickDoc([D("a", "Lab Report", { active: true, frontWindow: true, browser: "Safari" }), D("b", "History Essay", { active: true, frontWindow: true })], "edit my paper");
-    expect(r.pick?.id).toBe("a"); // front tab of the first front window still decides
+    expect(r.pick).toBeNull();
+    expect(r.choices.length).toBe(2);
   });
   it("two background docs, nothing named = asks", () => {
     const r = pickDoc([D("a", "Lab Report"), D("b", "History Essay")], "edit my paper");

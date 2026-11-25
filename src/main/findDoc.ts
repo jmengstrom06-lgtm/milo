@@ -45,6 +45,21 @@ export function tabScript(app: string): string {
 })()`;
 }
 
+/** Apps with windows on screen, front to back (macOS's real stacking order), so "the doc in front" means the
+ *  browser you were last in, not whichever browser happens to be checked first. */
+const ORDER_SCRIPT = `(() => {
+  ObjC.import("CoreGraphics");
+  const list = ObjC.castRefToObject($.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly | $.kCGWindowListExcludeDesktopElements, $.kCGNullWindowID));
+  const out = [];
+  for (let i = 0; i < list.count; i++) {
+    const w = list.objectAtIndex(i);
+    if (ObjC.unwrap(w.objectForKey("kCGWindowLayer")) !== 0) continue;
+    const n = ObjC.unwrap(w.objectForKey("kCGWindowOwnerName"));
+    if (n && out.indexOf(n) < 0) out.push(n);
+  }
+  return out.join("\\n");
+})()`;
+
 /** Any window, in any app, whose title says Google Docs (the doc is open somewhere we can't read tabs from,
  *  like a browser built into another app). Returns "App: title" lines. */
 const WINDOW_SCRIPT = `(() => {
@@ -72,7 +87,7 @@ export function parseTabs(browser: string, out: string): DocTab[] {
 
 const STOP = new Set("milo hey please the and that this with into open opened google docs doc document paper essay draft screen bottom left right top corner look through find grammar mistakes make sound better fix edit want have from about called named it's its my your just could would can you".split(" "));
 /** Which doc they mean. Named words in the title win, then the tab in front, then the only one. (pure) */
-export function pickDoc(tabs: DocTab[], said: string): { pick: DocTab | null; choices: DocTab[]; why: string } {
+export function pickDoc(tabs: DocTab[], said: string, order: string[] = []): { pick: DocTab | null; choices: DocTab[]; why: string } {
   const uniq = [...new Map(tabs.map((t) => [t.id, t])).values()];
   if (!uniq.length) return { pick: null, choices: [], why: "none open" };
   if (uniq.length === 1) return { pick: uniq[0], choices: uniq, why: "only one" };
@@ -81,8 +96,17 @@ export function pickDoc(tabs: DocTab[], said: string): { pick: DocTab | null; ch
   const ranked = [...uniq].sort((a, b) => score(b) - score(a));
   if (score(ranked[0]) > 0 && score(ranked[0]) > score(ranked[1])) return { pick: ranked[0], choices: uniq, why: "named" };
   const named = score(ranked[0]) > 0 ? ranked.filter((t) => score(t) === score(ranked[0])) : uniq;
-  const front = named.find((t) => t.active && t.frontWindow) ?? (named.filter((t) => t.active).length === 1 ? named.find((t) => t.active) : undefined);
-  if (front) return { pick: front, choices: uniq, why: "front tab" };
+  // the tab you're looking at in each browser's front window; if several browsers have one, the browser most in front
+  const rank = (b: string) => {
+    const i = order.findIndex((o) => b.startsWith(o) || o.startsWith(b.replace(/ \(extension\)$/, "")));
+    return i < 0 ? 999 : i;
+  };
+  const fronts = named.filter((t) => t.active && t.frontWindow).sort((a, b) => rank(a.browser) - rank(b.browser));
+  if (fronts.length === 1 || (fronts.length > 1 && rank(fronts[0].browser) < rank(fronts[1].browser))) return { pick: fronts[0], choices: uniq, why: "front tab" };
+  if (!fronts.length) {
+    const actives = named.filter((t) => t.active);
+    if (actives.length === 1) return { pick: actives[0], choices: uniq, why: "front tab" };
+  }
   return { pick: null, choices: named, why: "several" };
 }
 
@@ -107,7 +131,10 @@ export async function findDoc(said: string): Promise<{ doc: DocTab | null; choic
   }
   const clipId = docIdFrom(clipboard.readText().trim());
   if (clipId && !tabs.some((x) => x.id === clipId)) tabs.push({ id: clipId, title: "the doc link you copied", browser: "clipboard", frontWindow: false, active: false });
-  const r = pickDoc(tabs, said);
+  const ord = await osa(ORDER_SCRIPT, 3000);
+  if (ord.err) errors["order"] = ord.err;
+  const order = ord.out.split("\n").filter(Boolean);
+  const r = pickDoc(tabs, said, order);
   // Nothing in a browser: is a Google Doc open somewhere else (another app's built-in browser)? Say where.
   let elsewhere: string | undefined;
   if (!r.pick && !r.choices.length) {
@@ -116,6 +143,6 @@ export async function findDoc(said: string): Promise<{ doc: DocTab | null; choic
     const first = w.out.split("\n").find(Boolean);
     if (first) elsewhere = first.split("\t")[0];
   }
-  bb("writing", "doc_lookup", { found: tabs.length, why: r.why, pick: r.pick?.title?.slice(0, 60) ?? null, browsers: [...new Set(tabs.map((t) => t.browser))], elsewhere: elsewhere ?? null, errors });
+  bb("writing", "doc_lookup", { found: tabs.length, why: r.why, pick: r.pick?.title?.slice(0, 60) ?? null, browsers: [...new Set(tabs.map((t) => t.browser))], order: order.slice(0, 6), elsewhere: elsewhere ?? null, errors });
   return { doc: r.pick, choices: r.choices, why: r.why, elsewhere };
 }
