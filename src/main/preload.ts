@@ -212,7 +212,7 @@ contextBridge.exposeInMainWorld("milo", {
   },
   paper: (request: string, name?: string) => ipcRenderer.invoke("milo:paper", request, name),
   paperStop: () => ipcRenderer.invoke("milo:paper-stop"),
-  paperEdit: (ask: string) => ipcRenderer.invoke("milo:paper-edit", ask),
+  paperEdit: (ask: string, docId?: string) => ipcRenderer.invoke("milo:paper-edit", ask, docId),
   paperUndo: (docId: string, edits: unknown[]) => ipcRenderer.invoke("milo:paper-undo", docId, edits),
   paperCite: (ask: string) => ipcRenderer.invoke("milo:paper-cite", ask),
   citePage: (ask: string) => ipcRenderer.invoke("milo:cite-page", ask),

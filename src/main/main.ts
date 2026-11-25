@@ -22,6 +22,7 @@ import { log as bb, saveClip, timer, LOG_DIR, LOG_FILE } from "./blackbox";
 import { closeFlux, fluxAvailable, forceEndTurn, onFlux, openFlux, sendAudio } from "./flux";
 import { macSpeak } from "./macvoice";
 import { bridgeConnected, call as ext, registerNativeHost, startBridge } from "./bridge";
+import { findDoc } from "./findDoc";
 import { runWebTask } from "./webagent";
 import { registerKit } from "./kitipc";
 import { registerLibrary } from "./library";
@@ -648,18 +649,23 @@ const toOverlay = (ch: string, v: unknown) => {
   toHome(ch, v);
 };
 /** The Google Doc open in Chrome right now (the paper they mean). */
-async function openDoc(): Promise<{ id: string; title: string } | null> {
-  const t = await activeTab("Google Chrome").catch(() => ({ url: "", title: "" }));
-  const id = docIdFrom(t.url);
-  return id ? { id, title: t.title.replace(/ - Google Docs$/, "") } : null;
+/** The doc they mean: any Google Doc open in any browser (every window and tab), or a doc link they copied. */
+async function openDoc(said = "", picked?: string): Promise<{ id: string; title: string } | { ask: string; docs: { id: string; title: string }[] } | null> {
+  if (picked) return { id: picked, title: "your doc" };
+  const r = await findDoc(said);
+  if (r.doc) return { id: r.doc.id, title: r.doc.title };
+  if (r.choices.length > 1) return { ask: `You have ${r.choices.length} Google Docs open. Which one?`, docs: r.choices.slice(0, 4).map((c) => ({ id: c.id, title: c.title })) };
+  return null;
 }
-const NO_DOC = "Open your paper in Google Docs (in Chrome), then ask me again. If it's a Word file, open it in Google Docs first: File, then Open with Google Docs.";
+const NO_DOC = "I don't see a Google Doc open in Chrome or Safari. Open your paper in Google Docs, or copy its link, then ask me again. (A Word file: open it in Google Docs first.)";
 let writingBusy = false;
-ipcMain.handle("milo:paper-edit", async (_e, ask: string) => {
+ipcMain.handle("milo:paper-edit", async (_e, ask: string, picked?: string) => {
   if (!googleStatus().connected) return { ok: false, connect: true, text: "Connect Google first so I can edit your doc. Say “connect Google.”" };
   if (writingBusy) return { ok: false, text: "I'm still working on the last one. One sec." };
-  const doc = await openDoc();
-  if (!doc) return { ok: false, text: NO_DOC };
+  const found = await openDoc(String(ask ?? ""), typeof picked === "string" ? picked : undefined);
+  if (!found) return { ok: false, text: NO_DOC };
+  if ("ask" in found) return { ok: false, text: found.ask, docs: found.docs };
+  const doc = found;
   writingBusy = true;
   try {
     const clip = clipboard.readText().trim();
@@ -703,8 +709,10 @@ activity.onUndo("doc_cite", async (d) => {
 ipcMain.handle("milo:paper-cite", async (_e, ask: string) => {
   if (!googleStatus().connected) return { ok: false, connect: true, text: "Connect Google first so I can add sources to your doc. Say “connect Google.”" };
   if (writingBusy) return { ok: false, text: "I'm still working on the last one. One sec." };
-  const doc = await openDoc();
-  if (!doc) return { ok: false, text: NO_DOC };
+  const found = await openDoc(String(ask ?? ""));
+  if (!found) return { ok: false, text: NO_DOC };
+  if ("ask" in found) return { ok: false, text: `${found.ask} Click it so it's in front, then ask me again.` };
+  const doc = found;
   writingBusy = true;
   try {
     const n = Math.max(2, Math.min(10, Number(String(ask).match(/\b(\d{1,2})\s+(?:sources|citations|references|articles)/i)?.[1] ?? 5)));
