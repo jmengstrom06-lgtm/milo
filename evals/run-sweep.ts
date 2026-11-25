@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import dotenv from "dotenv";
 import { chromium, type Page } from "playwright";
-import { sweepPlan } from "../src/main/brain";
+import { findOption, sweepPlan } from "../src/main/brain";
 import { sweepCore, sweepSummary } from "../src/main/sweepCore";
 import { SHEETS, renderSheet } from "./worksheets";
 import { HARD } from "./hardSheets";
@@ -28,7 +28,7 @@ async function plan(page: Page, skip: string[], ask: string) {
       const has = q.input?.kind !== "none" && q.input?.x !== undefined && q.input?.y !== undefined;
       return { label: String(q.label ?? ""), answer: q.answer, kind: has ? q.input.kind : "none", x: q.input?.x, y: q.input?.y, later: has && (q.input.y ?? 0) > H - 70 };
     });
-  return { ok: true as const, items, more: !!r.data.more_below };
+  return { ok: true as const, items, more: !!r.data.more_below, next: r.data.next_button };
 }
 
 async function fill(page: Page, it: Item) {
@@ -36,8 +36,15 @@ async function fill(page: Page, it: Item) {
   await page.mouse.click(it.x, it.y);
   await page.waitForTimeout(it.kind === "type" ? 100 : 180);
   if (it.kind === "select") {
-    await page.keyboard.type(it.answer);
-    await page.keyboard.press("Enter");
+    // the list is open now: find the option on screen and click it (real menus and custom-drawn lists alike)
+    await page.waitForTimeout(250);
+    const b64 = (await page.screenshot({ type: "jpeg", quality: 85 })).toString("base64");
+    const at = await findOption(b64, { width: W, height: H }, it.answer);
+    if (at) await page.mouse.click(at.x, at.y);
+    else {
+      await page.keyboard.type(it.answer);
+      await page.keyboard.press("Enter");
+    }
   }
   if (it.kind === "type") {
     await page.keyboard.press("ControlOrMeta+A");
@@ -61,7 +68,9 @@ async function main() {
   for (const s of sheets) {
     const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
     await page.setContent(s.html, { waitUntil: "load" });
-    await page.waitForTimeout(300); // frames (srcdoc) settle
+    // embedded frames (srcdoc) load after the page: wait until every frame has its questions
+    await page.waitForFunction(() => [...document.querySelectorAll("iframe")].every((f) => f.contentDocument?.readyState === "complete" && !!f.contentDocument.body?.children.length), null, { timeout: 5000 }).catch(() => {});
+    await page.waitForTimeout(300);
     const t0 = Date.now();
     const out = await sweepCore<Item>(
       {
@@ -80,6 +89,11 @@ async function main() {
           await page.mouse.wheel(0, -30000);
           await page.waitForTimeout(250);
         },
+        next: async (at) => {
+          const p = at as { x: number; y: number };
+          await page.mouse.click(p.x, p.y);
+          await page.waitForTimeout(500);
+        },
         stopped: () => false,
       },
       { fill: true }
@@ -87,7 +101,7 @@ async function main() {
     const g = (await page.evaluate("window.__grade()")) as { right: number; total: number; wrong: string[]; blank: string[] };
     right += g.right;
     total += g.total;
-    const said = sweepSummary(out, true);
+    const said = out.error ? `ERROR: ${out.error}` : out.empty ? "EMPTY: found no questions" : sweepSummary(out, true);
     // honest: if anything is blank or wrong, Milo must not have said "All filled"
     const honest = g.blank.length === 0 || !/^Done\. All/.test(said);
     const mark = g.right === g.total ? "✓" : "✗";

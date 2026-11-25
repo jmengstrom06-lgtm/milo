@@ -60,7 +60,7 @@ import { activateApp, chromeWindowCount, click, scrollAt, ensureBrowser, resolve
 import { plan } from "./quick";
 import { research } from "./research";
 import { buildTool } from "./builder";
-import { askScreen, locateTarget, suggestActions, preflightCheck, readAiPolicy } from "./brain";
+import { askScreen, findOption, locateTarget, suggestActions, preflightCheck, readAiPolicy } from "./brain";
 import { createTray, extensionDirs, firstRunDefaults, loadKeys } from "./appshell";
 import { isPaused, PAUSED_TEXT, pauseState, setPause } from "./pause";
 import { looksLikeRubric, prefs, setPrefs, type Prefs } from "./prefs";
@@ -1149,7 +1149,8 @@ ipcMain.handle("milo:sweep-plan", async (_e, skip: string[], extra?: string, nam
         later: hasPt && bounds.y + q.input.y! / k > bottom,
       };
     });
-  return { ok: true, items, more: !!r.data.more_below };
+  const nb = r.data.next_button;
+  return { ok: true, items, more: !!r.data.more_below, next: nb && typeof nb.x === "number" ? { x: bounds.x + nb.x / k, y: bounds.y + nb.y / k } : undefined };
 });
 
 ipcMain.handle(
@@ -1165,10 +1166,21 @@ ipcMain.handle(
       await click(item.screen.x, item.screen.y);
       await sleep(item.kind === "type" ? 150 : item.kind === "select" ? 350 : 220); // let a radio/checkbox register before moving on
       if (item.kind === "select") {
-        // an open dropdown jumps to what you type; Return picks it
-        await typeText(item.answer);
-        await sleep(150);
-        await pressKeys("return");
+        // the list is open: find the option on screen and click it (real menus and custom-drawn lists alike)
+        const cap = await captureScreen();
+        let at: { x: number; y: number } | null = null;
+        if (cap.ok) {
+          const small = toJpeg(cap.shot.full, 1568);
+          const p = await findOption(small.b64, small.size, item.answer).catch(() => null);
+          const k = small.k * cap.shot.pxPerPt;
+          if (p) at = { x: cap.shot.bounds.x + p.x / k, y: cap.shot.bounds.y + p.y / k };
+        }
+        if (at) await click(at.x, at.y);
+        else {
+          await typeText(item.answer); // an open menu jumps to what you type; Return picks it
+          await sleep(150);
+          await pressKeys("return");
+        }
       }
       if (item.kind === "type") {
         await pressKeys("cmd+a"); // replace anything already in the box

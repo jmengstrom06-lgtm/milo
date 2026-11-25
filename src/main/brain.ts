@@ -696,6 +696,12 @@ const SWEEP_TOOL = {
         },
       },
       more_below: { type: "boolean", description: "True if the page clearly continues below the visible area (more questions off screen)." },
+      next_button: {
+        type: "object",
+        description: "Only if more questions are on ANOTHER page reached by a button like Next, Continue, Next page or →: the center of that button. Never a Submit, Finish, Turn in, Save and submit or Done button. Omit otherwise.",
+        properties: { x: { type: "number" }, y: { type: "number" } },
+        required: ["x", "y"],
+      },
     },
     required: ["questions", "more_below"],
   },
@@ -707,13 +713,16 @@ export async function sweepPlan(
   skip: string[],
   extra = "",
   name = ""
-): Promise<ApiOk<{ questions: SweepItem[]; more_below: boolean }> | ApiErr> {
+): Promise<ApiOk<{ questions: SweepItem[]; more_below: boolean; next_button?: { x: number; y: number } }> | ApiErr> {
   return callTool(
     {
       max_tokens: 6000,
       system: `${persona()}
 You are completing a student's worksheet that is open on their screen. Find every visible question that still needs an answer, solve each one carefully, and say exactly where its answer goes. Coordinates are pixels in the screenshot. Be precise with input points: the center of the empty field, or the center of the correct option's radio button/checkbox.
 Skip questions that already have an answer filled in (typed text, or a selected radio/checkbox).${skip.length ? ` Also skip these, already done: ${skip.join(", ")}.` : ""}
+Only include a question when its answer box (and for multiple choice, the correct option) is fully visible right now. If it is cut off at the edge of the screen or of a scrolling box (an embedded quiz frame, a panel), leave it out and set more_below true: Milo scrolls and gets it next.
+If one answer is split across boxes (a fraction's top and bottom box, hours and minutes, a table row), list one item per box ("2 top", "2 bottom"). Math answer boxes take plain typing: x^7, 5/6, sqrt(2).
+Custom-drawn bubbles and checkboxes (circles or squares next to options) are kind=choose at the circle/square. A box that says "Choose" with a list behind it is kind=select.
 Fields like Name, Date or Class at the top count as questions ONLY if the student asked for them or the field is required: use label "Name" etc. and the value they gave${name ? ` (the student's name is ${name})` : ""}.${extra ? `
 What the student asked: "${extra}". If they say an answer is wrong or name questions to redo, include those even if they are filled in, and re-solve them carefully.` : ""}`,
       tools: [SWEEP_TOOL],
@@ -1269,4 +1278,38 @@ If they did NOT say which one ("my math problem", "this", "the problem on my scr
     },
     TARGET_TOOL.name
   );
+}
+
+// ---------------------------------------------------------------------------------------------
+// A dropdown is open: where is the option they want? (works for real menus and custom-drawn lists)
+const OPTION_TOOL = {
+  name: "option",
+  description: "Where the wanted option is in the open list on screen.",
+  input_schema: {
+    type: "object",
+    properties: { found: { type: "boolean" }, x: { type: "number" }, y: { type: "number" } },
+    required: ["found"],
+  },
+};
+export async function findOption(jpegBase64: string, size: { width: number; height: number }, text: string): Promise<{ x: number; y: number } | null> {
+  const r = await callTool<{ found: boolean; x?: number; y?: number }>(
+    {
+      model: models.fast(),
+      max_tokens: 200,
+      system: "A dropdown list is open on the student's screen. Find the option whose text matches what they want and give the pixel center of it. found=false if no open list shows it.",
+      tools: [OPTION_TOOL],
+      tool_choice: { type: "auto" },
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: jpegBase64 } },
+            { type: "text", text: `Screenshot is ${size.width}x${size.height}. Option wanted: "${text.slice(0, 120)}"` },
+          ],
+        },
+      ],
+    },
+    OPTION_TOOL.name
+  );
+  return r.ok && r.data.found && typeof r.data.x === "number" && typeof r.data.y === "number" ? { x: r.data.x, y: r.data.y } : null;
 }

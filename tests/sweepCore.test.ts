@@ -84,3 +84,37 @@ describe("worksheet sweep core", () => {
     expect(o.empty).toBe(true);
   });
 });
+
+describe("one question per page", () => {
+  it("answers each page, presses Next, never past the last", async () => {
+    const N = 5;
+    let page = 0;
+    const filled = new Set<number>();
+    let nexts = 0;
+    const o = await sweepCore(
+      {
+        plan: async () => ({
+          ok: true as const,
+          items: filled.has(page) ? [] : [{ label: String(page + 1), answer: "x", kind: "choose" as const }],
+          more: false,
+          next: page < N - 1 ? { x: 1, y: 1 } : undefined, // the last page shows Finish, not Next
+        }),
+        fill: async () => (filled.add(page), true),
+        scroll: async () => false,
+        top: async () => {},
+        next: async () => {
+          nexts++;
+          page++;
+        },
+        stopped: () => false,
+      },
+      { fill: true }
+    );
+    expect(filled.size).toBe(N);
+    expect(nexts).toBe(N - 1);
+    expect(o.missed).toEqual([]);
+  });
+  it("nothing found is never 'all filled'", () => {
+    expect(sweepSummary({ results: [], missed: [] }, true)).toMatch(/didn't find any/);
+  });
+});
