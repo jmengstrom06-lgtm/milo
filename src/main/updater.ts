@@ -1,10 +1,18 @@
 // Auto-updates: every fix reaches students on its own.
-// Checks shortly after launch and every 4 hours; downloads quietly; installs the next time Milo quits,
-// or right away if the student taps "Restart to update". Installed (signed) app only: macOS refuses
-// to install updates into an unsigned app, so until signing is on this just logs what it would do.
+// Milo isn't signed with an Apple Developer ID yet, and macOS's built-in updater (Squirrel) refuses to update
+// unsigned apps. So Milo updates himself the same way the one-line installer does: check GitHub for a newer
+// release, download the zip quietly, and swap the app in /Applications the next time he quits (or right away
+// on "Restart to update"). Checks shortly after launch and every 4 hours.
 
-import { app, ipcMain, type BrowserWindow } from "electron";
+import { app, ipcMain, net, type BrowserWindow } from "electron";
+import { spawn, execFile } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { log as bb } from "./blackbox";
+
+const REPO = "jmengstrom06-lgtm/milo";
+const ASSET = "Milo-mac-arm64.zip";
 
 // Hooks for the menu-bar frog (appshell.ts): show "Restart to update", check on demand.
 let readyVersion: string | null = null;
@@ -18,58 +26,113 @@ export function startUpdater(fn: () => void) {
   onChange = fn;
 }
 
+/** "0.2.166" > "0.2.160"? (pure) */
+export function newer(a: string, b: string): boolean {
+  const x = a.replace(/^v/, "").split(".").map(Number);
+  const y = b.replace(/^v/, "").split(".").map(Number);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+  return false;
+}
+
+/** The shell step that runs after Milo quits: wait for him to exit, swap the app, keep the old one if anything fails. */
+export const SWAP_SCRIPT = `#!/bin/bash
+PID="$1"; NEW="$2"; APP="$3"; RELAUNCH="$4"
+for i in $(seq 1 150); do kill -0 "$PID" 2>/dev/null || break; sleep 0.2; done
+rm -rf "$APP.old"
+if mv "$APP" "$APP.old" && ditto "$NEW" "$APP"; then
+  rm -rf "$APP.old"
+else
+  rm -rf "$APP"; mv "$APP.old" "$APP"
+fi
+xattr -dr com.apple.quarantine "$APP" >/dev/null 2>&1
+if [ "$RELAUNCH" = "1" ]; then open "$APP"; fi
+`;
+
+const run = (cmd: string, args: string[]) => new Promise<void>((res, rej) => execFile(cmd, args, (e) => (e ? rej(e) : res())));
+
 export function startUpdates(win: BrowserWindow) {
-  if (!app.isPackaged || process.env.MILO_NO_UPDATES === "1") return;
-  // loaded lazily so the dev build never needs it
-  type Info = { version: string };
-  type Updater = {
-    autoDownload: boolean;
-    autoInstallOnAppQuit: boolean;
-    logger: unknown;
-    on(ev: "update-available" | "update-downloaded", fn: (i: Info) => void): void;
-    on(ev: "update-not-available", fn: () => void): void;
-    on(ev: "error", fn: (e: Error) => void): void;
-    checkForUpdates(): Promise<unknown>;
-    quitAndInstall(silent?: boolean, forceRunAfter?: boolean): void;
-  };
-  let autoUpdater: Updater;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    autoUpdater = require("electron-updater").autoUpdater as Updater;
-  } catch {
-    bb("update", "missing_package", {});
-    return;
-  }
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.logger = null;
-  autoUpdater.on("update-available", (i) => bb("update", "available", { version: i.version }));
-  autoUpdater.on("update-not-available", () => bb("update", "none", {}));
-  autoUpdater.on("update-downloaded", (i) => {
-    bb("update", "ready", { version: i.version });
-    readyVersion = i.version;
-    onChange();
-    win.webContents.send("milo:update-ready", i.version);
-  });
-  autoUpdater.on("error", (e) => bb("update", "error", { error: String(e?.message ?? e).slice(0, 300) }));
-  ipcMain.handle("milo:update-install", () => {
-    bb("update", "install_now", {});
-    setImmediate(() => autoUpdater.quitAndInstall(false, true));
-  });
-  installNow = () => {
-    bb("update", "install_now", { from: "menu" });
-    setImmediate(() => autoUpdater.quitAndInstall(false, true));
-  };
-  checkNow = async () => {
-    if (readyVersion) return `Version ${readyVersion} is ready. Pick "Restart to update".`;
+  if (!app.isPackaged || process.env.MILO_NO_UPDATES === "1" || process.platform !== "darwin") return;
+  const appPath = path.resolve(process.execPath, "..", "..", ".."); // /Applications/Milo.app
+  const work = path.join(os.tmpdir(), "milo-update");
+  let staged: string | null = null; // unzipped new Milo.app, ready to swap in
+  let busy = false;
+  let swapping = false;
+
+  const canSwap = () => {
     try {
-      await autoUpdater.checkForUpdates();
-      return "Checking… I'll let you know if there's a new Milo.";
-    } catch (e) {
-      return `Couldn't check for updates: ${String((e as Error)?.message ?? e).slice(0, 80)}`;
+      fs.accessSync(path.dirname(appPath), fs.constants.W_OK);
+      fs.accessSync(appPath, fs.constants.W_OK);
+      return /\.app$/.test(appPath);
+    } catch {
+      return false;
     }
   };
-  const check = () => autoUpdater.checkForUpdates().catch((e) => bb("update", "check_failed", { error: String(e?.message ?? e).slice(0, 200) }));
-  setTimeout(check, 45e3);
-  setInterval(check, 4 * 3600e3);
+
+  async function check(manual = false): Promise<string> {
+    if (readyVersion) return `Version ${readyVersion} is ready. Pick "Restart to update".`;
+    if (busy) return "Already downloading the new Milo…";
+    busy = true;
+    try {
+      const r = await net.fetch(`https://api.github.com/repos/${REPO}/releases/latest`, { headers: { Accept: "application/vnd.github+json", "User-Agent": "Milo" } });
+      if (!r.ok) throw new Error(`GitHub said ${r.status}`);
+      const rel = (await r.json()) as { tag_name: string; assets: { name: string; browser_download_url: string }[] };
+      const latest = rel.tag_name.replace(/^v/, "");
+      if (!newer(latest, app.getVersion())) {
+        bb("update", "none", { have: app.getVersion(), latest });
+        return manual ? `You're on the newest Milo (${app.getVersion()}).` : "";
+      }
+      if (!canSwap()) {
+        bb("update", "cant_write", { appPath });
+        return "There's a new Milo, but I can't update myself in this folder. Run the installer once.";
+      }
+      const asset = rel.assets.find((x) => x.name === ASSET);
+      if (!asset) throw new Error("no Mac download in the release");
+      bb("update", "available", { version: latest });
+      fs.rmSync(work, { recursive: true, force: true });
+      fs.mkdirSync(work, { recursive: true });
+      const zip = path.join(work, "Milo.zip");
+      const d = await net.fetch(asset.browser_download_url);
+      if (!d.ok) throw new Error(`download ${d.status}`);
+      fs.writeFileSync(zip, Buffer.from(await d.arrayBuffer()));
+      const out = path.join(work, "out");
+      await run("/usr/bin/ditto", ["-x", "-k", zip, out]);
+      const appNew = path.join(out, "Milo.app");
+      const plist = fs.readFileSync(path.join(appNew, "Contents", "Info.plist"), "utf8");
+      if (!plist.includes(`<string>${latest}</string>`)) throw new Error("downloaded app has the wrong version");
+      staged = appNew;
+      readyVersion = latest;
+      bb("update", "ready", { version: latest });
+      onChange();
+      win.webContents.send("milo:update-ready", latest);
+      return `Version ${latest} is ready. Pick "Restart to update".`;
+    } catch (e) {
+      bb("update", "check_failed", { error: String((e as Error)?.message ?? e).slice(0, 200) });
+      return manual ? `Couldn't check for updates: ${String((e as Error)?.message ?? e).slice(0, 80)}` : "";
+    } finally {
+      busy = false;
+    }
+  }
+
+  /** Hand the swap to a small script that runs after Milo exits. */
+  function swap(relaunch: boolean) {
+    if (!staged || swapping) return false;
+    swapping = true;
+    const script = path.join(work, "swap.sh");
+    fs.writeFileSync(script, SWAP_SCRIPT, { mode: 0o755 });
+    const child = spawn("/bin/bash", [script, String(process.pid), staged, appPath, relaunch ? "1" : "0"], { detached: true, stdio: "ignore" });
+    child.unref();
+    bb("update", "install", { version: readyVersion, relaunch });
+    return true;
+  }
+
+  ipcMain.handle("milo:update-install", () => {
+    if (swap(true)) setImmediate(() => app.quit());
+  });
+  installNow = () => {
+    if (swap(true)) setImmediate(() => app.quit());
+  };
+  checkNow = () => check(true);
+  app.on("will-quit", () => void swap(false)); // installs the next time Milo quits
+  setTimeout(() => void check(), 45e3);
+  setInterval(() => void check(), 4 * 3600e3);
 }
