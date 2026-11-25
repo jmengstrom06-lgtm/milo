@@ -23,6 +23,7 @@ import { checkupLine, type CheckItem } from "../main/checkup";
 import { sweepCore, sweepSummary } from "../main/sweepCore";
 import { CLEAR_AREA, isSure, LOCKIN_START, PICK_AREA, pickSpoken } from "./exact";
 import AreaPicker, { AreaFlash } from "./AreaPicker";
+import { DiscussionCard, EditsCard, SourcesCard } from "./WritingCards";
 import Onboarding, { setupDone } from "./Onboarding";
 import ActivityPanel from "./ActivityPanel";
 import FeedbackPanel from "./FeedbackPanel";
@@ -152,6 +153,13 @@ export default function App() {
   const [chatOpen, setChatOpen] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [chatMore, setChatMore] = useState(false);
+  // writing help on their own work: the cards Milo shows after editing, citing, or drafting a discussion post
+  const [edits, setEdits] = useState<Extract<MiloEditResult, { ok: true }> | null>(null);
+  const [sources, setSources] = useState<Extract<MiloCiteResult, { ok: true }> | null>(null);
+  const [discussion, setDiscussion] = useState<Extract<MiloDraftResult, { ok: true }> | null>(null);
+  const [writingBusy, setWritingBusy] = useState(false);
+  const writingOn = useRef(false);
+  const droppedPath = useRef<string | null>(null);
   // "Pick an area": the drag box, the request to run after it (if any), and a quick outline of what Milo is looking at
   const [picking, setPicking] = useState<{ then?: string } | null>(null);
   const [areaFlash, setAreaFlash] = useState<{ box: MiloRect; label?: string; id: number } | null>(null);
@@ -1233,6 +1241,140 @@ export default function App() {
     await say(r.text);
     setBubble(null);
   };
+  // ---- writing help on the student's real work -------------------------------------------------
+  // live narration while Milo works in their doc / D2L ("Reading your paper…", "Editing 4 of 12: run-on sentence")
+  useEffect(
+    () =>
+      window.milo.onWritingLive((p) => {
+        if (!writingOn.current) return;
+        setBubble(p.n ? `${p.i}/${p.n} · ${p.text}` : p.text);
+      }),
+    []
+  );
+  const closeWriting = () => {
+    setEdits(null);
+    setSources(null);
+    setDiscussion(null);
+    hover(false);
+  };
+  const writingStart = (line: string) => {
+    hush();
+    setChatOpen(false);
+    closeWriting();
+    writingOn.current = true;
+    setWritingBusy(true);
+    setMood("writing");
+    setBubble(line);
+  };
+  const writingEnd = () => {
+    writingOn.current = false;
+    setWritingBusy(false);
+  };
+  const startEdit = async (text: string) => {
+    if (await heldBack("write", text)) return;
+    writingStart("Opening your paper…");
+    const r = await window.milo.paperEdit(text).catch(() => ({ ok: false as const, text: "Something went wrong. Try again." }));
+    writingEnd();
+    if (!r.ok) {
+      setMood("idle");
+      await say(r.text);
+      return setBubble(null);
+    }
+    setBubble(null);
+    setMood("happy");
+    sfx.success();
+    setEdits(r);
+    const d = r.wordsAfter - r.wordsBefore;
+    await say(`${r.summary || "Done."} ${r.applied.length} change${r.applied.length === 1 ? "" : "s"}${d && Math.abs(d) >= 10 ? `, ${Math.abs(d)} words ${d < 0 ? "shorter" : "longer"}` : ""}. Tap any one to see it or undo it.`);
+    setBubble(null);
+  };
+  const startCite = async (text: string) => {
+    writingStart("Reading your paper…");
+    const r = await window.milo.paperCite(text).catch(() => ({ ok: false as const, text: "Something went wrong. Try again." }));
+    writingEnd();
+    if (!r.ok) {
+      setMood("idle");
+      await say(r.text);
+      return setBubble(null);
+    }
+    setBubble(null);
+    setMood("happy");
+    sfx.success();
+    setSources(r);
+    await say(`Added ${r.sources.length} real sources in ${r.style}${r.placed ? `, cited ${r.placed} of them where they back up your points` : ""}${r.addedList ? `, and a ${r.style === "APA" ? "References" : "Works Cited"} page at the end` : ""}.`);
+    setBubble(null);
+  };
+  const startCitePage = async (text: string) => {
+    setMood("thinking");
+    setBubble("Making the citation…");
+    const r = await window.milo.citePage(text).catch(() => ({ ok: false as const, text: "I couldn't read that page." }));
+    setMood(r.ok ? "happy" : "idle");
+    if (r.ok) setMessages((m) => [...m, { role: "assistant", content: r.line }]);
+    await say(r.ok ? `Copied the ${r.style} citation. Paste it wherever you need it.` : r.text);
+    setBubble(null);
+  };
+  const startDiscussion = async (text: string, change?: string, previous?: MiloDraft) => {
+    if (!change && (await heldBack("write", text))) return;
+    if (!portal) return void say("Connect your school's D2L first. Open Home base and add it.").then(() => setBubble(null));
+    if (!change) writingStart("Opening your discussions…");
+    else {
+      writingOn.current = true;
+      setWritingBusy(true);
+    }
+    const r = await window.milo.discussionDraft({ portal, ask: text, change, previous, name: name || undefined }).catch(() => ({ ok: false as const, text: "Something went wrong. Try again." }));
+    writingEnd();
+    if (!r.ok) {
+      setMood("idle");
+      await say(r.text);
+      return setBubble(null);
+    }
+    setBubble(null);
+    setMood("happy");
+    setDiscussion({ ...r });
+    if (change) return;
+    const w = (r.draft.body.match(/\b[\w'’-]+\b/g) ?? []).length;
+    await say(`Here's your post for ${r.topic}: ${w} words${r.req.replies ? ` and ${r.draft.replies.length} replies to classmates` : ""}${r.voice ? ", in your own voice" : ""}. Change anything, then post it.`);
+    setBubble(null);
+  };
+  const postDiscussion = async (d: MiloDraft) => {
+    setWritingBusy(true);
+    setBubble("Posting to D2L…");
+    const r = await window.milo.discussionPost({ subject: d.subject, body: d.body, replies: d.replies.map((x) => ({ parentId: x.parentId, to: x.to, body: x.body })) }).catch(() => ({ ok: false, text: "I couldn't post it." }) as { ok: boolean; posted?: number; text?: string });
+    setWritingBusy(false);
+    if (r.ok) {
+      setDiscussion(null);
+      setMood("celebrating");
+      sfx.success();
+      await say(`Posted${(r.posted ?? 1) > 1 ? ` with ${(r.posted ?? 1) - 1} repl${(r.posted ?? 1) > 2 ? "ies" : "y"}` : ""}. Say undo if you want it back.`);
+    } else await say(r.text || "I couldn't post it.");
+    setBubble(null);
+  };
+  const startReading = async (text: string, path?: string) => {
+    writingStart(path ? "Reading it…" : "Getting the reading…");
+    const r = await window.milo.readThis({ path, ask: text, portal: portal || undefined }).catch(() => ({ ok: false as const, text: "Something went wrong. Try again." }));
+    writingEnd();
+    if (!r.ok) {
+      setMood("idle");
+      await say(r.text);
+      return setBubble(null);
+    }
+    setBubble(null);
+    setMood("celebrating");
+    sfx.success();
+    const quizQs = r.quiz.map((q) => ({ q: q.q, choices: q.choices, correct: q.correct, explain: q.why }));
+    setOffer({
+      seen: `${r.title}${r.pages ? ` · ${r.pages} pages` : ""}`,
+      options: [
+        ...(quizQs.length ? [{ label: "Quiz me now", say: "__readquiz" }] : []),
+        { label: "Open my notes", say: "open your notes" },
+        ...(r.cards ? [{ label: `${r.cards} flashcards`, say: `open my ${r.course || ""} flashcards`.replace(/\s+/g, " ") }] : []),
+      ],
+    });
+    readQuiz.current = quizQs.length ? { topic: r.title, questions: quizQs } : null;
+    await say(`Done. ${r.terms} key terms, ${r.cards} flashcards${r.alerts ? `, and ${r.alerts} things that look like test material` : ""}. Saved to your ${r.course || "General"} notes. Want a quick quiz?`);
+    setBubble(null);
+  };
+  const readQuiz = useRef<{ topic: string; questions: QuizQ[] } | null>(null);
   useEffect(
     () =>
       window.milo.onPaperProgress((p) => {
@@ -1348,6 +1490,28 @@ export default function App() {
         });
       return;
     }
+    if (o.say === "__readquiz" && readQuiz.current) {
+      chipsRef.current = null;
+      setOffer(null);
+      const q = readQuiz.current;
+      setRpSize("half");
+      setQuiz({ id: Date.now(), topic: q.topic, questions: q.questions, focus: q.topic });
+      return;
+    }
+    if (o.say.startsWith("__readfile")) {
+      chipsRef.current = null;
+      setOffer(null);
+      const p = droppedPath.current;
+      if (p) void startReading(o.say === "__readfile_quiz" ? "make notes and a quiz" : "make notes", p);
+      return;
+    }
+    if (o.say === "__openfile") {
+      chipsRef.current = null;
+      setOffer(null);
+      const p = droppedPath.current;
+      if (p) void window.milo.openDropped({ path: p }).then((r) => r.ok && window.setTimeout(() => void handleThis("handle this file"), 1800));
+      return;
+    }
     if (o.say.startsWith("__pick:")) {
       chipsRef.current = null;
       setOffer(null);
@@ -1368,6 +1532,19 @@ export default function App() {
     const url = (dt.getData("text/uri-list") || "").split("\n").find((l) => /^https?:\/\//.test(l.trim()))?.trim();
     const text = dt.getData("text/plain").trim();
     bb("drop", { file: !!file, url: !!url, text: !!text && !url });
+    if (file && /\.(pdf|docx?|rtf|odt|txt|md)$/i.test(file.name)) {
+      // a reading or a document: offer to turn it into study material (or just open it)
+      droppedPath.current = window.milo.pathForFile(file);
+      setOffer({
+        seen: file.name,
+        options: [
+          { label: "Notes + quiz", say: "__readfile_quiz" },
+          { label: "Explain it", say: "__openfile" },
+        ],
+      });
+      say("Want notes and a quiz from this, or should I open it and explain it?").then(() => setBubble(null));
+      return;
+    }
     if (file) {
       const path = window.milo.pathForFile(file);
       say(`Opening ${file.name}.`).then(() => undefined);
@@ -2943,6 +3120,21 @@ export default function App() {
       case "paper":
         void startPaper(intent.text);
         return;
+      case "edit_paper":
+        void startEdit(intent.text);
+        return;
+      case "cite":
+        void startCite(intent.text);
+        return;
+      case "cite_page":
+        void startCitePage(intent.text);
+        return;
+      case "discussion":
+        void startDiscussion(intent.text);
+        return;
+      case "reading":
+        void startReading(intent.text);
+        return;
       case "feedback":
         setFeedback(intent.text);
         say(intent.text ? "Got it. Check it and hit send." : "What happened? Type it and I'll send it to Jake.").then(() => setBubble(null));
@@ -3045,6 +3237,14 @@ export default function App() {
   /** Do what the router decided. */
   const applyRoute = (rt: MiloRoute, text: string, spoken: boolean, local: Intent) => {
     switch (rt.kind) {
+      case "edit_paper":
+        return void startEdit(text);
+      case "cite":
+        return void (/\b(this|that) (page|article|site|website)\b|^cite this\b/i.test(text) ? startCitePage(text) : startCite(text));
+      case "discussion":
+        return void startDiscussion(text);
+      case "reading":
+        return void startReading(text);
       case "ask": {
         // Not sure what they meant: ask with buttons instead of guessing. Tapping (or saying) one runs it.
         const options = rt.choices ?? [];
@@ -4599,6 +4799,20 @@ export default function App() {
         }}
       />
 
+      {edits && <EditsCard r={edits} style={panelStyle} hover={hover} onClose={closeWriting} onUndone={(n) => void say(`Undid ${n === 1 ? "that one" : `${n} changes`}.`).then(() => setBubble(null))} />}
+      {sources && <SourcesCard r={sources} style={panelStyle} hover={hover} onClose={closeWriting} />}
+      {discussion && (
+        <DiscussionCard
+          key={discussion.draft.body.slice(0, 40)}
+          r={discussion}
+          style={panelStyle}
+          hover={hover}
+          busy={writingBusy}
+          onChange={(how, cur) => void startDiscussion(lastAsk.current, how, cur)}
+          onPost={(d) => void postDiscussion(d)}
+          onClose={closeWriting}
+        />
+      )}
       {picking && <AreaPicker onDone={areaPicked} onCancel={() => (setPicking(null), hover(false))} hover={hover} />}
       {areaFlash && !picking && <AreaFlash key={areaFlash.id} box={areaFlash.box} label={areaFlash.label} />}
       {chatOpen && (

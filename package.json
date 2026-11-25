@@ -29,7 +29,8 @@
     "test:computer": "npm run build:hands && npm run build:main && concurrently -k -s command-electron -n vite,electron \"vite\" \"wait-on tcp:127.0.0.1:5173 && cross-env MILO_DEV=1 MILO_TEST=1 MILO_TEST_COMPUTER=1 electron .\"",
     "release": "npm run dist && node scripts/publish-update.js",
     "ext:zip": "node scripts/zip-extension.js",
-    "eval:sweep": "vite-node --config vitest.config.ts evals/run-sweep.ts"
+    "eval:sweep": "vite-node --config vitest.config.ts evals/run-sweep.ts",
+    "eval:writing": "vite-node --config vitest.config.ts evals/run-writing.ts"
   },
   "dependencies": {
     "@fontsource/caveat": "^5.3.0",
@@ -37,6 +38,7 @@
     "dotenv": "^16.4.5",
     "electron-updater": "^6.3.9",
     "katex": "^0.19.1",
+    "pdf-lib": "^1.17.1",
     "ws": "^8.23.0"
   },
   "devDependencies": {

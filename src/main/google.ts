@@ -317,6 +317,11 @@ export async function docsText(id: string): Promise<string> {
   const d = await g<{ body?: { content?: El[] } }>(`https://docs.googleapis.com/v1/documents/${id}`);
   return (d.body?.content ?? []).map((e) => (e.paragraph?.elements ?? []).map((x) => x.textRun?.content ?? "").join("")).join("");
 }
+/** A whole doc: title, body structure (for exact in-place edits) and revision. */
+export async function docsFull(id: string): Promise<{ title: string; content: import("./docEdit").DocEl[]; revisionId?: string }> {
+  const d = await g<{ title?: string; revisionId?: string; body?: { content?: import("./docEdit").DocEl[] } }>(`https://docs.googleapis.com/v1/documents/${id}`);
+  return { title: d.title ?? "", content: d.body?.content ?? [], revisionId: d.revisionId };
+}
 /** Apply Docs edits (insert text, styles) in one go. */
 export async function docsBatch(id: string, requests: unknown[]) {
   if (!requests.length) return;

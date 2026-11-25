@@ -17,6 +17,19 @@ declare global {
     actions: number;
   };
   type MiloPrefs = { notifyAway: boolean; quiet: boolean; quietFrom: number; quietTo: number; noRecord: string[]; okRecord: string[]; autofill: boolean; preflight: boolean };
+  type MiloEdit = { find: string; replace: string; why: string; kind?: string };
+  type MiloEditResult =
+    | { ok: true; title: string; summary: string; applied: MiloEdit[]; skipped: number; notes: string[]; wordsBefore: number; wordsAfter: number; docId: string; rubric: boolean }
+    | { ok: false; text: string; connect?: boolean };
+  type MiloSource = { kind: "article" | "web"; title: string; authors: string[]; year?: number; date?: string; container?: string; site?: string; url: string; why: string };
+  type MiloCiteResult = { ok: true; style: "MLA" | "APA"; sources: MiloSource[]; placed: number; addedList: boolean; applied: MiloEdit[]; docId: string } | { ok: false; text: string; connect?: boolean };
+  type MiloDraft = { subject: string; body: string; replies: { parentId: number; to: string; excerpt: string; body: string }[]; checklist: string[] };
+  type MiloDraftResult =
+    | { ok: true; draft: MiloDraft; course: string; topic: string; prompt: string; due: string | null; req: { minWords: number; replies: number }; already: boolean; url: string; voice: boolean }
+    | { ok: false; text: string; signin?: boolean };
+  type MiloReadResult =
+    | { ok: true; title: string; course: string; noteId: string; studyId: string | null; pages: number; terms: number; cards: number; alerts: number; quiz: { q: string; choices: string[]; correct: number; why: string }[]; summary: string }
+    | { ok: false; text: string };
   type MiloRect = { x: number; y: number; width: number; height: number };
   type MiloCheckItem = { id: string; label: string; ok: boolean | null; detail: string; fix?: { kind: string; label: string } };
   type MiloRuleLevel = "none" | "study" | "credit" | "allowed" | "unclear";
@@ -54,7 +67,7 @@ declare global {
     box?: MiloBox | null;
   };
   type MiloRoute = {
-    kind: "chat" | "look" | "task" | "research" | "move" | "close" | "open_result" | "screen_question" | "kit" | "in_app" | "kit_menu" | "hold" | "drop" | "sweep" | "build" | "quiz" | "brief" | "watch" | "checkwork" | "lockin" | "ask";
+    kind: "chat" | "look" | "task" | "research" | "move" | "close" | "open_result" | "screen_question" | "kit" | "in_app" | "kit_menu" | "hold" | "drop" | "sweep" | "build" | "quiz" | "brief" | "watch" | "checkwork" | "lockin" | "ask" | "edit_paper" | "cite" | "discussion" | "reading";
     choices?: { label: string; say: string }[];
     minutes?: number;
     mode?: MiloMode;
@@ -247,6 +260,14 @@ declare global {
         busy: () => Promise<{ ok: boolean; events: { title: string; start: number; end: number }[]; text?: string }>;
         apply: (blocks: { title: string; course: string; start: number; end: number }[]) => Promise<{ ok: boolean; added: number; failed: number; text: string }>;
       };
+      paperEdit: (ask: string) => Promise<MiloEditResult>;
+      paperUndo: (docId: string, edits: MiloEdit[]) => Promise<{ ok: boolean; undone: number }>;
+      paperCite: (ask: string) => Promise<MiloCiteResult>;
+      citePage: (ask: string) => Promise<{ ok: true; line: string; style: "MLA" | "APA" } | { ok: false; text: string }>;
+      discussionDraft: (q: { portal: string; ask: string; change?: string; previous?: MiloDraft; name?: string }) => Promise<MiloDraftResult>;
+      discussionPost: (q: { subject: string; body: string; replies: { parentId: number; to: string; body: string }[] }) => Promise<{ ok: boolean; posted?: number; url?: string; pasted?: boolean; text?: string }>;
+      readThis: (q: { path?: string; ask: string; portal?: string }) => Promise<MiloReadResult>;
+      onWritingLive: (fn: (p: { stage: string; text: string; i?: number; n?: number }) => void) => () => void;
       onPaperProgress: (fn: (p: { stage: string; text: string; url?: string; step?: number; of?: number }) => void) => () => void;
       d2lFeedUrl: (portal: string) => Promise<string | null>;
       d2lSubscribeUrl: (portal: string) => Promise<string | null>;

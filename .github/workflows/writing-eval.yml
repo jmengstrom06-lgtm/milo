@@ -1,0 +1,36 @@
+# The writing bench: edit my paper, real sources, discussion posts, readings. Real AI, checked automatically.
+# Fails under 90%. Runs on any change to the writing code, and by hand (Actions → writing-eval → Run workflow).
+name: writing-eval
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "edit,sources,discussion,reading (empty = all)"
+        default: ""
+  pull_request:
+    paths:
+      - "src/main/writing.ts"
+      - "src/main/docEdit.ts"
+      - "src/main/citations.ts"
+      - "src/main/discussions.ts"
+      - "src/main/reading.ts"
+      - "evals/run-writing.ts"
+
+jobs:
+  writing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Writing bench (real AI)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          WRITING_ONLY: ${{ github.event.inputs.only }}
+        run: npm run eval:writing

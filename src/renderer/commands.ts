@@ -31,6 +31,11 @@ export type Intent =
   | { kind: "undo" } // "undo that": take back the newest thing
   | { kind: "feedback"; text: string } // "report a problem", "tell Jake that…"
   | { kind: "paper"; text: string } // "write a 5 page paper on…": written live into a Google Doc
+  | { kind: "edit_paper"; text: string } // "edit my paper", "proofread my essay", "cut it to 800 words": their open Google Doc, in place
+  | { kind: "cite"; text: string } // "find 5 sources for my paper", "add a works cited": real sources into their doc
+  | { kind: "cite_page"; text: string } // "cite this in APA": the page open in Chrome
+  | { kind: "discussion"; text: string } // "do my discussion post for bio": drafted from the real D2L prompt
+  | { kind: "reading"; text: string } // "read this chapter": notes, flashcards and a quiz
   | { kind: "fill" } // type the lesson's answer into the blank
   | { kind: "yes" }
   | { kind: "no" }
@@ -98,6 +103,16 @@ export const FILL_IN = /\b(fill (it|them|this|everything) in|type (them|it|the a
 /** Just "fill it in" / "type them in", nothing else: the worksheet on screen, answers typed in. */
 const FILL_ONLY = /^(?:just |go ahead and |can you |please )?(?:fill (?:it|them|this|everything) in|type (?:them|it|the answers) in|put the answers in)(?: for me)?$/;
 
+/** Writing help on their own work. Exported for tests. */
+export const EDIT_PAPER =
+  /^(?:can you |could you |please |help me |go ahead and |i need you to |i want you to )?(?:edit|proofread|proof read|revise|polish|improve|tighten(?: up)?|clean up|smooth out|fix(?: up)?(?: the (?:grammar|spelling|flow|wording|typos)(?: in| of| on)?)?|rework|reword|shorten|cut|trim|make)\s+(?:my|this|the)\s+(?:[a-z]+\s+)?(?:paper|essay|draft|doc|document|intro(?:duction)?|conclusion|thesis|report|writing|response|personal statement)\b/;
+export const CITE_PAPER =
+  /\b(?:find|get|add|give me|look up|search for)\b[^.]{0,20}\b(?:sources|citations|references|articles|scholarly|research)\b[^.]{0,25}\b(?:for|to|in|on|into)\s+(?:my|this|the)\s+(?:[a-z]+\s+){0,2}(?:paper|essay|doc|document|report|draft|project)\b|^(?:cite|add citations to|add in.?text citations to)\s+(?:my|this|the)\s+(?:paper|essay|doc|draft|report)\b|^(?:add|make)\s+(?:a |the |my )?(?:works cited|references|reference list|bibliography)(?: page| list)?\b/;
+export const CITE_PAGE = /^(?:cite|make (?:me )?a citation for|give me (?:a |the )?citation for)\s+(?:this|this page|this article|this website|this site|that)\b/;
+export const DISCUSSION = /\b(?:discussion|disc)\s+(?:post|posts|board|response|reply|replies|question|forum|assignment)s?\b|\b(?:reply|respond)\s+to\s+(?:my |two |three |a )?(?:classmates?|peers|the discussion)\b/;
+export const READING =
+  /^(?:can you |could you |please |help me )?(?:read|summarize|study|go through|take notes on|make (?:me )?(?:notes|flashcards|a quiz) (?:on|from|for)|break down|outline|quiz me on)\s+(?:this|the|my)\s+(?:chapter|reading|readings|article|pdf|textbook|text|section|document|file|book chapter|case study|lecture slides|slides)\b|^(?:read|summarize) (?:this|it)$/;
+
 const SWEEP =
   /\b(do|finish|complete|answer|solve|fill (out|in))\b.*\b(whole|entire|all|every|everything)\b.*\b(worksheet|assignment|homework|page|quiz|questions|problems|them|these|it)?|\b(do|finish|complete|fill out|fill in|fill|answer|solve) (out |in )?(this|the|my|that) (worksheet|assignment|homework|problem set|practice set|form|quiz|sheet)\b|\bworksheet sweep\b/;
 /** "Put the answers in the boxes", "fill these in", "type them into the boxes": the worksheet, answers typed in. */
@@ -156,6 +171,13 @@ function parseSingle(raw: string, ctx: Ctx): Intent {
   // "write (me) a 5 page paper on…", "draft an essay about…", "help me write a research paper on…"
   if (/^(?:can you |could you |please |help me |i need (?:you )?to |i have to )?(?:write|draft|type up|start)\b(?! (?:an? |the |my )?(?:email|message|text|poem|song|story|code|program))[^.?!]{0,60}?\b(?:research paper|paper|essay|report)\b/.test(t) && !/\b(read|grade|check|proofread|edit|fix)\b.{0,20}\b(paper|essay)\b/.test(t))
     return { kind: "paper", text };
+  if (!ctx.inLesson) {
+    if (CITE_PAGE.test(t)) return { kind: "cite_page", text };
+    if (CITE_PAPER.test(t)) return { kind: "cite", text };
+    if (EDIT_PAPER.test(t) && !/\b(write|start)\b/.test(t.split(" ")[0])) return { kind: "edit_paper", text };
+    if (DISCUSSION.test(t)) return { kind: "discussion", text };
+    if (READING.test(t)) return { kind: "reading", text };
+  }
   {
     const fb = t.match(/^(send feedback|give feedback|report (a |this )?(bug|problem|issue)|tell jake|that'?s a bug|feedback)\b[\s:,-]*(that )?/);
     if (fb) return { kind: "feedback", text: text.slice(fb[0].length).trim() };
