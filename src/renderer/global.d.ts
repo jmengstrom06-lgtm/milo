@@ -20,7 +20,7 @@ declare global {
   type MiloEdit = { find: string; replace: string; why: string; kind?: string };
   type MiloEditResult =
     | { ok: true; title: string; summary: string; applied: MiloEdit[]; skipped: number; notes: string[]; wordsBefore: number; wordsAfter: number; docId: string; rubric: boolean }
-    | { ok: false; text: string; connect?: boolean };
+    | { ok: false; text: string; connect?: boolean; docs?: { id: string; title: string }[] };
   type MiloSource = { kind: "article" | "web"; title: string; authors: string[]; year?: number; date?: string; container?: string; site?: string; url: string; why: string };
   type MiloCiteResult = { ok: true; style: "MLA" | "APA"; sources: MiloSource[]; placed: number; addedList: boolean; applied: MiloEdit[]; docId: string } | { ok: false; text: string; connect?: boolean };
   type MiloDraft = { subject: string; body: string; replies: { parentId: number; to: string; excerpt: string; body: string }[]; checklist: string[] };
@@ -260,7 +260,7 @@ declare global {
         busy: () => Promise<{ ok: boolean; events: { title: string; start: number; end: number }[]; text?: string }>;
         apply: (blocks: { title: string; course: string; start: number; end: number }[]) => Promise<{ ok: boolean; added: number; failed: number; text: string }>;
       };
-      paperEdit: (ask: string) => Promise<MiloEditResult>;
+      paperEdit: (ask: string, docId?: string) => Promise<MiloEditResult>;
       paperUndo: (docId: string, edits: MiloEdit[]) => Promise<{ ok: boolean; undone: number }>;
       paperCite: (ask: string) => Promise<MiloCiteResult>;
       citePage: (ask: string) => Promise<{ ok: true; line: string; style: "MLA" | "APA" } | { ok: false; text: string }>;

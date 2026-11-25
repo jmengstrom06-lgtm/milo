@@ -1270,13 +1270,19 @@ export default function App() {
     writingOn.current = false;
     setWritingBusy(false);
   };
-  const startEdit = async (text: string) => {
-    if (await heldBack("write", text)) return;
+  const editAsk = useRef("");
+  const startEdit = async (text: string, docId?: string) => {
+    if (!docId && (await heldBack("write", text))) return;
     writingStart("Opening your paper…");
-    const r = await window.milo.paperEdit(text).catch(() => ({ ok: false as const, text: "Something went wrong. Try again." }));
+    const r = await window.milo.paperEdit(text, docId).catch(() => ({ ok: false as const, text: "Something went wrong. Try again." }));
     writingEnd();
     if (!r.ok) {
       setMood("idle");
+      if ("docs" in r && r.docs?.length) {
+        // several docs open: one tap picks it
+        editAsk.current = text;
+        setOffer({ seen: "Which paper?", options: r.docs.map((d) => ({ label: d.title.slice(0, 40) || "Untitled doc", say: `__editdoc:${d.id}` })) });
+      }
       await say(r.text);
       return setBubble(null);
     }
@@ -1488,6 +1494,12 @@ export default function App() {
           setAreaFlash({ box: t.box, label: t.label, id: Date.now() });
           routeRef.current(area[2], false);
         });
+      return;
+    }
+    if (o.say.startsWith("__editdoc:")) {
+      chipsRef.current = null;
+      setOffer(null);
+      void startEdit(editAsk.current || "edit my paper", o.say.slice("__editdoc:".length));
       return;
     }
     if (o.say === "__readquiz" && readQuiz.current) {
@@ -3560,6 +3572,14 @@ export default function App() {
       // Only listening because he just spoke, and it sounds like room chatter, not you: let it go.
       // Right after his ding, a short answer ("not now", "do it for me") is for him, never background.
       const answering = !!answerUntil.current && Date.now() < answerUntil.current + 3000 && (!!parseAnswer(text) || (!!offerRef.current && !!parseOfferAnswer(text)));
+      // The rest of what you were just saying (you paused, the first half already ran): join them and redo it.
+      if (direct && !addressed && !pendingRef.current && lastCommand.current && Date.now() - lastCommandAt.current < 6000 && /(?:\b(um+|uh+|uhm|er|like|so|and)[.,]*|,)$/i.test(lastCommand.current.trim())) {
+        const joined = `${lastCommand.current.replace(/[\s,]*(?:\b(um+|uh+|uhm|er|like|so|and)[.,]*)?$/i, "")} ${text}`.trim();
+        bb("joined_rest", { first: lastCommand.current.slice(0, 80), rest: text.slice(0, 80) });
+        hush();
+        setPendingCmd(joined, true);
+        return;
+      }
       if (direct && !pushToTalk && !forced && !pendingRef.current && !addressed && !answering && looksLikeBackground(text)) {
         bb("ignored_background", { text: text.slice(0, 120) });
         followUntil.current = 0;
@@ -3787,7 +3807,8 @@ export default function App() {
     if (!text) return;
     if (goNow && !soundsUnfinished(text)) return runPending(text);
     // Smart ears already judged that you finished; only an obvious dangling word ("…and", "…then") holds the card.
-    const unfinished = smartTurn.current ? /\b(and|and then|then|to|the|a|an|my|or|with|for|of)[.,!?]*$/i.test(text.trim()) : soundsUnfinished(text);
+    // ("…right now. Um," = still thinking: hold the card for the rest)
+    const unfinished = smartTurn.current ? /(?:\b(and|and then|then|to|the|a|an|my|or|with|for|of|um+|uh+|uhm|er|like|so)[.,!?]*|,)$/i.test(text.trim()) : soundsUnfinished(text);
     if (!unfinished) getRoute(text); // think about it now, so it's ready when the card runs
     bb("card_shown", { text, unfinished, goNow });
     pendingRef.current = { text, started: Date.now(), unfinished, smart: smartTurn.current };
