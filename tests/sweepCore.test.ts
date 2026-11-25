@@ -138,3 +138,22 @@ describe("never claims all done when it skipped a number", () => {
     expect(sweepSummary(o, true)).not.toMatch(/All/);
   });
 });
+
+describe("split answers count as seen", () => {
+  it("'2 top' and '2 bottom' mean question 2 was seen", async () => {
+    let done = false;
+    const qs = ["1", "2 top", "2 bottom", "3"];
+    const o = await sweepCore(
+      {
+        plan: async () => ({ ok: true as const, items: done ? [] : qs.map((l) => ({ label: l, answer: "x", kind: "type" as const })), more: false }),
+        fill: async () => ((done = true), true),
+        scroll: async () => false,
+        top: async () => {},
+        stopped: () => false,
+      },
+      { fill: true }
+    );
+    expect(o.unseen).toEqual([]);
+    expect(sweepSummary(o, true)).toMatch(/^Done\. All 4/);
+  });
+});

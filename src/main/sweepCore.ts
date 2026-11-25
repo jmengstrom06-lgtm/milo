@@ -98,7 +98,7 @@ export async function sweepCore<T extends SweepItemCore>(d: SweepDeps<T>, opt: {
   // numbered 1, 2, 4, 5: never saw 3 (scrolled past it). Say so rather than claim it's all done.
   // (it may already have been answered by the student, so it's "check it", not "couldn't fill it")
   const unseen: string[] = [];
-  const nums = [...seen].map((l) => l.match(/^(\d+)[a-z]?$/i)?.[1]).filter(Boolean).map(Number);
+  const nums = [...seen].map((l) => l.match(/^(\d+)(?![\d.])/)?.[1]).filter(Boolean).map(Number);
   if (opt.fill && nums.length >= 2) {
     const have = new Set(nums);
     for (let k = Math.min(...nums); k < Math.max(...nums); k++)
