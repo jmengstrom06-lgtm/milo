@@ -1916,13 +1916,21 @@ export default function App() {
       {
         plan: (skip) => window.milo.sweepPlan(skip, ask, name),
         fill: doItem,
-        scroll: async () => {
+        scroll: async (area) => {
           show({ status: "scrolling" });
           setBox(null);
-          const r = await window.milo.scrollPage();
+          const r = await window.milo.scrollPage(area as MiloRect | undefined);
           return r.ok && r.moved !== false;
         },
         top: async () => void (await window.milo.scrollTop()),
+        next: async (at) => {
+          // one question per page: press Next (never Submit) like a student would
+          show({ status: "scrolling" });
+          setBox(null);
+          const p = at as { x: number; y: number };
+          await window.milo.sweepFill({ label: "next", work: "", answer: "", box: { x: 0, y: 0, width: 0, height: 0 }, kind: "choose", point: null, screen: p });
+          await sleep(700);
+        },
         stopped: () => sweepStop.current,
         log: (ev, data) => bb(ev, data),
         onPhase: (ph) => {

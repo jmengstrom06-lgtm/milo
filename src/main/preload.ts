@@ -288,7 +288,7 @@ contextBridge.exposeInMainWorld("milo", {
   sweepPlan: (skip: string[], extra?: string, name?: string) => ipcRenderer.invoke("milo:sweep-plan", skip, extra, name),
   scrollTop: () => ipcRenderer.invoke("milo:scroll-top"),
   sweepFill: (item: unknown) => ipcRenderer.invoke("milo:sweep-fill", item),
-  scrollPage: () => ipcRenderer.invoke("milo:scroll-page"),
+  scrollPage: (area?: { x: number; y: number; width: number; height: number }) => ipcRenderer.invoke("milo:scroll-page", area),
   build: (req: string) => ipcRenderer.invoke("milo:build", req),
   stopBuild: () => ipcRenderer.send("milo:build-stop"),
   onBuild: (cb: (ev: unknown) => void) => {

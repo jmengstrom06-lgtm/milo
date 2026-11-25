@@ -68,7 +68,7 @@ describe("worksheet sweep core", () => {
     const p = fakePage(sheet(6), { neverSticks: ["3"] });
     const o = await sweepCore(p.deps, { fill: true });
     expect(o.missed).toEqual(["3"]);
-    expect(sweepSummary(o, true)).toMatch(/Filled 5 of 6.*number 3/);
+    expect(sweepSummary(o, true)).toMatch(/Filled 5 of 6.*couldn.t fill number 3/);
   });
 
   it("show mode never types and doesn't double-check", async () => {
@@ -82,5 +82,78 @@ describe("worksheet sweep core", () => {
     const p = fakePage([]);
     const o = await sweepCore({ ...p.deps, plan: async () => ({ ok: true as const, items: [], more: false }) }, { fill: true });
     expect(o.empty).toBe(true);
+  });
+});
+
+describe("one question per page", () => {
+  it("answers each page, presses Next, never past the last", async () => {
+    const N = 5;
+    let page = 0;
+    const filled = new Set<number>();
+    let nexts = 0;
+    const o = await sweepCore(
+      {
+        plan: async () => ({
+          ok: true as const,
+          items: filled.has(page) ? [] : [{ label: String(page + 1), answer: "x", kind: "choose" as const }],
+          more: false,
+          next: page < N - 1 ? { x: 1, y: 1 } : undefined, // the last page shows Finish, not Next
+        }),
+        fill: async () => (filled.add(page), true),
+        scroll: async () => false,
+        top: async () => {},
+        next: async () => {
+          nexts++;
+          page++;
+        },
+        stopped: () => false,
+      },
+      { fill: true }
+    );
+    expect(filled.size).toBe(N);
+    expect(nexts).toBe(N - 1);
+    expect(o.missed).toEqual([]);
+  });
+  it("nothing found is never 'all filled'", () => {
+    expect(sweepSummary({ results: [], missed: [] }, true)).toMatch(/didn't find any/);
+  });
+});
+
+describe("never claims all done when it skipped a number", () => {
+  it("1, 2, 4, 5 seen: says to check 3", async () => {
+    const qs = ["1", "2", "4", "5"];
+    let done = false;
+    const o = await sweepCore(
+      {
+        plan: async () => ({ ok: true as const, items: done ? [] : qs.map((l) => ({ label: l, answer: "x", kind: "type" as const })), more: false }),
+        fill: async () => ((done = true), true),
+        scroll: async () => false,
+        top: async () => {},
+        stopped: () => false,
+      },
+      { fill: true }
+    );
+    expect(o.unseen).toEqual(["3"]);
+    expect(sweepSummary(o, true)).toMatch(/never saw number 3/);
+    expect(sweepSummary(o, true)).not.toMatch(/All/);
+  });
+});
+
+describe("split answers count as seen", () => {
+  it("'2 top' and '2 bottom' mean question 2 was seen", async () => {
+    let done = false;
+    const qs = ["1", "2 top", "2 bottom", "3"];
+    const o = await sweepCore(
+      {
+        plan: async () => ({ ok: true as const, items: done ? [] : qs.map((l) => ({ label: l, answer: "x", kind: "type" as const })), more: false }),
+        fill: async () => ((done = true), true),
+        scroll: async () => false,
+        top: async () => {},
+        stopped: () => false,
+      },
+      { fill: true }
+    );
+    expect(o.unseen).toEqual([]);
+    expect(sweepSummary(o, true)).toMatch(/^Done\. All 4/);
   });
 });

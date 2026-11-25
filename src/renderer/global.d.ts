@@ -326,10 +326,10 @@ declare global {
       stopResearch: () => void;
       openUrl: (url: string) => void;
       onResearch: (cb: (ev: ResearchEvent) => void) => () => void;
-      sweepPlan: (skip: string[], extra?: string, name?: string) => Promise<{ ok: true; items: SweepItem[]; more: boolean } | Err>;
+      sweepPlan: (skip: string[], extra?: string, name?: string) => Promise<{ ok: true; items: SweepItem[]; more: boolean; next?: { x: number; y: number }; area?: MiloRect } | Err>;
       scrollTop: () => Promise<{ ok: true } | Err>;
       sweepFill: (item: SweepItem) => Promise<{ ok: true } | Err>;
-      scrollPage: () => Promise<{ ok: true; moved?: boolean } | Err>;
+      scrollPage: (area?: MiloRect) => Promise<{ ok: true; moved?: boolean } | Err>;
       build: (req: string) => Promise<boolean>;
       stopBuild: () => void;
       onBuild: (cb: (ev: { type: "code"; delta: string } | { type: "done"; title: string; html: string } | { type: "error"; text: string }) => void) => () => void;
