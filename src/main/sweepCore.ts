@@ -16,19 +16,19 @@ export type SweepItemCore = {
 };
 export type SweepResult = { label: string; answer: string; filled: boolean };
 export type SweepDeps<T extends SweepItemCore> = {
-  plan: (skip: string[]) => Promise<{ ok: true; items: T[]; more: boolean; next?: unknown } | { ok: false; text: string }>;
+  plan: (skip: string[]) => Promise<{ ok: true; items: T[]; more: boolean; next?: unknown; area?: unknown } | { ok: false; text: string }>;
   /** click a page's Next / Continue button (one question per page quizzes). Never Submit. */
   next?: (at: unknown) => Promise<void>;
   /** put one answer in (or just show it); true = it went in */
   fill: (item: T, items: T[]) => Promise<boolean>;
-  /** scroll down a bit more than half a screen; false = the page didn't move (the end) */
-  scroll: () => Promise<boolean>;
+  /** scroll down about half of what's scrolling (`area` = an embedded frame or panel, if the AI saw one); false = it didn't move (the end) */
+  scroll: (area?: unknown) => Promise<boolean>;
   top: () => Promise<void>;
   stopped: () => boolean;
   log?: (ev: string, data: Record<string, unknown>) => void;
   onPhase?: (phase: "reading" | "checking") => void;
 };
-export type SweepOutcome = { results: SweepResult[]; missed: string[]; empty?: boolean; error?: string; stopped?: boolean };
+export type SweepOutcome = { results: SweepResult[]; missed: string[]; unseen?: string[]; empty?: boolean; error?: string; stopped?: boolean };
 
 export async function sweepCore<T extends SweepItemCore>(d: SweepDeps<T>, opt: { fill: boolean; maxPages?: number }): Promise<SweepOutcome> {
   const max = opt.maxPages ?? 30;
@@ -57,7 +57,7 @@ export async function sweepCore<T extends SweepItemCore>(d: SweepDeps<T>, opt: {
       record(it, await d.fill(it, plan.items));
     }
     d.log?.("sweep_page", { page, items: plan.items.map((i) => i.label), later: plan.items.filter((i) => i.later).map((i) => i.label), next: !!plan.next });
-    if (await d.scroll()) continue;
+    if (await d.scroll(plan.area)) continue;
     // the end of this page. One question per page? Check this page took, then Next.
     if (!plan.next || !d.next) break;
     if (opt.fill) {
@@ -92,8 +92,20 @@ export async function sweepCore<T extends SweepItemCore>(d: SweepDeps<T>, opt: {
         const again = await d.plan([]);
         if (again.ok) for (const it of again.items) if (!it.later && blanks.some((b) => b.label === it.label) && !missed.includes(it.label)) missed.push(it.label);
       }
-      if (!(await d.scroll())) break;
+      if (!(await d.scroll(plan.area))) break;
     }
+  }
+  // numbered 1, 2, 4, 5: never saw 3 (scrolled past it). Say so rather than claim it's all done.
+  // (it may already have been answered by the student, so it's "check it", not "couldn't fill it")
+  const unseen: string[] = [];
+  const nums = [...seen].map((l) => l.match(/^(\d+)[a-z]?$/i)?.[1]).filter(Boolean).map(Number);
+  if (opt.fill && nums.length >= 2) {
+    const have = new Set(nums);
+    for (let k = Math.min(...nums); k < Math.max(...nums); k++)
+      if (!have.has(k)) {
+        unseen.push(String(k));
+        d.log?.("sweep_gap", { label: k });
+      }
   }
   if (opt.fill) {
     // seen but never filled (or filled and still blank on the second look)
@@ -104,7 +116,7 @@ export async function sweepCore<T extends SweepItemCore>(d: SweepDeps<T>, opt: {
       else results.push({ label: m, answer: "", filled: false });
     }
   }
-  return { results, missed };
+  return { results, missed, unseen };
 }
 
 /** What Milo says at the end: only what's true. (pure) */
@@ -113,7 +125,8 @@ export function sweepSummary(o: SweepOutcome, fill: boolean): string {
   const filled = o.results.filter((r) => r.filled).length;
   if (!n) return "I didn't find any questions I could answer on this page.";
   if (!fill) return `Done. ${n} answer${n === 1 ? "" : "s"} on screen for you to type in.`;
-  if (!o.missed.length) return `Done. All ${filled} filled in. Give it a quick look before you submit.`;
-  const list = o.missed.length === 1 ? `number ${o.missed[0]}` : `numbers ${o.missed.slice(0, -1).join(", ")} and ${o.missed.at(-1)}`;
-  return `Filled ${filled} of ${n}. I couldn't get ${list} to stick. Can you fill ${o.missed.length === 1 ? "that one" : "those"} in? The answers are on the card.`;
+  const nums = (xs: string[]) => (xs.length === 1 ? `number ${xs[0]}` : `numbers ${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}`);
+  const unseen = o.unseen?.length ? ` I never saw ${nums(o.unseen)}, so check ${o.unseen.length === 1 ? "it's" : "they're"} answered.` : "";
+  if (!o.missed.length) return unseen ? `Filled ${filled}.${unseen}` : `Done. All ${filled} filled in. Give it a quick look before you submit.`;
+  return `Filled ${filled} of ${n}. I couldn't fill ${nums(o.missed)}. Can you do ${o.missed.length === 1 ? "that one" : "those"}? The answers are on the card.${unseen}`;
 }

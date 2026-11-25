@@ -1150,7 +1150,15 @@ ipcMain.handle("milo:sweep-plan", async (_e, skip: string[], extra?: string, nam
       };
     });
   const nb = r.data.next_button;
-  return { ok: true, items, more: !!r.data.more_below, next: nb && typeof nb.x === "number" ? { x: bounds.x + nb.x / k, y: bounds.y + nb.y / k } : undefined };
+  const sa = r.data.scroll_area;
+  return {
+    ok: true,
+    items,
+    more: !!r.data.more_below,
+    next: nb && typeof nb.x === "number" ? { x: bounds.x + nb.x / k, y: bounds.y + nb.y / k } : undefined,
+    // a quiz inside a frame with its own scrollbar (D2L): scroll THAT, by its own size
+    area: sa && typeof sa.height === "number" ? { x: bounds.x + sa.x / k, y: bounds.y + sa.y / k, width: sa.width / k, height: sa.height / k } : undefined,
+  };
 });
 
 ipcMain.handle(
@@ -1220,7 +1228,7 @@ ipcMain.handle("milo:scroll-top", async () => {
     overlay?.setFocusable(true);
   }
 });
-ipcMain.handle("milo:scroll-page", async () => {
+ipcMain.handle("milo:scroll-page", async (_e, frame?: ScreenRect) => {
   // Scroll ~60% of what Milo is looking at (the picked area / the work window / the screen), with the pointer
   // over it so the right pane scrolls. Then compare: if nothing moved, that was the end of the page.
   handsBusy++;
@@ -1229,11 +1237,12 @@ ipcMain.handle("milo:scroll-page", async () => {
   applyClickable();
   try {
     const wa = screen.getPrimaryDisplay().workArea;
-    const area = pickedArea?.box ?? (workWindow && worthFocusing(workWindow.box, screen.getPrimaryDisplay().bounds) ? workWindow.box : null) ?? wa;
+    const ok = (b?: ScreenRect) => !!b && [b.x, b.y, b.width, b.height].every(Number.isFinite) && b.width > 40 && b.height > 40;
+    const area = (ok(frame) ? frame : null) ?? pickedArea?.box ?? (workWindow && worthFocusing(workWindow.box, screen.getPrimaryDisplay().bounds) ? workWindow.box : null) ?? wa;
     const before = await captureScreen();
-    const cx = area.x + area.width / 2;
-    const cy = area.y + area.height / 2;
-    const native = await scrollAt(cx, cy, Math.max(200, area.height * 0.6));
+    const cx = area!.x + area!.width / 2;
+    const cy = area!.y + area!.height / 2;
+    const native = await scrollAt(cx, cy, Math.max(150, area!.height * 0.55));
     if (!native) {
       await pressKeys("escape"); // older helper: keyboard (leave any text box so the page itself scrolls)
       await pressKeys("pagedown");

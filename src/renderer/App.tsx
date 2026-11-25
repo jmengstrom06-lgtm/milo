@@ -1916,10 +1916,10 @@ export default function App() {
       {
         plan: (skip) => window.milo.sweepPlan(skip, ask, name),
         fill: doItem,
-        scroll: async () => {
+        scroll: async (area) => {
           show({ status: "scrolling" });
           setBox(null);
-          const r = await window.milo.scrollPage();
+          const r = await window.milo.scrollPage(area as MiloRect | undefined);
           return r.ok && r.moved !== false;
         },
         top: async () => void (await window.milo.scrollTop()),

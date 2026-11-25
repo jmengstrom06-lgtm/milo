@@ -696,6 +696,12 @@ const SWEEP_TOOL = {
         },
       },
       more_below: { type: "boolean", description: "True if the page clearly continues below the visible area (more questions off screen)." },
+      scroll_area: {
+        type: "object",
+        description: "Only if the questions sit inside a box with its OWN scrollbar that is smaller than the screen (an embedded quiz frame, a panel): that box, in pixels. Omit when the whole page scrolls.",
+        properties: { x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" } },
+        required: ["x", "y", "width", "height"],
+      },
       next_button: {
         type: "object",
         description: "Only if more questions are on ANOTHER page reached by a button like Next, Continue, Next page or →: the center of that button. Never a Submit, Finish, Turn in, Save and submit or Done button. Omit otherwise.",
@@ -713,7 +719,7 @@ export async function sweepPlan(
   skip: string[],
   extra = "",
   name = ""
-): Promise<ApiOk<{ questions: SweepItem[]; more_below: boolean; next_button?: { x: number; y: number } }> | ApiErr> {
+): Promise<ApiOk<{ questions: SweepItem[]; more_below: boolean; next_button?: { x: number; y: number }; scroll_area?: { x: number; y: number; width: number; height: number } }> | ApiErr> {
   return callTool(
     {
       max_tokens: 6000,

@@ -68,7 +68,7 @@ describe("worksheet sweep core", () => {
     const p = fakePage(sheet(6), { neverSticks: ["3"] });
     const o = await sweepCore(p.deps, { fill: true });
     expect(o.missed).toEqual(["3"]);
-    expect(sweepSummary(o, true)).toMatch(/Filled 5 of 6.*number 3/);
+    expect(sweepSummary(o, true)).toMatch(/Filled 5 of 6.*couldn.t fill number 3/);
   });
 
   it("show mode never types and doesn't double-check", async () => {
@@ -116,5 +116,25 @@ describe("one question per page", () => {
   });
   it("nothing found is never 'all filled'", () => {
     expect(sweepSummary({ results: [], missed: [] }, true)).toMatch(/didn't find any/);
+  });
+});
+
+describe("never claims all done when it skipped a number", () => {
+  it("1, 2, 4, 5 seen: says to check 3", async () => {
+    const qs = ["1", "2", "4", "5"];
+    let done = false;
+    const o = await sweepCore(
+      {
+        plan: async () => ({ ok: true as const, items: done ? [] : qs.map((l) => ({ label: l, answer: "x", kind: "type" as const })), more: false }),
+        fill: async () => ((done = true), true),
+        scroll: async () => false,
+        top: async () => {},
+        stopped: () => false,
+      },
+      { fill: true }
+    );
+    expect(o.unseen).toEqual(["3"]);
+    expect(sweepSummary(o, true)).toMatch(/never saw number 3/);
+    expect(sweepSummary(o, true)).not.toMatch(/All/);
   });
 });

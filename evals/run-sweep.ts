@@ -30,7 +30,7 @@ async function plan(page: Page, skip: string[], ask: string) {
       return { label: String(q.label ?? ""), answer: q.answer, kind: has ? q.input.kind : "none", x: q.input?.x, y: q.input?.y, later: has && (q.input.y ?? 0) > H - 70 };
     });
   trace.push(`plan skip=[${skip}] -> ${items.map((i) => `${i.label}:${i.kind}${i.later ? "(later)" : ""}@${Math.round(i.x ?? -1)},${Math.round(i.y ?? -1)}=${i.answer}`).join(" ")}${r.data.next_button ? " NEXT" : ""} more=${r.data.more_below}`);
-  return { ok: true as const, items, more: !!r.data.more_below, next: r.data.next_button };
+  return { ok: true as const, items, more: !!r.data.more_below, next: r.data.next_button, area: r.data.scroll_area };
 }
 
 async function fill(page: Page, it: Item) {
@@ -79,17 +79,21 @@ async function main() {
       {
         plan: (skip) => plan(page, skip, s.ask),
         fill: (it) => fill(page, it),
-        scroll: async () => {
-          trace.push("scroll");
+        scroll: async (area) => {
+          const ar = (area as { x: number; y: number; width: number; height: number } | undefined) ?? { x: 0, y: 0, width: W, height: H };
+          trace.push(`scroll${area ? " frame" : ""}`);
           const a = await page.screenshot({ type: "jpeg", quality: 30 });
-          await page.mouse.move(W / 2, H / 2);
-          await page.mouse.wheel(0, Math.round(H * 0.6));
+          await page.mouse.move(ar.x + ar.width / 2, ar.y + ar.height / 2);
+          await page.mouse.wheel(0, Math.round(Math.max(150, ar.height * 0.55)));
           await page.waitForTimeout(400);
           const b = await page.screenshot({ type: "jpeg", quality: 30 });
           return !a.equals(b);
         },
         top: async () => {
+          // the page and any frame under the middle of the screen
           await page.mouse.move(W / 2, H / 2);
+          await page.mouse.wheel(0, -30000);
+          await page.mouse.move(W / 2, 80);
           await page.mouse.wheel(0, -30000);
           await page.waitForTimeout(250);
         },
