@@ -8,7 +8,7 @@
 import path from "node:path";
 import dotenv from "dotenv";
 import { proposeEdits, scholarly } from "../src/main/writing";
-import { flatten, plan, words, type DocEl } from "../src/main/docEdit";
+import { flatten, plan, scopeOf, words, type DocEl } from "../src/main/docEdit";
 import { citeLine, inText } from "../src/main/citations";
 import { draftDiscussion } from "../src/main/discussions";
 import { readThis } from "../src/main/reading";
@@ -82,7 +82,7 @@ async function editCases() {
   // 4. intro only: nothing after the first paragraph changes
   const intro = await proposeEdits(ESSAY[0], text, "edit my intro");
   if (intro.ok) {
-    const ip = plan(flatten(doc(ESSAY)), intro.data.edits);
+    const ip = plan(flatten(doc(ESSAY)), intro.data.edits, scopeOf(text, "edit my intro"));
     const firstEnd = text.indexOf(ESSAY[2]);
     const outside = ip.ok.filter((e) => text.indexOf(e.find) >= firstEnd);
     check("edit (intro only): stays in the intro", outside.length === 0, `${outside.length} edits outside`);

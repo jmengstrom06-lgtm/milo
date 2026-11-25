@@ -51,7 +51,24 @@ export type Edit = { find: string; replace: string; why: string; kind?: string }
 export type Planned = Edit & { start: number; end: number }; // Docs indexes
 
 /** Turn AI edits into exact, non-overlapping Docs ranges. Anything that can't be placed safely is dropped. (pure) */
-export function plan(doc: DocText, edits: Edit[]): { ok: Planned[]; dropped: (Edit & { reason: string })[] } {
+/** The part of the paper the student asked about ("edit my intro" / "my conclusion"), as a range of the flat text.
+ *  Body paragraphs are the real ones (12+ words), so a title, name or date line isn't mistaken for the intro. (pure) */
+export function scopeOf(text: string, ask: string): { from: number; to: number; part: string } | null {
+  const a = ask.toLowerCase();
+  const part = /\bintro(duction)?\b|\bfirst paragraph\b/.test(a) ? "intro" : /\bconclusion\b|\blast paragraph\b/.test(a) ? "conclusion" : "";
+  if (!part) return null;
+  const paras: { from: number; to: number }[] = [];
+  let i = 0;
+  for (const line of text.split("\n")) {
+    if (words(line) >= 12) paras.push({ from: i, to: i + line.length });
+    i += line.length + 1;
+  }
+  if (paras.length < 2) return null;
+  const p = part === "intro" ? paras[0] : paras[paras.length - 1];
+  return { ...p, part };
+}
+
+export function plan(doc: DocText, edits: Edit[], scope?: { from: number; to: number } | null): { ok: Planned[]; dropped: (Edit & { reason: string })[] } {
   const ok: Planned[] = [];
   const dropped: (Edit & { reason: string })[] = [];
   for (const e of edits) {
@@ -67,6 +84,10 @@ export function plan(doc: DocText, edits: Edit[]): { ok: Planned[]; dropped: (Ed
     const loc = locate(doc, e.find);
     if (!loc) {
       dropped.push({ ...e, reason: "not found once" });
+      continue;
+    }
+    if (scope && (loc.from < scope.from || loc.to > scope.to)) {
+      dropped.push({ ...e, reason: "outside the part you asked for" });
       continue;
     }
     const start = doc.at[loc.from];

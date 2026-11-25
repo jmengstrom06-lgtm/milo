@@ -7,7 +7,7 @@ import { callClaude, callTool, persona } from "./brain";
 import { log as bb } from "./blackbox";
 import { models } from "./gateway";
 import { docsBatch, docsFull } from "./google";
-import { flatten, locate, plan, requestsFor, undoOf, words, type Edit } from "./docEdit";
+import { scopeOf, flatten, locate, plan, requestsFor, undoOf, words, type Edit } from "./docEdit";
 import { type Source, citeLine, inText, styleOf, type CiteStyle } from "./citations";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -60,7 +60,7 @@ export type EditResult = {
 export function editBrief(ask: string, rubric = ""): string {
   const a = ask.toLowerCase();
   const target = a.match(/\b(?:cut|shorten|trim|get)\b.*?\b(?:to|by|under)\s+(\d{2,5})\s*words?\b/);
-  const scope = /\bintro(duction)?\b/.test(a) ? "Only the introduction (first paragraph or two)." : /\bconclusion\b/.test(a) ? "Only the conclusion (last paragraph or two)." : /\bthesis\b/.test(a) ? "Focus on the thesis sentence and anything that has to change with it." : "The whole document.";
+  const scope = /\bintro(duction)?\b/.test(a) ? "Only the introduction (the first body paragraph). Do not touch any other paragraph." : /\bconclusion\b/.test(a) ? "Only the conclusion (the last body paragraph). Do not touch any other paragraph." : /\bthesis\b/.test(a) ? "Focus on the thesis sentence and anything that has to change with it." : "The whole document.";
   const focus = [
     /\b(grammar|spelling|typos?|proofread)\b/.test(a) && "Fix only grammar, spelling, punctuation and typos. Don't rewrite style.",
     /\b(flow|transitions?)\b/.test(a) && "Improve flow and transitions between sentences and paragraphs.",
@@ -108,7 +108,7 @@ export async function editPaper(docId: string, ask: string, opts: { rubric?: str
   if (flat.text.length > 120000) return { ok: false, text: "That doc is really long. Tell me which part to edit, like “edit my intro” or “edit section 2”." };
   const r = await proposeEdits(doc.title, flat.text, ask, opts.rubric);
   if (!r.ok) return { ok: false, text: r.text };
-  const { ok: planned, dropped } = plan(flat, r.data.edits ?? []);
+  const { ok: planned, dropped } = plan(flat, r.data.edits ?? [], scopeOf(flat.text, ask));
   bb("writing", "edit_plan", { asked: r.data.edits?.length ?? 0, placed: planned.length, dropped: dropped.map((d) => d.reason) });
   if (!planned.length) return { ok: false, text: "I read it, but couldn't place my edits safely in the doc. Try again, or tell me which part to work on." };
   // one at a time, bottom to top, so the student sees the doc change (positions above never move)
