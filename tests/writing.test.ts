@@ -94,3 +94,19 @@ describe("citations", () => {
     expect(styleOf("find sources", "plain text")).toBe("MLA");
   });
 });
+
+import { scopeOf as scopeOfX, plan as planX, flatten as flattenX } from "../src/main/docEdit";
+describe("edit only the part asked for", () => {
+  const paras = ["My Essay Title", "Jake Engstrom", "This is the first real paragraph of the essay and it has more than twelve words in it.", "This is the middle paragraph and it also has well over twelve words to count here.", "This is the last paragraph which wraps things up with more than twelve words total."];
+  let i = 1;
+  const content = paras.map((p) => { const s = p + "\n"; const el = { startIndex: i, endIndex: i + s.length, paragraph: { elements: [{ startIndex: i, textRun: { content: s } }] } }; i += s.length; return el; });
+  const flat = flattenX(content);
+  it("intro = first real paragraph, not the title or name", () => expect(flat.text.slice(scopeOfX(flat.text, "edit my intro")!.from).startsWith("This is the first")).toBe(true));
+  it("conclusion = last paragraph", () => expect(flat.text.slice(scopeOfX(flat.text, "fix my conclusion")!.from).startsWith("This is the last")).toBe(true));
+  it("no part named = whole paper", () => expect(scopeOfX(flat.text, "edit my paper")).toBeNull());
+  it("edits outside the intro are dropped", () => {
+    const r = planX(flat, [{ find: "the first real paragraph", replace: "the opening paragraph", why: "", kind: "" }, { find: "the middle paragraph", replace: "the body", why: "", kind: "" }], scopeOfX(flat.text, "edit my intro"));
+    expect(r.ok.length).toBe(1);
+    expect(r.dropped[0].reason).toBe("outside the part you asked for");
+  });
+});
