@@ -1296,7 +1296,7 @@ export async function findOption(jpegBase64: string, size: { width: number; heig
     {
       model: models.fast(),
       max_tokens: 200,
-      system: "A dropdown list is open on the student's screen. Find the option whose text matches what they want and give the pixel center of it. found=false if no open list shows it.",
+      system: "Is a dropdown LIST open on the student's screen (a menu of options showing, not just a closed box)? If yes, give the pixel center of the option matching what they want. found=false if no list is open, or if the closed box already shows that option.",
       tools: [OPTION_TOOL],
       tool_choice: { type: "auto" },
       messages: [

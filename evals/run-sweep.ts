@@ -18,6 +18,7 @@ const BAR = 0.95;
 
 type Item = { label: string; answer: string; kind: "type" | "choose" | "select" | "none"; later?: boolean; x?: number; y?: number };
 
+let trace: string[] = [];
 async function plan(page: Page, skip: string[], ask: string) {
   const b64 = (await page.screenshot({ type: "jpeg", quality: 85 })).toString("base64");
   const r = await sweepPlan(b64, { width: W, height: H }, skip, ask, "Jake");
@@ -28,6 +29,7 @@ async function plan(page: Page, skip: string[], ask: string) {
       const has = q.input?.kind !== "none" && q.input?.x !== undefined && q.input?.y !== undefined;
       return { label: String(q.label ?? ""), answer: q.answer, kind: has ? q.input.kind : "none", x: q.input?.x, y: q.input?.y, later: has && (q.input.y ?? 0) > H - 70 };
     });
+  trace.push(`plan skip=[${skip}] -> ${items.map((i) => `${i.label}:${i.kind}${i.later ? "(later)" : ""}@${Math.round(i.x ?? -1)},${Math.round(i.y ?? -1)}=${i.answer}`).join(" ")}${r.data.next_button ? " NEXT" : ""} more=${r.data.more_below}`);
   return { ok: true as const, items, more: !!r.data.more_below, next: r.data.next_button };
 }
 
@@ -36,15 +38,15 @@ async function fill(page: Page, it: Item) {
   await page.mouse.click(it.x, it.y);
   await page.waitForTimeout(it.kind === "type" ? 100 : 180);
   if (it.kind === "select") {
-    // the list is open now: find the option on screen and click it (real menus and custom-drawn lists alike)
+    // same order as the app: a real menu jumps to what you type and Return picks it; a custom-drawn list
+    // ignores typing and stays open, so then find the option on screen and click it
+    await page.keyboard.type(it.answer);
+    await page.keyboard.press("Enter");
     await page.waitForTimeout(250);
     const b64 = (await page.screenshot({ type: "jpeg", quality: 85 })).toString("base64");
     const at = await findOption(b64, { width: W, height: H }, it.answer);
+    trace.push(`select ${it.label}: ${at ? "clicked option" : "typed"}`);
     if (at) await page.mouse.click(at.x, at.y);
-    else {
-      await page.keyboard.type(it.answer);
-      await page.keyboard.press("Enter");
-    }
   }
   if (it.kind === "type") {
     await page.keyboard.press("ControlOrMeta+A");
@@ -72,11 +74,13 @@ async function main() {
     await page.waitForFunction(() => [...document.querySelectorAll("iframe")].every((f) => f.contentDocument?.readyState === "complete" && !!f.contentDocument.body?.children.length), null, { timeout: 5000 }).catch(() => {});
     await page.waitForTimeout(300);
     const t0 = Date.now();
+    trace = [];
     const out = await sweepCore<Item>(
       {
         plan: (skip) => plan(page, skip, s.ask),
         fill: (it) => fill(page, it),
         scroll: async () => {
+          trace.push("scroll");
           const a = await page.screenshot({ type: "jpeg", quality: 30 });
           await page.mouse.move(W / 2, H / 2);
           await page.mouse.wheel(0, Math.round(H * 0.6));
@@ -106,6 +110,7 @@ async function main() {
     const honest = g.blank.length === 0 || !/^Done\. All/.test(said);
     const mark = g.right === g.total ? "✓" : "✗";
     console.log(`${mark} ${s.id.padEnd(16)} ${g.right}/${g.total}  ${((Date.now() - t0) / 1000).toFixed(0)}s  wrong=[${g.wrong}] blank=[${g.blank}]  ${honest ? "" : "DISHONEST "}"${said}"`);
+    if (g.right !== g.total) for (const line of trace) console.log("      " + line);
     await page.screenshot({ path: path.join(dir, `${s.id}${repeat > 1 ? "-" + rows.filter((r) => r.id === s.id).length : ""}.png`), fullPage: true });
     rows.push({ id: s.id, ...g, said, honest, missed: out.missed });
     await page.close();

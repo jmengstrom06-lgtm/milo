@@ -1166,7 +1166,12 @@ ipcMain.handle(
       await click(item.screen.x, item.screen.y);
       await sleep(item.kind === "type" ? 150 : item.kind === "select" ? 350 : 220); // let a radio/checkbox register before moving on
       if (item.kind === "select") {
-        // the list is open: find the option on screen and click it (real menus and custom-drawn lists alike)
+        // a real menu jumps to what you type and Return picks it; a custom-drawn list ignores that and stays
+        // open, so then find the option on screen and click it
+        await typeText(item.answer);
+        await sleep(150);
+        await pressKeys("return");
+        await sleep(250);
         const cap = await captureScreen();
         let at: { x: number; y: number } | null = null;
         if (cap.ok) {
@@ -1176,11 +1181,6 @@ ipcMain.handle(
           if (p) at = { x: cap.shot.bounds.x + p.x / k, y: cap.shot.bounds.y + p.y / k };
         }
         if (at) await click(at.x, at.y);
-        else {
-          await typeText(item.answer); // an open menu jumps to what you type; Return picks it
-          await sleep(150);
-          await pressKeys("return");
-        }
       }
       if (item.kind === "type") {
         await pressKeys("cmd+a"); // replace anything already in the box
