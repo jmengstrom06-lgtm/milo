@@ -721,8 +721,8 @@ export async function runSelfTest(win: BrowserWindow) {
     }
   }
 
-  // ======================= STUDENT WRITING (T): your real Google + D2L, checked for real =======================
-  // MILO_TEST_ONLY=T runs just these. Makes one test Google Doc ("Milo test – safe to delete"), never posts to D2L.
+  // ======================= STUDENT WRITING (Q): your real Google + D2L, checked for real =======================
+  // MILO_TEST_ONLY=Q runs just these. Makes one test Google Doc ("Milo test – safe to delete"), never posts to D2L.
   {
     const gsT = (() => { try { return googleStatus(); } catch { return { connected: false }; } })();
     const ESSAY = [
@@ -735,35 +735,36 @@ export async function runSelfTest(win: BrowserWindow) {
     const clean = (s: string) => s.replace(/\s+/g, " ").trim();
     let docId = "";
     let original = "";
+    let firstEdits: Parameters<typeof undoEdits>[1] = [];
     if (!gsT.connected) {
-      results.push({ id: "T0", cat: "Writing", name: "Google connected (for the paper tests)", score: 0, pass: false, detail: "Google isn't connected. Connect it in Milo, then run again." });
+      results.push({ id: "Q0", cat: "Writing", name: "Google connected (for the paper tests)", score: 0, pass: false, detail: "Google isn't connected. Connect it in Milo, then run again." });
     } else {
-      await test("T1", "Writing", "Edit my paper: fixes real mistakes inside a real Google Doc", async () => {
+      await test("Q1", "Writing", "Edit my paper: fixes real mistakes inside a real Google Doc", async () => {
         const d = await docsCreate(`Milo test – safe to delete ${new Date().toLocaleString()}`, ESSAY);
         docId = d.id;
         original = await docsText(docId);
         const t0 = Date.now();
         const r = await editPaper(docId, "edit my paper");
         if (!r.ok) return { score: 0, detail: `no edits: ${r.text}` };
+        firstEdits = r.applied;
         const now = await docsText(docId);
         const fixed = [/their nights/.test(now), !/students scrolls/.test(now), !/this effects/.test(now), /it['’]s time|it is time/.test(now)].filter(Boolean).length;
         const quote = now.includes("the bedroom has become a 24-hour entertainment center.");
         return { ms: Date.now() - t0, score: (fixed / 4) * (quote ? 1 : 0.5), detail: `${r.applied.length} edits landed in ${((Date.now() - t0) / 1000).toFixed(0)}s, ${fixed}/4 planted mistakes fixed, quote ${quote ? "kept" : "CHANGED"}` };
       });
-      await test("T2", "Writing", "Undo all puts the doc back exactly", async () => {
-        if (!docId) return { score: 0, detail: "no test doc (T1 failed)" };
-        const now = await docsText(docId);
-        if (clean(now) === clean(original)) return { score: 0, detail: "nothing to undo (T1 made no changes)" };
-        const changed = now;
-        // rebuild the applied list from the black box isn't possible; re-run the edit and undo that run instead
-        const r = await editPaper(docId, "fix any remaining grammar");
-        const mid = await docsText(docId);
-        if (r.ok) await undoEdits(docId, r.applied);
+      await test("Q2", "Writing", "Undo all puts the doc back exactly", async () => {
+        if (!docId) return { score: 0, detail: "no test doc (Q1 failed)" };
+        if (!firstEdits.length) return { score: 0, detail: "nothing to undo (Q1 made no changes)" };
+        const t0 = Date.now();
+        const u = await undoEdits(docId, firstEdits);
         const back = await docsText(docId);
-        const same = clean(back) === clean(changed);
-        return { score: !r.ok ? 0.6 : same ? 1 : 0, detail: !r.ok ? "second edit found nothing more to fix (undo not exercised)" : same ? `${r.applied.length} edits undone, doc matches exactly` : `doc differs after undo (${clean(mid).length} → ${clean(back).length} chars vs ${clean(changed).length})` };
+        const same = clean(back) === clean(original);
+        if (same) return { ms: Date.now() - t0, score: 1, detail: `all ${u.undone} edits undone, doc matches the original exactly` };
+        const a = clean(original).split(" "), b = clean(back).split(" ");
+        const i = a.findIndex((w, k) => w !== b[k]);
+        return { score: 0, detail: `${u.undone}/${firstEdits.length} undone; first difference: "${a.slice(Math.max(0, i - 3), i + 4).join(" ")}" vs "${b.slice(Math.max(0, i - 3), i + 4).join(" ")}"` };
       });
-      await test("T3", "Writing", "Edit my intro: only the intro changes", async () => {
+      await test("Q3", "Writing", "Edit my intro: only the intro changes", async () => {
         if (!docId) return { score: 0, detail: "no test doc" };
         const before = (await docsText(docId)).split("\n");
         const r = await editPaper(docId, "make my intro stronger");
@@ -774,7 +775,7 @@ export async function runSelfTest(win: BrowserWindow) {
         const ok = changedRows.length > 0 && changedRows.every((i) => i <= 1);
         return { score: ok ? 1 : 0, detail: ok ? `${r.applied.length} edits, all in the intro, undone after` : `changed lines ${changedRows.join(",")}` };
       });
-      await test("T4", "Writing", "Sources: real citations + Works Cited page, then removed cleanly", async () => {
+      await test("Q4", "Writing", "Sources: real citations + Works Cited page, then removed cleanly", async () => {
         if (!docId) return { score: 0, detail: "no test doc" };
         const before = await docsText(docId);
         const t0 = Date.now();
@@ -797,8 +798,11 @@ export async function runSelfTest(win: BrowserWindow) {
 
     // ---- Discussions: read your real D2L, draft only (never posts) ----
     const portalT = await js<string>("localStorage.getItem('milo.portal') || ''").catch(() => "");
-    await test("T6", "Writing", "Discussion: finds a real D2L discussion and drafts a post + replies (no posting)", async () => {
+    await test("Q6", "Writing", "Discussion: finds a real D2L discussion and drafts a post + replies (no posting)", async () => {
       if (!portalT) return { score: 0, detail: "no school site set up" };
+      for (let i = 0; i < 60 && !bridgeConnected(); i++) await sleep(250); // Chrome's extension reconnects after Milo starts
+      const chk = await d2lCheck(portalT);
+      if (!chk.ok) return { score: 0, detail: `D2L: ${chk.text} (Chrome extension ${chk.chrome ? "connected" : "NOT connected"})` };
       const all = await d2lCourses(portalT);
       const t0 = Date.now();
       let found: { course: (typeof all)[number]; topics: Awaited<ReturnType<typeof discussionTopics>> } | null = null;
@@ -823,7 +827,7 @@ export async function runSelfTest(win: BrowserWindow) {
     });
 
     // ---- Readings: a long PDF, split and read ----
-    await test("T7", "Writing", "Reading: a 150-page PDF becomes notes, flashcards and a quiz", async () => {
+    await test("Q7", "Writing", "Reading: a 150-page PDF becomes notes, flashcards and a quiz", async () => {
       const { PDFDocument, StandardFonts } = await import("pdf-lib");
       const pdf = await PDFDocument.create();
       const font = await pdf.embedFont(StandardFonts.Helvetica);
@@ -844,7 +848,7 @@ export async function runSelfTest(win: BrowserWindow) {
       const good = r.pages === 150 && r.terms >= 4 && r.cards >= 8 && r.quiz.length >= 6;
       return { ms, score: good ? 1 : 0.4, detail: `${r.pages} pages in ${(ms / 1000).toFixed(0)}s: ${r.terms} terms, ${r.cards} flashcards, ${r.quiz.length} quiz questions, ${r.alerts} test alerts` };
     });
-    await test("T8", "Writing", "Reading: your newest real PDF from Downloads", async () => {
+    await test("Q8", "Writing", "Reading: your newest real PDF from Downloads", async () => {
       const dl = path.join(app.getPath("home"), "Downloads");
       let files: string[] = [];
       try { files = fs.readdirSync(dl).filter((f) => /\.pdf$/i.test(f)).map((f) => path.join(dl, f)).sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs); } catch { /* no access */ }

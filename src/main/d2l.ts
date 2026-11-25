@@ -47,7 +47,7 @@ const feedStatus = async (w: BrowserWindow) =>
 
 let opening: Promise<BrowserWindow> | null = null;
 function d2lPage(portal: string): Promise<BrowserWindow> {
-  if (page && !page.isDestroyed() && Date.now() - pageAt < 30 * 60e3) return Promise.resolve(page);
+  if (page && !page.isDestroyed() && Date.now() - pageAt < 30 * 60e3 && /\/d2l\//.test(page.webContents.getURL())) return Promise.resolve(page);
   if (!opening) opening = openD2lPage(portal).finally(() => (opening = null));
   return opening;
 }
@@ -167,16 +167,31 @@ async function api<T>(portal: string, path: string): Promise<T> {
     }
     if (c.s === 404 || c.s >= 500) throw new Error(`D2L said ${c.s} for ${path}`);
   }
-  const w = await d2lPage(portal).catch((e) => {
-    if (e instanceof SignInNeeded) bb("d2l", "signin_needed", { chrome: bridgeConnected() });
-    throw e;
-  });
-  using("milo");
-  const r = (await w.webContents.executeJavaScript(
-    `fetch(${JSON.stringify(path)}, { headers: { Accept: "application/json" }, credentials: "include" }).then(async (r) => ({ s: r.status, t: r.headers.get("content-type") || "", b: await r.text() }))`,
-    true
-  )) as { s: number; t: string; b: string };
-  if (r.s !== 200 || !r.t.includes("json")) bb("d2l", "api_miss", { path: path.split("?")[0], status: r.s, type: r.t.slice(0, 40) });
+  type R = { s: number; t: string; b: string; at: string };
+  const ask = async (): Promise<R> => {
+    const w = await d2lPage(portal).catch((e) => {
+      if (e instanceof SignInNeeded) bb("d2l", "signin_needed", { chrome: bridgeConnected() });
+      throw e;
+    });
+    using("milo");
+    // absolute URL: the hidden page may have wandered off D2L (a session refresh, the school's login), and a
+    // relative fetch from there hits the wrong site and looks like "signed out"
+    const url = /^https?:/.test(path) ? path : `${origin || originOf(portal)}${path}`;
+    return (await w.webContents.executeJavaScript(
+      `fetch(${JSON.stringify(url)}, { headers: { Accept: "application/json" }, credentials: "include" }).then(async (r) => ({ s: r.status, t: r.headers.get("content-type") || "", b: await r.text(), at: location.host }))`,
+      true
+    )) as R;
+  };
+  let r = await ask();
+  if (r.s !== 200 || !r.t.includes("json")) {
+    bb("d2l", "api_miss", { path: path.split("?")[0], status: r.s, type: r.t.slice(0, 40), pageAt: r.at });
+    if (r.s !== 401 && r.s !== 403) {
+      // one fresh look before saying "sign in": reopen the hidden page (re-checks sign-in) and ask again
+      pageAt = 0;
+      r = await ask();
+      bb("d2l", r.s === 200 && r.t.includes("json") ? "api_retry_ok" : "api_retry_miss", { path: path.split("?")[0], status: r.s, pageAt: r.at });
+    }
+  }
   if (r.s === 401 || r.s === 403 || !r.t.includes("json")) {
     pageAt = 0; // session may have expired: reopen (and re-check sign-in) next time
     throw new SignInNeeded("Sign in to D2L first.");
