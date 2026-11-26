@@ -1291,7 +1291,8 @@ export default function App() {
     sfx.success();
     setEdits(r);
     const d = r.wordsAfter - r.wordsBefore;
-    await say(`${r.summary || "Done."} ${r.applied.length} change${r.applied.length === 1 ? "" : "s"}${d && Math.abs(d) >= 10 ? `, ${Math.abs(d)} words ${d < 0 ? "shorter" : "longer"}` : ""}. Tap any one to see it or undo it.`);
+    const gist = (r.summary || "Done.").split(/(?<=[.!?])\s+/)[0]; // one sentence out loud; the card has every change
+    await say(`${gist} ${r.applied.length} change${r.applied.length === 1 ? "" : "s"}${d && Math.abs(d) >= 10 ? `, ${Math.abs(d)} words ${d < 0 ? "shorter" : "longer"}` : ""}. Tap any one to see it or undo it.`);
     setBubble(null);
   };
   const startCite = async (text: string) => {
@@ -3257,6 +3258,8 @@ export default function App() {
         return void startDiscussion(text);
       case "reading":
         return void startReading(text);
+      case "undo":
+        return void runUndo();
       case "ask": {
         // Not sure what they meant: ask with buttons instead of guessing. Tapping (or saying) one runs it.
         const options = rt.choices ?? [];

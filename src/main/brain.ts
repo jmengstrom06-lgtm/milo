@@ -542,7 +542,7 @@ ${profileText()}
 // Router: decides what the student wants, knowing what's open on screen right now.
 export type RouteKind =
   | "chat" | "look" | "task" | "research" | "move" | "close" | "open_result" | "screen_question" | "kit" | "in_app" | "kit_menu" | "hold" | "drop"
-  | "sweep" | "build" | "quiz" | "brief" | "watch" | "checkwork" | "lockin" | "ask" | "edit_paper" | "cite" | "discussion" | "reading";
+  | "sweep" | "build" | "quiz" | "brief" | "watch" | "checkwork" | "lockin" | "ask" | "edit_paper" | "cite" | "discussion" | "reading" | "undo";
 export type Route = { kind: RouteKind; choices?: { label: string; say: string }[]; minutes?: number; mode?: Mode; followUp?: boolean; where?: string; question?: string; on?: boolean; after?: string; app?: string; target?: string; request?: string; failed?: boolean };
 export type RouteCtx = {
   researchOpen?: boolean;
@@ -564,7 +564,7 @@ const ROUTE_TOOL = {
     properties: {
       kind: {
         type: "string",
-        enum: ["chat", "look", "task", "research", "move", "close", "open_result", "screen_question", "kit", "in_app", "kit_menu", "hold", "drop", "sweep", "build", "quiz", "brief", "watch", "checkwork", "lockin", "ask", "edit_paper", "cite", "discussion", "reading"],
+        enum: ["chat", "look", "task", "research", "move", "close", "open_result", "screen_question", "kit", "in_app", "kit_menu", "hold", "drop", "sweep", "build", "quiz", "brief", "watch", "checkwork", "lockin", "ask", "edit_paper", "cite", "discussion", "reading", "undo"],
         description: [
           "in_app = ONLY when one of Milo's apps is open (see 'Right now'): the request is something to do INSIDE that open app. Sheet: change the data or chart ('make it a box plot', 'add a z-score column', 'sort by score', 'who's above average', 'more bins', 'make another example'). Study: answer the problem, next, hint, another one, harder, explain. Sketch: change the drawing/graph ('shade above 80', 'add labels'). Notes: add to / ask about / quiz on the open note. Planner: change the plan. NOT in_app: closing it, opening a different app, anything outside the app (Chrome, moving, research).",
           "research = a request for information about the world (people, events, news, weather, scores, prices, facts, 'look up', 'tell me about', 'do some research on') when the student did NOT ask for Chrome / a browser / a tab / a website. Shown in Milo's own research box.",
@@ -581,6 +581,7 @@ const ROUTE_TOOL = {
           "sweep = a whole worksheet, form, quiz or problem set on screen: 'fill in this worksheet', 'complete this', 'do all the questions', 'put the answers in the boxes', 'fill these in' (even if they also say 'put Jake for the name'). Milo answers every question on the page, scrolling as needed, and types the answers into the boxes. look (mode do) is for ONE problem only. build = make a small working app/tool/calculator. quiz = quiz me. brief = what's due / daily brief. watch = watch me work (on:false to stop). checkwork = check my work once.",
           "lockin = start a focus session where Milo studies alongside the student and pulls them back when they drift to TikTok, Instagram, YouTube etc.: 'lock in', 'lock in for 45 minutes on stats', 'focus mode', 'help me focus', 'start a pomodoro', 'keep me off my phone while I study', 'I need to grind out this essay'. Set minutes if they gave a length and request = the subject if they named one. on:false to end a running session: 'stop the lock in', 'end focus', 'I'm done studying'.",
           "chat = conversation, or a quick question about a concept ('what is a derivative?'). But 'teach me X' / 'help me learn X' / 'I don't understand X' = kit study (a real lesson with practice).",
+          "undo = take back something MILO himself just did (his edits to a paper, citations he added, a calendar event, a post): 'undo that', 'undo the changes you made to my paper', 'put it back how it was', 'remove the sources you added'. Milo undoes it himself, exactly; NEVER task (pressing Cmd+Z in an app could undo the student's own typing).",
           "edit_paper = improve the student's OWN paper/essay/draft that's open (Google Docs): edit, proofread, revise, fix grammar or flow, make it shorter/longer/stronger/less AI-sounding, cut to N words, edit against a rubric. Not 'write a paper' (that's a new paper) and not 'check my work' (that only finds mistakes).",
           "cite = real sources or citations for the student's paper: 'find sources for my essay', 'I need 5 scholarly sources', 'add citations', 'make my works cited', 'cite this page in APA'.",
           "discussion = a D2L discussion board post or replies to classmates: 'do my discussion post for bio', 'I have to reply to two classmates in psych', 'answer this week's discussion'.",

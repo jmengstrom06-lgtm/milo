@@ -57,12 +57,16 @@ export type EditResult = {
 };
 
 /** What the student asked for, turned into editing instructions. (pure) */
+const WORDING = /\b(wording|word choice|reword|sounds? (?:off|bad|weird|awkward|better|good|wrong)|sound better|make it (?:better|sound)|awkward|clarity|clearer|polish|improve|unprofessional|nonprofessional|informal|flow better)\b/;
 export function editBrief(ask: string, rubric = ""): string {
   const a = ask.toLowerCase();
   const target = a.match(/\b(?:cut|shorten|trim|get)\b.*?\b(?:to|by|under)\s+(\d{2,5})\s*words?\b/);
   const scope = /\bintro(duction)?\b/.test(a) ? "Only the introduction (the first body paragraph). Do not touch any other paragraph." : /\bconclusion\b/.test(a) ? "Only the conclusion (the last body paragraph). Do not touch any other paragraph." : /\bthesis\b/.test(a) ? "Focus on the thesis sentence and anything that has to change with it." : "The whole document.";
   const focus = [
-    /\b(grammar|spelling|typos?|proofread)\b/.test(a) && "Fix only grammar, spelling, punctuation and typos. Don't rewrite style.",
+    // grammar ONLY when that's all they asked for; "grammar and bad wording" wants both
+    /\b(grammar|spelling|typos?|proofread)\b/.test(a) && !WORDING.test(a) && "Fix only grammar, spelling, punctuation and typos. Don't rewrite style.",
+    /\b(grammar|spelling|typos?|proofread)\b/.test(a) && WORDING.test(a) && "Fix all grammar, spelling, punctuation and typos.",
+    WORDING.test(a) && "Also fix the wording: rewrite awkward, vague, wordy, repetitive or informal sentences so they read well, in the student's own voice. Keep their ideas and every fact.",
     /\b(flow|transitions?)\b/.test(a) && "Improve flow and transitions between sentences and paragraphs.",
     /\b(shorter|concise|wordy|cut|trim|shorten)\b/.test(a) && (target ? `Cut it to about ${target[1]} words: remove filler and repetition, keep every argument.` : "Make it tighter: cut filler and repetition, keep every argument."),
     /\b(longer|expand|add more|lengthen)\b/.test(a) && "Develop thin points with more explanation of the student's own ideas (no new facts or sources).",
