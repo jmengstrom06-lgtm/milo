@@ -204,6 +204,15 @@ export function fixImageTypes<T>(body: T): T {
   return body;
 }
 
+/** Never read raw error JSON out loud: one plain sentence a student can act on. (pure) */
+export function brainTrouble(status: number, detail: string): string {
+  if (/credit balance|billing|purchase credits/i.test(detail)) return "My brain is out of credits right now, so I can't think. Jake needs to top up the AI account. It isn't anything you did.";
+  if (status === 401 || status === 403 || /api.?key|authentication/i.test(detail)) return "My brain's key isn't working right now. Try again in a bit.";
+  if (status === 429 || status === 529 || /overloaded|rate.?limit/i.test(detail)) return "My brain is overloaded for a second. Try again in a moment.";
+  if (status >= 500) return "My brain service is having a hiccup. Try again in a moment.";
+  return "Something went wrong on my end. Try that again.";
+}
+
 async function callClaude(body: Record<string, unknown>): Promise<ApiOk<Block[]> | ApiErr> {
   fixImageTypes(body);
   try {
@@ -213,7 +222,7 @@ async function callClaude(body: Record<string, unknown>): Promise<ApiOk<Block[]>
       if (limit) return { ok: false, text: limit };
       const detail = await res.text();
       bb("brain", "api_error", { status: res.status, model: (body.model as string) ?? model(), detail: detail.slice(0, 500) });
-      return { ok: false, text: `My brain hit an error (${res.status}). ${detail.slice(0, 200)}` };
+      return { ok: false, text: brainTrouble(res.status, detail) };
     }
     const data = (await res.json()) as { content?: Block[]; usage?: Record<string, number> };
     if (data.usage?.cache_read_input_tokens) bb("brain", "cache_hit", { tokens: data.usage.cache_read_input_tokens });

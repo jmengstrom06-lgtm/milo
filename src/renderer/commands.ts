@@ -109,7 +109,7 @@ export const EDIT_PAPER =
 /** Said the long way: "I have a paper open… there are grammar mistakes… fix all of it". A paper/essay/draft
  *  plus a fixing word, in one request (new papers were already caught above). */
 export const EDIT_PAPER_TALK =
-  /\b(?:my|this|the|a)\s+(?:[a-z]+\s+)?(?:paper|essay|draft|personal statement)\b(?=[\s\S]*\b(?:fix|correct|proofread|proof read|edit|revise|polish|grammar|spelling|typos|mistakes|errors|run.?on|wording|flow)\b)|\b(?:fix|correct|proofread|edit|revise|polish)\b[^.?!]{0,40}\b(?:my|this|the)\s+(?:[a-z]+\s+)?(?:paper|essay|draft)\b/;
+  /\b(?:my|this|the|a)\s+(?:[a-z]+\s+){0,2}(?:paper|essay|draft|personal statement)\b(?=[\s\S]*\b(?:fix|correct|proofread|proof read|edit|revise|polish|grammar|spelling|typos|mistakes|errors|run.?on|wording|flow)\b)|\b(?:fix|correct|proofread|edit|revise|polish)\b[^.?!]{0,40}\b(?:my|this|the)\s+(?:[a-z]+\s+)?(?:paper|essay|draft)\b/;
 export const CITE_PAPER =
   /\b(?:find|get|add|give me|look up|search for)\b[^.]{0,20}\b(?:sources|citations|references|articles|scholarly|research)\b[^.]{0,25}\b(?:for|to|in|on|into)\s+(?:my|this|the)\s+(?:[a-z]+\s+){0,2}(?:paper|essay|doc|document|report|draft|project)\b|^(?:cite|add citations to|add in.?text citations to)\s+(?:my|this|the)\s+(?:paper|essay|doc|draft|report)\b|^(?:add|make)\s+(?:a |the |my )?(?:works cited|references|reference list|bibliography)(?: page| list)?\b/;
 export const CITE_PAGE = /^(?:cite|make (?:me )?a citation for|give me (?:a |the )?citation for)\s+(?:this|this page|this article|this website|this site|that)\b/;
