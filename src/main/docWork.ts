@@ -5,7 +5,6 @@
 import { callTool, persona } from "./brain";
 import { log as bb } from "./blackbox";
 import { models } from "./gateway";
-import { editBrief } from "./writing";
 import { applyPlan, docWords, listing, paragraphs, type Change, type DocIO, type Plan } from "./docAgent";
 
 const PLAN_TOOL = {
@@ -61,10 +60,9 @@ const CHECK_TOOL = {
   },
 };
 
-function system(ask: string, rubric: string): string {
-  const brief = editBrief(ask, rubric)
-    .split("\n")
-    .filter((l) => !/^Focus: a full edit/.test(l)); // no default "polish everything": do what they asked
+function system(rubric: string): string {
+  // No keyword rules here (they misfire: "move X right after my intro" is not "edit only the intro").
+  // The request itself says what to do and where; the agent reads it whole.
   return `${persona()}
 Today is ${new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}.
 You work on a college student's own Google Doc while they watch. Do EXACTLY what they asked, all of it, and nothing they didn't ask for.
@@ -74,8 +72,9 @@ You work on a college student's own Google Doc while they watch. Do EXACTLY what
 - New writing: match the paper's voice, level and formatting. A new section is usually a short heading paragraph only if the paper already uses headings or they asked for one; otherwise plain paragraphs.
 - Keep their argument, facts, direct quotes and numbers unless they asked to change them. Never invent sources, statistics, quotes or citations (if they need sources, say "say 'find sources for my paper'" in notes).
 - Word targets ("cut to 500 words") count the body, not the header block.
+- A part of the paper named in the request ("my intro", "the CDC paragraph") is WHERE to act or a reference point, not a limit on everything else they asked.
 - If part of the request can't be done in a Google Doc from here, still do the rest and say what you couldn't in "cant".
-${brief.join("\n")}`;
+${rubric ? `Grade it against this rubric and make changes that close the gaps:\n${rubric.slice(0, 4000)}` : ""}`;
 }
 
 export type DocResult =
@@ -110,7 +109,7 @@ export async function docWork(io: DocIO, ask: string, opts: { rubric?: string; l
       ? `The student said: "${ask}"\n\nDocument title: ${doc.title}\n\n${listing(ps)}`
       : `The student said: "${ask}"\n\nYou already made changes, but this is still missing: ${missing}\nDo ONLY what's missing. Paragraph numbers below are the doc as it is now.\n\nDocument title: ${doc.title}\n\n${listing(ps)}`;
     opts.status?.(round === 0 ? `Reading “${doc.title}”…` : "Finishing the rest…");
-    const r = await callTool<Plan>({ model: models.smart(), max_tokens: 12000, system: system(ask, opts.rubric ?? ""), tools: [PLAN_TOOL], tool_choice: { type: "auto" }, messages: [{ role: "user", content: msg }] }, PLAN_TOOL.name);
+    const r = await callTool<Plan>({ model: models.smart(), max_tokens: 12000, system: system(opts.rubric ?? ""), tools: [PLAN_TOOL], tool_choice: { type: "auto" }, messages: [{ role: "user", content: msg }] }, PLAN_TOOL.name);
     if (!r.ok) {
       if (!applied.length) return { ok: false, text: r.text };
       break;
