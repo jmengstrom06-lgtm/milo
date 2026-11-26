@@ -12,11 +12,57 @@ import { flatten, words, type DocEl } from "./docEdit";
 export type Style = "NORMAL_TEXT" | "TITLE" | "SUBTITLE" | "HEADING_1" | "HEADING_2" | "HEADING_3";
 const STYLES: Style[] = ["NORMAL_TEXT", "TITLE", "SUBTITLE", "HEADING_1", "HEADING_2", "HEADING_3"];
 
-export type Para = { n: number; text: string; start: number; end: number; style: Style; at: number[] };
+type Obj = Record<string, unknown>;
+/** A paragraph: text, where it is, its style, and its text-style runs (offsets within the paragraph). */
+export type Para = { n: number; text: string; start: number; end: number; style: Style; at: number[]; props: Obj; runs: { from: number; to: number; ts: Obj }[] };
+
+// Formatting Milo can change, and how each maps to Docs.
+const TEXT_FIELDS = ["bold", "italic", "underline", "fontSize", "weightedFontFamily"] as const;
+const PARA_FIELDS = ["alignment", "lineSpacing", "indentFirstLine", "indentStart", "spaceAbove", "spaceBelow"] as const;
+export type Fmt = { bold?: boolean; italic?: boolean; underline?: boolean; font?: string; size?: number; align?: "START" | "CENTER" | "END" | "JUSTIFIED"; lineSpacing?: number; firstLineIndent?: number; hanging?: boolean; noSpacing?: boolean };
+/** A plain format request -> Docs styles + the field masks to send. (pure) */
+export function fmtToDocs(f: Fmt): { ts: Obj; tf: string[]; ps: Obj; pf: string[] } {
+  const ts: Obj = {};
+  const ps: Obj = {};
+  if (typeof f.bold === "boolean") ts.bold = f.bold;
+  if (typeof f.italic === "boolean") ts.italic = f.italic;
+  if (typeof f.underline === "boolean") ts.underline = f.underline;
+  if (f.size && f.size >= 6 && f.size <= 72) ts.fontSize = { magnitude: f.size, unit: "PT" };
+  if (f.font && f.font.length < 40) ts.weightedFontFamily = { fontFamily: f.font, weight: 400 };
+  if (f.align && ["START", "CENTER", "END", "JUSTIFIED"].includes(f.align)) ps.alignment = f.align;
+  if (f.lineSpacing && f.lineSpacing >= 100 && f.lineSpacing <= 300) ps.lineSpacing = f.lineSpacing;
+  if (f.hanging) {
+    ps.indentStart = { magnitude: 36, unit: "PT" };
+    ps.indentFirstLine = { magnitude: 0, unit: "PT" };
+  } else if (typeof f.firstLineIndent === "number" && f.firstLineIndent >= 0 && f.firstLineIndent <= 72) ps.indentFirstLine = { magnitude: f.firstLineIndent, unit: "PT" };
+  if (f.noSpacing) {
+    ps.spaceAbove = { magnitude: 0, unit: "PT" };
+    ps.spaceBelow = { magnitude: 0, unit: "PT" };
+  }
+  return { ts, tf: Object.keys(ts), ps, pf: Object.keys(ps) };
+}
+const pick = (o: Obj, keys: readonly string[] | string[]) => Object.fromEntries(keys.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]));
+/** The runs inside [from, to) of a paragraph, made relative to `from`. (pure) */
+const runsIn = (p: Para, from: number, to: number) =>
+  p.runs.filter((r) => r.to > from && r.from < to).map((r) => ({ from: Math.max(r.from, from) - from, to: Math.min(r.to, to) - from, ts: pick(r.ts, TEXT_FIELDS) }));
+/** Put formatting back on text that starts at `offset` in paragraph p (and the paragraph's look). (pure) */
+function restoreReqs(p: Para, offset: number, runs: { from: number; to: number; ts: Obj }[] = [], props?: Obj): unknown[] {
+  const out: unknown[] = [];
+  if (props) out.push({ updateParagraphStyle: { range: { startIndex: p.start, endIndex: p.end }, paragraphStyle: pick(props, PARA_FIELDS), fields: PARA_FIELDS.join(",") } });
+  for (const r of runs) {
+    const a = offset + r.from;
+    const b = offset + r.to;
+    if (b <= a || a < 0 || b > p.text.length) continue;
+    const s = p.at[a] ?? p.start;
+    const e = (p.at[b - 1] ?? s) + 1;
+    out.push({ updateTextStyle: { range: { startIndex: s, endIndex: e }, textStyle: r.ts, fields: TEXT_FIELDS.join(",") } });
+  }
+  return out;
+}
 
 /** A change Milo made, in the shape the cards already show (find → replace, why), plus what undo needs. */
 export type Change = {
-  op: "replace" | "insert" | "delete" | "style";
+  op: "replace" | "insert" | "delete" | "style" | "format";
   find: string; // text before ("" for an insert)
   replace: string; // text after ("" for a delete)
   why: string;
@@ -25,17 +71,26 @@ export type Change = {
   styles?: Style[]; // insert/delete: each paragraph's style
   style?: Style; // style change: new
   oldStyle?: Style; // style change: old
+  /** format: what each touched paragraph looked like before, and which fields changed */
+  before?: { text: string; occ: number; props: Obj; runs: { from: number; to: number; ts: Obj }[] }[];
+  fields?: { text: string[]; para: string[] };
+  /** replace/delete: the old text's formatting (runs relative to `find`) and paragraph look, restored on undo */
+  oldRuns?: { from: number; to: number; ts: Obj }[];
+  oldProps?: Obj;
 };
 
 export type Op = {
-  op: "replace_text" | "rewrite_paragraph" | "insert" | "delete" | "move" | "set_style";
+  op: "replace_text" | "rewrite_paragraph" | "insert" | "delete" | "move" | "set_style" | "format";
   para?: number;
   after?: number;
   find?: string;
   replace?: string;
   text?: string;
-  paragraphs?: { text: string; style?: Style }[];
+  paragraphs?: ({ text: string; style?: Style } & Fmt)[];
   style?: Style;
+  /** format: which paragraphs ("all" = the whole doc) and what to change */
+  target?: "para" | "all";
+  format?: Fmt;
   why?: string;
 };
 export type Plan = { understood: string; answer: string; ops: Op[]; summary: string; cant: string; notes: string[] };
@@ -54,16 +109,27 @@ export function paragraphs(content: DocEl[] = []): Para[] {
   for (const el of content) {
     if (el.paragraph) {
       const f = flatten([el]);
+      const start = el.startIndex ?? f.at[0] ?? 1;
+      const text = f.text.replace(/\n$/, "");
+      const runs: Para["runs"] = [];
+      let off = 0;
+      for (const r of el.paragraph.elements ?? []) {
+        const c = (r.textRun?.content ?? "").replace(/\n$/, "");
+        if (c.length) runs.push({ from: off, to: off + c.length, ts: { ...(r.textRun?.textStyle ?? {}) } });
+        off += c.length;
+      }
       out.push({
         n: out.length + 1,
-        text: f.text.replace(/\n$/, ""),
-        start: el.startIndex ?? f.at[0] ?? 1,
+        text,
+        start,
         end: el.endIndex ?? (f.at[f.at.length - 1] ?? 0) + 1,
         style: asStyle(el.paragraph.paragraphStyle?.namedStyleType),
         at: f.at,
+        props: { ...(el.paragraph.paragraphStyle ?? {}) },
+        runs,
       });
     } else if (el.table) {
-      out.push({ n: out.length + 1, text: "[table: Milo can't edit tables yet]", start: el.startIndex ?? 0, end: el.endIndex ?? 0, style: "NORMAL_TEXT", at: [] });
+      out.push({ n: out.length + 1, text: "[table: Milo can't edit tables yet]", start: el.startIndex ?? 0, end: el.endIndex ?? 0, style: "NORMAL_TEXT", at: [], props: {}, runs: [] });
     }
   }
   return out;
@@ -71,7 +137,12 @@ export function paragraphs(content: DocEl[] = []): Para[] {
 
 /** What the AI sees: numbered paragraphs with their style. (pure) */
 export function listing(ps: Para[]): string {
-  return ps.map((p) => `P${p.n}${p.style !== "NORMAL_TEXT" ? ` [${p.style}]` : ""}: ${p.text || "(blank line)"}`).join("\n");
+  return ps
+    .map((p) => {
+      const tags = [p.style !== "NORMAL_TEXT" ? p.style : "", p.props.alignment && p.props.alignment !== "START" ? String(p.props.alignment).toLowerCase() : "", p.runs.length && p.runs.every((r) => r.ts.bold) ? "bold" : "", (p.props.indentStart as { magnitude?: number })?.magnitude ? "hanging" : ""].filter(Boolean);
+      return `P${p.n}${tags.length ? ` [${tags.join(", ")}]` : ""}: ${p.text || "(blank line)"}`;
+    })
+    .join("\n");
 }
 
 /** Find a paragraph by its text (the occurrence-th one with that text). (pure) */
@@ -90,7 +161,7 @@ export function findRun(ps: Para[], texts: string[]): Para[] | null {
 const styleReq = (start: number, end: number, style: Style) => ({ updateParagraphStyle: { range: { startIndex: start, endIndex: end }, paragraphStyle: { namedStyleType: style }, fields: "namedStyleType" } });
 
 /** Requests to add paragraphs after `after` (null = top of the doc). Returns the requests. (pure) */
-export function insertRequests(ps: Para[], after: Para | null, texts: string[], styles: Style[]): unknown[] {
+export function insertRequests(ps: Para[], after: Para | null, texts: string[], styles: Style[], fmts: (Fmt | undefined)[] = []): unknown[] {
   const clean = texts.map((t) => t.replace(/\n+/g, " ").trim());
   const reqs: unknown[] = [];
   if (!after) {
@@ -100,6 +171,7 @@ export function insertRequests(ps: Para[], after: Para | null, texts: string[], 
     let s = at;
     clean.forEach((t, i) => {
       reqs.push(styleReq(s, s + t.length + 1, styles[i] ?? "NORMAL_TEXT"));
+      reqs.push(...fmtReqs(s, s + t.length, fmts[i]));
       s += t.length + 1;
     });
     return reqs;
@@ -109,9 +181,23 @@ export function insertRequests(ps: Para[], after: Para | null, texts: string[], 
   let s = at + 1;
   clean.forEach((t, i) => {
     reqs.push(styleReq(s, s + t.length + 1, styles[i] ?? "NORMAL_TEXT"));
+    reqs.push(...fmtReqs(s, s + t.length, fmts[i]));
     s += t.length + 1;
   });
   return reqs;
+}
+
+/** Formatting for a new paragraph [s, e) (its text) plus its line break for paragraph styles. (pure) */
+function fmtReqs(s: number, e: number, f?: Fmt): unknown[] {
+  const d = fmtToDocs(f ?? {});
+  const out: unknown[] = [];
+  // new text would inherit bold/italic/underline from the line before it (a bold title, say): start clean
+  // unless asked (font and size are kept, so it matches the paper)
+  const plain = ["bold", "italic", "underline"].filter((k) => !d.tf.includes(k));
+  if (plain.length && e > s) out.push({ updateTextStyle: { range: { startIndex: s, endIndex: e }, textStyle: {}, fields: plain.join(",") } });
+  if (d.pf.length) out.push({ updateParagraphStyle: { range: { startIndex: s, endIndex: e + 1 }, paragraphStyle: d.ps, fields: d.pf.join(",") } });
+  if (d.tf.length && e > s) out.push({ updateTextStyle: { range: { startIndex: s, endIndex: e }, textStyle: d.ts, fields: d.tf.join(",") } });
+  return out;
 }
 
 /** Requests to remove whole paragraphs (the last one in the doc keeps the doc's final line break). (pure) */
@@ -120,7 +206,16 @@ export function deleteRequests(ps: Para[], run: Para[]): unknown[] {
   const last = run[run.length - 1];
   const isLast = last.n === ps[ps.length - 1].n;
   if (isLast && first.n === 1) return first.end - 1 > first.start ? [{ deleteContentRange: { range: { startIndex: first.start, endIndex: last.end - 1 } } }] : [];
-  if (isLast) return [{ deleteContentRange: { range: { startIndex: first.start - 1, endIndex: last.end - 1 } } }];
+  if (isLast) {
+    // removing the last paragraph takes the line break above it, so the paragraph above would inherit the
+    // deleted one's style: put its own look back right after
+    const prev = ps[first.n - 2];
+    const keep = ["namedStyleType", ...PARA_FIELDS];
+    return [
+      { deleteContentRange: { range: { startIndex: first.start - 1, endIndex: last.end - 1 } } },
+      { updateParagraphStyle: { range: { startIndex: prev.start, endIndex: prev.end }, paragraphStyle: pick(prev.props, keep), fields: keep.join(",") } },
+    ];
+  }
   return [{ deleteContentRange: { range: { startIndex: first.start, endIndex: last.end } } }];
 }
 
@@ -190,9 +285,10 @@ export async function applyPlan(io: DocIO, plan: Plan, live?: (c: Change, i: num
           continue;
         }
         const old = p.text.slice(loc.from, loc.to);
+        const oldRuns = runsIn(p, loc.from, loc.to);
         await io.batch(replaceRequests(p, loc.from, loc.to, op.replace));
         cur.set(op.para!, p.text.slice(0, loc.from) + op.replace.replace(/\n+/g, " ") + p.text.slice(loc.to));
-        changes.push({ op: "replace", find: old, replace: op.replace.replace(/\n+/g, " "), why, kind: "edit" });
+        changes.push({ op: "replace", find: old, replace: op.replace.replace(/\n+/g, " "), why, kind: "edit", oldRuns });
       } else if (op.op === "rewrite_paragraph") {
         const p = locateOrig(ps, op.para);
         const text = (op.text ?? "").replace(/\n+/g, " ").trim();
@@ -200,8 +296,9 @@ export async function applyPlan(io: DocIO, plan: Plan, live?: (c: Change, i: num
           skipped.push({ op, why: !p ? "paragraph gone" : "no change" });
           continue;
         }
+        const oldRuns = runsIn(p, 0, p.text.length);
         await io.batch(replaceRequests(p, 0, p.text.length, text));
-        if (p.text) changes.push({ op: "replace", find: p.text, replace: text, why, kind: "rewrite" });
+        if (p.text) changes.push({ op: "replace", find: p.text, replace: text, why, kind: "rewrite", oldRuns });
         else changes.push({ op: "insert", find: "", replace: text, why, kind: "add", anchor: ps[ps.indexOf(p) - 1]?.text ?? "", styles: [p.style] });
         cur.set(op.para!, text);
       } else if (op.op === "insert") {
@@ -213,7 +310,7 @@ export async function applyPlan(io: DocIO, plan: Plan, live?: (c: Change, i: num
         const a = anchorFor(ps, op.after ?? ps.length);
         const texts = items.map((x) => x.text.replace(/\n+/g, " ").trim());
         const styles = items.map((x) => asStyle(x.style));
-        await io.batch(insertRequests(ps, a?.para ?? null, texts, styles));
+        await io.batch(insertRequests(ps, a?.para ?? null, texts, styles, items));
         tail.set(op.after ?? ps.length, texts[texts.length - 1]);
         changes.push({ op: "insert", find: "", replace: texts.join("\n"), why, kind: "add", anchor: a?.text ?? "", styles });
       } else if (op.op === "delete") {
@@ -225,7 +322,7 @@ export async function applyPlan(io: DocIO, plan: Plan, live?: (c: Change, i: num
         const idx = ps.indexOf(p);
         await io.batch(deleteRequests(ps, [p]));
         cur.set(op.para!, null);
-        changes.push({ op: "delete", find: p.text, replace: "", why, kind: "cut", anchor: ps[idx - 1]?.text ?? "", styles: [p.style] });
+        changes.push({ op: "delete", find: p.text, replace: "", why, kind: "cut", anchor: ps[idx - 1]?.text ?? "", styles: [p.style], oldRuns: runsIn(p, 0, p.text.length), oldProps: pick(p.props, PARA_FIELDS) });
       } else if (op.op === "move") {
         const p = locateOrig(ps, op.para);
         if (!p || op.after === op.para) {
@@ -233,14 +330,56 @@ export async function applyPlan(io: DocIO, plan: Plan, live?: (c: Change, i: num
           continue;
         }
         const idx = ps.indexOf(p);
+        const keepRuns = runsIn(p, 0, p.text.length);
+        const keepProps = pick(p.props, PARA_FIELDS);
         await io.batch(deleteRequests(ps, [p]));
-        changes.push({ op: "delete", find: p.text, replace: "", why, kind: "move", anchor: ps[idx - 1]?.text ?? "", styles: [p.style] });
+        changes.push({ op: "delete", find: p.text, replace: "", why, kind: "move", anchor: ps[idx - 1]?.text ?? "", styles: [p.style], oldRuns: keepRuns, oldProps: keepProps });
         cur.set(op.para!, null);
         const ps2 = paragraphs((await io.read()).content);
         const a = anchorFor(ps2, op.after ?? 0);
         await io.batch(insertRequests(ps2, a?.para ?? null, [p.text], [p.style]));
+        {
+          const ps3 = paragraphs((await io.read()).content);
+          const at = a?.para ? ps3.findIndex((q) => q.start >= (a.para as Para).end - 1 && norm(q.text) === norm(p.text)) : ps3.findIndex((q) => norm(q.text) === norm(p.text));
+          if (at >= 0) await io.batch(restoreReqs(ps3[at], 0, keepRuns, keepProps));
+        }
         changes.push({ op: "insert", find: "", replace: p.text, why, kind: "move", anchor: a?.text ?? "", styles: [p.style] });
         tail.set(op.after ?? 0, p.text);
+      } else if (op.op === "format") {
+        const d = fmtToDocs(op.format ?? {});
+        if (!d.tf.length && !d.pf.length) {
+          skipped.push({ op, why: "no formatting given" });
+          continue;
+        }
+        const targets: { p: Para; from: number; to: number }[] = [];
+        if (op.target === "all") for (const p of ps) { if (!p.text.startsWith("[table:")) targets.push({ p, from: 0, to: p.text.length }); }
+        else {
+          const p = locateOrig(ps, op.para);
+          const loc = p && op.find ? within(p, op.find) : null;
+          if (!p || (op.find && !loc)) {
+            skipped.push({ op, why: !p ? "paragraph gone" : "text not found" });
+            continue;
+          }
+          targets.push({ p, from: loc?.from ?? 0, to: loc?.to ?? p.text.length });
+        }
+        const reqs: unknown[] = [];
+        const before: NonNullable<Change["before"]> = [];
+        for (const t of targets) {
+          const occN = ps.filter((q) => q.n < t.p.n && norm(q.text) === norm(t.p.text)).length;
+          before.push({ text: t.p.text, occ: occN, props: pick(t.p.props, d.pf), runs: t.p.runs.filter((r) => r.to > t.from && r.from < t.to).map((r) => ({ from: Math.max(r.from, t.from), to: Math.min(r.to, t.to), ts: pick(r.ts, d.tf) })) });
+          if (d.pf.length) reqs.push({ updateParagraphStyle: { range: { startIndex: t.p.start, endIndex: t.p.end }, paragraphStyle: d.ps, fields: d.pf.join(",") } });
+          if (d.tf.length && t.to > t.from) {
+            const s = t.p.at[t.from] ?? t.p.start;
+            const e = (t.p.at[t.to - 1] ?? s) + 1;
+            reqs.push({ updateTextStyle: { range: { startIndex: s, endIndex: e }, textStyle: d.ts, fields: d.tf.join(",") } });
+          }
+        }
+        if (!reqs.length) {
+          skipped.push({ op, why: "nothing to format" });
+          continue;
+        }
+        await io.batch(reqs);
+        changes.push({ op: "format", find: op.target === "all" ? "(the whole paper)" : (targets[0].p.text.slice(targets[0].from, targets[0].to) || targets[0].p.text), replace: "", why, kind: "format", before, fields: { text: d.tf, para: d.pf } });
       } else if (op.op === "set_style") {
         const p = locateOrig(ps, op.para);
         const style = asStyle(op.style);
@@ -275,6 +414,10 @@ export async function undoChanges(io: DocIO, changes: Change[]): Promise<{ undon
       const h = hits.find((x) => norm(x.p.text) === norm(c.replace)) ?? (total === 1 ? hits[0] : undefined);
       if (h?.loc) {
         await io.batch(replaceRequests(h.p, h.loc.from, h.loc.to, c.find));
+        if (c.oldRuns?.length) {
+          const p2 = paragraphs((await io.read()).content).find((q) => q.start === h.p.start);
+          if (p2) await io.batch(restoreReqs(p2, h.loc.from, c.oldRuns));
+        }
         ok = true;
       }
     } else if (op === "insert") {
@@ -287,6 +430,31 @@ export async function undoChanges(io: DocIO, changes: Change[]): Promise<{ undon
       const after = c.anchor ? findPara(ps, c.anchor) : null;
       if (!c.anchor || after) {
         await io.batch(insertRequests(ps, after, c.find.split("\n"), c.styles ?? []));
+        if (c.oldRuns || c.oldProps) {
+          const ps2 = paragraphs((await io.read()).content);
+          const back = after ? ps2.find((q) => q.start === after.end) : ps2[0];
+          if (back && norm(back.text) === norm(c.find)) await io.batch(restoreReqs(back, 0, c.oldRuns ?? [], c.oldProps));
+        }
+        ok = true;
+      }
+    } else if (op === "format" && c.before && c.fields) {
+      const reqs: unknown[] = [];
+      for (const b of c.before) {
+        const p = findPara(ps, b.text, b.occ);
+        if (!p) continue;
+        // send each changed field with its old value; a field that wasn't set goes back to default
+        if (c.fields.para.length) reqs.push({ updateParagraphStyle: { range: { startIndex: p.start, endIndex: p.end }, paragraphStyle: b.props, fields: c.fields.para.join(",") } });
+        if (c.fields.text.length) {
+          for (const r of b.runs) {
+            if (r.to <= r.from) continue;
+            const s = p.at[r.from] ?? p.start;
+            const e = (p.at[r.to - 1] ?? s) + 1;
+            reqs.push({ updateTextStyle: { range: { startIndex: s, endIndex: e }, textStyle: r.ts, fields: c.fields.text.join(",") } });
+          }
+        }
+      }
+      if (reqs.length) {
+        await io.batch(reqs);
         ok = true;
       }
     } else if (op === "style") {

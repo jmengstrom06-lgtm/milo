@@ -8,7 +8,7 @@
 export type DocEl = {
   startIndex?: number;
   endIndex?: number;
-  paragraph?: { elements?: { startIndex?: number; textRun?: { content?: string } }[]; paragraphStyle?: { namedStyleType?: string } };
+  paragraph?: { elements?: { startIndex?: number; textRun?: { content?: string; textStyle?: Record<string, unknown> } }[]; paragraphStyle?: { namedStyleType?: string } & Record<string, unknown> };
   table?: { tableRows?: { tableCells?: { content?: DocEl[] }[] }[] };
 };
 export type DocText = { text: string; at: number[] }; // at[i] = Docs index of text[i]
