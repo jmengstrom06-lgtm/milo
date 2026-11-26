@@ -5,7 +5,6 @@
 import { callTool, persona } from "./brain";
 import { log as bb } from "./blackbox";
 import { models } from "./gateway";
-import { editBrief } from "./writing";
 import { applyPlan, docWords, listing, paragraphs, type Change, type DocIO, type Plan } from "./docAgent";
 
 const PLAN_TOOL = {
@@ -53,7 +52,7 @@ const CHECK_TOOL = {
   input_schema: {
     type: "object",
     properties: {
-      done: { type: "boolean", description: "true only if EVERY part of the request is done in the doc." },
+      done: { type: "boolean", description: "true if every PART of the request was carried out in the doc, even if it could be done better. false only if a concrete part was not done at all (nothing added where they asked for an addition, a named paragraph not moved/removed, a word target clearly missed, a question unanswered)." },
       missing: { type: "string", description: "If not done: exactly what's still missing or wrong, as an instruction. Else empty." },
       extra: { type: "string", description: "Anything changed that they did NOT ask for, else empty." },
     },
@@ -61,25 +60,26 @@ const CHECK_TOOL = {
   },
 };
 
-function system(ask: string, rubric: string): string {
-  const brief = editBrief(ask, rubric)
-    .split("\n")
-    .filter((l) => !/^Focus: a full edit/.test(l)); // no default "polish everything": do what they asked
+function system(rubric: string): string {
+  // No keyword rules here (they misfire: "move X right after my intro" is not "edit only the intro").
+  // The request itself says what to do and where; the agent reads it whole.
   return `${persona()}
 Today is ${new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}.
 You work on a college student's own Google Doc while they watch. Do EXACTLY what they asked, all of it, and nothing they didn't ask for.
 - Read the request literally. "Add a section with your thoughts" = insert new paragraphs (don't also fix grammar). "Fix the grammar" = only grammar. "Edit it" or "make it better" = a real edit of grammar, clarity, flow and wording. A question = answer it with no actions.
 - Pick the right action: replace_text for words and phrases; rewrite_paragraph for a heavier rewrite of one paragraph; insert to add anything new (sections, sentences as their own paragraph, a conclusion, a heading); delete; move to reorder; set_style for headings and titles.
+- "My intro" = the first body paragraph after the title; "my conclusion" = the last body paragraph (unless the paper labels its sections otherwise). "The second paragraph" counts body paragraphs, not the header or title.
 - "After the paper" / "at the end" = after the last paragraph. "Before the conclusion" = after the paragraph before the conclusion. A header block (name, professor, class, date) is not the paper's start.
 - New writing: match the paper's voice, level and formatting. A new section is usually a short heading paragraph only if the paper already uses headings or they asked for one; otherwise plain paragraphs.
 - Keep their argument, facts, direct quotes and numbers unless they asked to change them. Never invent sources, statistics, quotes or citations (if they need sources, say "say 'find sources for my paper'" in notes).
 - Word targets ("cut to 500 words") count the body, not the header block.
+- A part of the paper named in the request ("my intro", "the CDC paragraph") is WHERE to act or a reference point, not a limit on everything else they asked.
 - If part of the request can't be done in a Google Doc from here, still do the rest and say what you couldn't in "cant".
-${brief.join("\n")}`;
+${rubric ? `Grade it against this rubric and make changes that close the gaps:\n${rubric.slice(0, 4000)}` : ""}`;
 }
 
 export type DocResult =
-  | { ok: true; title: string; summary: string; answer: string; applied: Change[]; skipped: number; notes: string[]; cant: string; missing: string; wordsBefore: number; wordsAfter: number }
+  | { ok: true; title: string; summary: string; answer: string; applied: Change[]; skipped: number; skippedWhy: string[]; plans: string[]; notes: string[]; cant: string; missing: string; wordsBefore: number; wordsAfter: number }
   | { ok: false; text: string };
 
 /** Do what they asked to the doc, check it, finish what's missing. */
@@ -95,6 +95,8 @@ export async function docWork(io: DocIO, ask: string, opts: { rubric?: string; l
 
   const applied: Change[] = [];
   let skipped = 0;
+  const skippedWhy: string[] = [];
+  const plans: string[] = [];
   let plan: Plan | null = null;
   let missing = "";
   let summary = "";
@@ -106,9 +108,9 @@ export async function docWork(io: DocIO, ask: string, opts: { rubric?: string; l
     const ps = paragraphs(doc.content);
     const msg = round === 0
       ? `The student said: "${ask}"\n\nDocument title: ${doc.title}\n\n${listing(ps)}`
-      : `The student said: "${ask}"\n\nYou already made changes, but this is still missing: ${missing}\nDo ONLY what's missing. Paragraph numbers below are the doc as it is now.\n\nDocument title: ${doc.title}\n\n${listing(ps)}`;
+      : `The student said: "${ask}"\n\nYou already made changes, but this is still missing: ${missing}\nDo ONLY what's missing, and don't touch any paragraph the request doesn't involve. If nothing concrete is missing, return no actions. Paragraph numbers below are the doc as it is now.\n\nDocument title: ${doc.title}\n\n${listing(ps)}`;
     opts.status?.(round === 0 ? `Reading “${doc.title}”…` : "Finishing the rest…");
-    const r = await callTool<Plan>({ model: models.smart(), max_tokens: 12000, system: system(ask, opts.rubric ?? ""), tools: [PLAN_TOOL], tool_choice: { type: "auto" }, messages: [{ role: "user", content: msg }] }, PLAN_TOOL.name);
+    const r = await callTool<Plan>({ model: models.smart(), max_tokens: 12000, system: system(opts.rubric ?? ""), tools: [PLAN_TOOL], tool_choice: { type: "auto" }, messages: [{ role: "user", content: msg }] }, PLAN_TOOL.name);
     if (!r.ok) {
       if (!applied.length) return { ok: false, text: r.text };
       break;
@@ -120,12 +122,14 @@ export async function docWork(io: DocIO, ask: string, opts: { rubric?: string; l
       cant = plan.cant ?? "";
       notes = plan.notes.slice(0, 3);
     }
+    plans.push(plan.ops.map((o) => `${o.op}(${o.para ?? ""}${o.after !== undefined ? `→${o.after}` : ""})`).join(" ") || `none${plan.cant ? ` cant: ${plan.cant}` : ""}${plan.answer ? " (answered)" : ""}`);
     bb("docwork", "plan", { round, understood: plan.understood?.slice(0, 120), ops: plan.ops.map((o) => o.op), answer: !!plan.answer, cant: !!plan.cant });
     if (!plan.ops.length) break; // a question, or nothing more it can do
     opts.status?.(`Making ${plan.ops.length} change${plan.ops.length === 1 ? "" : "s"}…`);
     const res = await applyPlan(io, plan, opts.live);
     applied.push(...res.changes);
     skipped += res.skipped.length;
+    skippedWhy.push(...res.skipped.map((s) => `${s.op.op}: ${s.why}`));
     if (res.skipped.length) bb("docwork", "skipped", { why: res.skipped.map((s) => s.why) });
 
     // the check: does the doc now match the request?
@@ -136,7 +140,7 @@ export async function docWork(io: DocIO, ask: string, opts: { rubric?: string; l
       {
         model: models.fast(),
         max_tokens: 600,
-        system: "You check a writing assistant's work on a student's Google Doc. Compare the request with the doc as it is now. Be strict about whether every part of the request was done; don't nitpick quality.",
+        system: "You check a writing assistant's work on a student's Google Doc. List the parts of the request, then check each one was carried out in the doc as it is now. Judge whether it was DONE, not how well: improving, rewriting, shortening or strengthening something counts as done once that thing was changed in that direction. Never ask for more polish.",
         tools: [CHECK_TOOL],
         tool_choice: { type: "auto" },
         messages: [{ role: "user", content: `Request: "${ask}"\n\nChanges made:\n${changeList || "(none)"}\n\nThe doc now:\n${listing(after)}` }],
@@ -152,5 +156,5 @@ export async function docWork(io: DocIO, ask: string, opts: { rubric?: string; l
     missing = chk.data.missing || "part of the request";
   }
   const end = await io.read();
-  return { ok: true, title: first.title, summary: summary || (applied.length ? "Done." : "I read it."), answer, applied, skipped, notes, cant, missing, wordsBefore, wordsAfter: docWords(end.content) };
+  return { ok: true, title: first.title, summary: summary || (applied.length ? "Done." : "I read it."), answer, applied, skipped, skippedWhy, plans, notes, cant, missing, wordsBefore, wordsAfter: docWords(end.content) };
 }
