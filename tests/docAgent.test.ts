@@ -100,3 +100,92 @@ describe("the doc agent's actions, on a simulated Google Doc", () => {
     expect(d.paras()).toEqual(new SimDoc(PAPER).paras());
   });
 });
+
+describe("formatting, and nothing ever lost", () => {
+  const styled = () => {
+    const d = new SimDoc(PAPER);
+    // the student's own formatting: a centered bold title, an italic word, a bold phrase
+    d.apply([
+      { updateParagraphStyle: { range: { startIndex: 1, endIndex: 19 }, paragraphStyle: { alignment: "CENTER" }, fields: "alignment" } },
+      { updateTextStyle: { range: { startIndex: 1, endIndex: 18 }, textStyle: { bold: true }, fields: "bold" } },
+    ]);
+    const p3 = d.content()[2];
+    const s = (p3.startIndex ?? 0) + "First, ".length;
+    d.apply([{ updateTextStyle: { range: { startIndex: s, endIndex: s + 5 }, textStyle: { italic: true }, fields: "italic" } }]);
+    return d;
+  };
+  it("double space + Times New Roman 12 on the whole paper, undone exactly", async () => {
+    const d = styled();
+    const before = d.full();
+    const r = await applyPlan(d.io(), plan([{ op: "format", target: "all", format: { lineSpacing: 200, font: "Times New Roman", size: 12 } }]));
+    expect(r.skipped).toEqual([]);
+    for (const p of d.full()) {
+      expect(p.ps.lineSpacing).toBe(200);
+      for (const run of p.runs) expect(run.ts.weightedFontFamily).toMatchObject({ fontFamily: "Times New Roman" });
+    }
+    expect(d.full()[0].runs[0].ts.bold).toBe(true); // the student's bold title stays bold
+    await undoChanges(d.io(), r.changes);
+    expect(d.full()).toEqual(before);
+  });
+  it("bold one phrase, undone exactly", async () => {
+    const d = styled();
+    const before = d.full();
+    const r = await applyPlan(d.io(), plan([{ op: "format", para: 4, find: "not sleeping", format: { bold: true } }]));
+    expect(d.full()[3].runs.find((x) => x.text === "not sleeping")?.ts.bold).toBe(true);
+    await undoChanges(d.io(), r.changes);
+    expect(d.full()).toEqual(before);
+  });
+  it("delete a formatted paragraph, undo brings back its formatting", async () => {
+    const d = styled();
+    const before = d.full();
+    const r = await applyPlan(d.io(), plan([{ op: "delete", para: 1 }, { op: "delete", para: 3 }]));
+    expect(d.full().length).toBe(3);
+    await undoChanges(d.io(), r.changes);
+    expect(d.full()).toEqual(before);
+  });
+  it("rewrite a paragraph with an italic word, undo brings the italic back", async () => {
+    const d = styled();
+    const before = d.full();
+    const r = await applyPlan(d.io(), plan([{ op: "rewrite_paragraph", para: 3, text: "First, rest is how students learn best." }]));
+    await undoChanges(d.io(), r.changes);
+    expect(d.full()).toEqual(before);
+  });
+  it("move keeps the paragraph's formatting, and undoes exactly", async () => {
+    const d = styled();
+    const before = d.full();
+    const r = await applyPlan(d.io(), plan([{ op: "move", para: 1, after: 5 }]));
+    const last = d.full()[4];
+    expect(last.text).toBe("Why Sleep Matters");
+    expect(last.ps.alignment).toBe("CENTER");
+    expect(last.runs[0].ts.bold).toBe(true);
+    await undoChanges(d.io(), r.changes);
+    expect(d.full()).toEqual(before);
+  });
+  it("new text after a bold title isn't bold; a Works Cited entry gets a hanging indent", async () => {
+    const d = styled();
+    await applyPlan(d.io(), plan([
+      { op: "insert", after: 1, paragraphs: [{ text: "A new opening line." }] },
+      { op: "insert", after: 5, paragraphs: [{ text: "Works Cited", align: "CENTER" }, { text: "Smith, Ann. Sleep. 2020.", hanging: true }] },
+    ]));
+    const f = d.full();
+    expect(f[1].runs[0].ts.bold).toBeUndefined();
+    expect(f[f.length - 2].ps.alignment).toBe("CENTER");
+    expect(f[f.length - 1].ps.indentStart).toMatchObject({ magnitude: 36 });
+  });
+  it("a big mixed request undoes to the exact original", async () => {
+    const d = styled();
+    const before = d.full();
+    const r = await applyPlan(d.io(), plan([
+      { op: "format", target: "all", format: { lineSpacing: 200, firstLineIndent: 36 } },
+      { op: "replace_text", para: 3, find: "learn", replace: "learn and remember" },
+      { op: "insert", after: 5, paragraphs: [{ text: "Works Cited", align: "CENTER" }, { text: "Smith, Ann. Sleep. 2020.", hanging: true }] },
+      { op: "move", para: 4, after: 2 },
+      { op: "format", para: 1, format: { align: "START", bold: false } },
+      { op: "set_style", para: 5, style: "HEADING_2" },
+    ]));
+    expect(r.skipped).toEqual([]);
+    const u = await undoChanges(d.io(), r.changes);
+    expect(u.missed).toBe(0);
+    expect(d.full()).toEqual(before);
+  });
+});

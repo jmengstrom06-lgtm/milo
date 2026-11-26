@@ -3144,7 +3144,7 @@ export default function App() {
         void startEdit(intent.text);
         return;
       case "cite":
-        void startCite(intent.text);
+        void startEdit(intent.text); // sources live in the doc agent now (real sources, exact citations, undoable)
         return;
       case "cite_page":
         void startCitePage(intent.text);
@@ -3260,7 +3260,7 @@ export default function App() {
       case "edit_paper":
         return void startEdit(text);
       case "cite":
-        return void (/\b(this|that) (page|article|site|website)\b|^cite this\b/i.test(text) ? startCitePage(text) : startCite(text));
+        return void (/\b(this|that) (page|article|site|website)\b|^cite this\b/i.test(text) ? startCitePage(text) : startEdit(text));
       case "discussion":
         return void startDiscussion(text);
       case "reading":

@@ -2,7 +2,9 @@
 // against what the student asked and finish anything missing (up to two more passes). Honest at the end:
 // if something couldn't be done, the reply says so instead of quietly doing something else.
 
-import { callTool, persona } from "./brain";
+import { callClaude, callTool, persona } from "./brain";
+import { scholarly, webSources } from "./writing";
+import { citeLine, inText, styleOf, type Source } from "./citations";
 import { log as bb } from "./blackbox";
 import { models } from "./gateway";
 import { applyPlan, docWords, listing, paragraphs, type Change, type DocIO, type Plan } from "./docAgent";
@@ -21,7 +23,7 @@ const PLAN_TOOL = {
         items: {
           type: "object",
           properties: {
-            op: { type: "string", enum: ["replace_text", "rewrite_paragraph", "insert", "delete", "move", "set_style"] },
+            op: { type: "string", enum: ["replace_text", "rewrite_paragraph", "insert", "delete", "move", "set_style", "format"] },
             para: { type: "number", description: "The paragraph (P number) this acts on." },
             after: { type: "number", description: "insert/move: the P number it goes after. 0 = the very top. The last P number = the very end." },
             find: { type: "string", description: "replace_text: exact text from that paragraph, copied character for character." },
@@ -30,9 +32,36 @@ const PLAN_TOOL = {
             paragraphs: {
               type: "array",
               description: "insert: the new paragraphs, in order. Use a heading paragraph only if it fits the paper.",
-              items: { type: "object", properties: { text: { type: "string" }, style: { type: "string", enum: ["NORMAL_TEXT", "TITLE", "SUBTITLE", "HEADING_1", "HEADING_2", "HEADING_3"] } }, required: ["text"] },
+              items: {
+                type: "object",
+                properties: {
+                  text: { type: "string" },
+                  style: { type: "string", enum: ["NORMAL_TEXT", "TITLE", "SUBTITLE", "HEADING_1", "HEADING_2", "HEADING_3"] },
+                  align: { type: "string", enum: ["START", "CENTER", "END", "JUSTIFIED"] },
+                  bold: { type: "boolean" },
+                  hanging: { type: "boolean", description: "Hanging indent (Works Cited / References entries)." },
+                },
+                required: ["text"],
+              },
             },
             style: { type: "string", enum: ["NORMAL_TEXT", "TITLE", "SUBTITLE", "HEADING_1", "HEADING_2", "HEADING_3"] },
+            target: { type: "string", enum: ["para", "all"], description: "format: one paragraph (para, optionally just the `find` text in it) or the whole paper (all)." },
+            format: {
+              type: "object",
+              description: "format: only the things to change.",
+              properties: {
+                bold: { type: "boolean" },
+                italic: { type: "boolean" },
+                underline: { type: "boolean" },
+                font: { type: "string", description: "e.g. Times New Roman, Arial" },
+                size: { type: "number", description: "points, e.g. 12" },
+                align: { type: "string", enum: ["START", "CENTER", "END", "JUSTIFIED"] },
+                lineSpacing: { type: "number", description: "100 = single, 150, 200 = double" },
+                firstLineIndent: { type: "number", description: "points; 36 = half an inch" },
+                hanging: { type: "boolean" },
+                noSpacing: { type: "boolean", description: "remove extra space above/below paragraphs" },
+              },
+            },
             why: { type: "string", description: "A few words the student sees: why this change." },
           },
           required: ["op", "why"],
@@ -67,19 +96,51 @@ function system(rubric: string): string {
 Today is ${new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}.
 You work on a college student's own Google Doc while they watch. Do EXACTLY what they asked, all of it, and nothing they didn't ask for.
 - Read the request literally. "Add a section with your thoughts" = insert new paragraphs (don't also fix grammar). "Fix the grammar" = only grammar. "Edit it" or "make it better" = a real edit of grammar, clarity, flow and wording. A question = answer it with no actions.
-- Pick the right action: replace_text for words and phrases; rewrite_paragraph for a heavier rewrite of one paragraph; insert to add anything new (sections, sentences as their own paragraph, a conclusion, a heading); delete; move to reorder; set_style for headings and titles.
+- Pick the right action: replace_text for words and phrases; rewrite_paragraph for a heavier rewrite of one paragraph; insert to add anything new (sections, a conclusion, a heading, a header line); delete; move to reorder; set_style for headings and titles; format for bold/italic/underline, font, size, alignment, line spacing and indents (target "all" for the whole paper).
+- MLA format = Times New Roman 12, double spaced (200), no extra paragraph spacing, half-inch first-line indents on body paragraphs, a left-aligned header block (name, professor, class, date), the title centered and not bold. APA 7 = double spaced, 12 pt, a bold centered title, and a References list.
 - "My intro" = the first body paragraph after the title; "my conclusion" = the last body paragraph (unless the paper labels its sections otherwise). "The second paragraph" counts body paragraphs, not the header or title.
 - "After the paper" / "at the end" = after the last paragraph. "Before the conclusion" = after the paragraph before the conclusion. A header block (name, professor, class, date) is not the paper's start.
 - New writing: match the paper's voice, level and formatting. A new section is usually a short heading paragraph only if the paper already uses headings or they asked for one; otherwise plain paragraphs.
 - Keep their argument, facts, direct quotes and numbers unless they asked to change them. Never invent sources, statistics, quotes or citations (if they need sources, say "say 'find sources for my paper'" in notes).
 - Word targets ("cut to 500 words") count the body, not the header block.
 - A part of the paper named in the request ("my intro", "the CDC paragraph") is WHERE to act or a reference point, not a limit on everything else they asked.
-- If part of the request can't be done in a Google Doc from here, still do the rest and say what you couldn't in "cant".
+- Can't be done from here: tables, images, comments, page numbers or headers/footers, page setup. Do the rest and say so in "cant".
 ${rubric ? `Grade it against this rubric and make changes that close the gaps:\n${rubric.slice(0, 4000)}` : ""}`;
 }
 
+const WANTS_SOURCES = /\b(sources?|cite|citing|citations?|works cited|references|bibliography|scholarly|peer.?reviewed|research to back|evidence from)\b/i;
+const NUM: Record<string, number> = { one: 1, a: 1, an: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8 };
+
+/** Real sources for this paper, found BEFORE planning, each with its exact in-text citation and list entry.
+ *  The agent may only cite from this list, so nothing is ever made up. */
+let lastTopic = "";
+export async function gatherSources(ask: string, docText: string, title: string): Promise<{ style: "MLA" | "APA"; list: { s: Source; inText: string; entry: string; notes: string }[] }> {
+  const style = styleOf(ask, docText);
+  const m = ask.toLowerCase().match(/\b(\d+|one|a|an|two|three|four|five|six|seven|eight)\s+(?:more\s+)?(?:scholarly\s+|peer.?reviewed\s+|credible\s+|academic\s+|real\s+)?(?:sources?|citations?|references|articles)\b/);
+  const n = Math.min(8, Math.max(1, m ? (NUM[m[1]] ?? Number(m[1])) : 3));
+  const basis = docText.trim().length > 200 ? docText.slice(0, 6000) : `${title}\n${ask}`;
+  const q = await callClaude({ model: models.fast(), max_tokens: 60, system: "Reply with only a 3 to 8 word search query for scholarly sources on this paper's topic.", messages: [{ role: "user", content: basis }] });
+  let topic = q.ok ? q.data.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join(" ").replace(/["\n]/g, " ").trim().slice(0, 120) : "";
+  if (topic.split(/\s+/).length < 2) topic = title; // an empty or one-word answer: use the paper's own title
+  let [sch, web] = await Promise.all([scholarly(topic, n + 4).catch(() => []), webSources(topic, 2).catch(() => [])]);
+  let used = topic;
+  if (sch.length + web.length < n) {
+    // too narrow or a hiccup: search again, broader (the paper's title, or the first few words of the query)
+    const broader = (title && !/^untitled/i.test(title) ? title : topic.split(/\s+/).slice(0, 3).join(" ")).replace(/[^\w\s'-]/g, " ").trim();
+    const [s2, w2] = await Promise.all([scholarly(broader, n + 4).catch(() => []), web.length ? Promise.resolve([]) : webSources(broader, 2).catch(() => [])]);
+    const seen = new Set([...sch, ...web].map((x) => x.doi || x.url));
+    sch = [...sch, ...s2.filter((x) => !seen.has(x.doi || x.url))];
+    web = [...web, ...w2.filter((x) => !seen.has(x.doi || x.url))];
+    used = `${topic} | ${broader}`;
+  }
+  const pool = [...sch, ...web].slice(0, n + 6);
+  bb("docwork", "sources", { topic: used, scholarly: sch.length, web: web.length, style });
+  lastTopic = `${used} (${sch.length} scholarly, ${web.length} web)`;
+  return { style, list: pool.map((s) => ({ s, inText: inText(s, style), entry: citeLine(s, style), notes: ((s as Source & { notes?: string }).notes ?? "").slice(0, 300) })) };
+}
+
 export type DocResult =
-  | { ok: true; title: string; summary: string; answer: string; applied: Change[]; skipped: number; skippedWhy: string[]; plans: string[]; notes: string[]; cant: string; missing: string; wordsBefore: number; wordsAfter: number }
+  | { ok: true; title: string; summary: string; answer: string; applied: Change[]; skipped: number; skippedWhy: string[]; plans: string[]; notes: string[]; cant: string; missing: string; wordsBefore: number; wordsAfter: number; offered: string[]; offeredCites: string[]; sourceSearch: string }
   | { ok: false; text: string };
 
 /** Do what they asked to the doc, check it, finish what's missing. */
@@ -92,6 +153,24 @@ export async function docWork(io: DocIO, ask: string, opts: { rubric?: string; l
     if (!/\b(write|add|start|draft|make|create|put)\b/i.test(ask)) return { ok: false, text: "That doc is empty. Write a draft (even a rough one), or tell me what to write in it." };
   }
   if (ps0.reduce((n, p) => n + p.text.length, 0) > 150000) return { ok: false, text: "That doc is really long. Tell me which part to work on, like “my intro” or “section 2”." };
+
+  // sources first (only when asked): real ones, each with its exact citation, so the plan can't invent any
+  let sourceBlock = "";
+  let offered: string[] = [];
+  let offeredCites: string[] = [];
+  if (WANTS_SOURCES.test(ask)) {
+    opts.status?.("Finding real sources…");
+    // the paper's real title (its Title/Heading line) beats the file name
+    const paperTitle = ps0.find((p) => p.style === "TITLE" || p.style === "HEADING_1")?.text || ps0.find((p) => p.props.alignment === "CENTER" && p.text.split(/\s+/).length <= 12)?.text || first.title;
+    const src = await gatherSources(ask, ps0.map((p) => p.text).join("\n"), paperTitle);
+    offered = src.list.map((x) => x.entry);
+    offeredCites = src.list.map((x) => x.inText);
+    sourceBlock = src.list.length
+      ? `\n\nREAL SOURCES you may cite (${src.style}). Use ONLY these. Copy the in-text citation and the list entry EXACTLY as written:\n${src.list
+          .map((x, i) => `[S${i + 1}] ${x.s.title} (${x.s.year ?? x.s.date ?? "n.d."})${x.notes ? ` — ${x.notes}` : ""}\n   in-text: ${x.inText}\n   entry: ${x.entry}`)
+          .join("\n")}\nCiting: put the in-text citation just before the final period of the sentence it supports (replace_text on that sentence's ending), only where the source really supports it. Then the list: if the paper has no ${src.style === "APA" ? "References" : "Works Cited"} list, insert at the very end a heading paragraph "${src.style === "APA" ? "References" : "Works Cited"}" (align CENTER${src.style === "APA" ? ", bold" : ""}) followed by one paragraph per source you cited (hanging: true), alphabetical. If a list exists, insert the new entries into it in alphabetical order. Cite as many sources as they asked for (default 3).`
+      : "\n\nThey asked for sources, but none could be found and verified right now. Don't cite anything; say so in cant.";
+  }
 
   const applied: Change[] = [];
   let skipped = 0;
@@ -107,8 +186,8 @@ export async function docWork(io: DocIO, ask: string, opts: { rubric?: string; l
     const doc = round === 0 ? first : await io.read();
     const ps = paragraphs(doc.content);
     const msg = round === 0
-      ? `The student said: "${ask}"\n\nDocument title: ${doc.title}\n\n${listing(ps)}`
-      : `The student said: "${ask}"\n\nYou already made changes, but this is still missing: ${missing}\nDo ONLY what's missing, and don't touch any paragraph the request doesn't involve. If nothing concrete is missing, return no actions. Paragraph numbers below are the doc as it is now.\n\nDocument title: ${doc.title}\n\n${listing(ps)}`;
+      ? `The student said: "${ask}"\n\nDocument title: ${doc.title}\n\n${listing(ps)}${sourceBlock}`
+      : `The student said: "${ask}"\n\nYou already made changes, but this is still missing: ${missing}\nDo ONLY what's missing, and don't touch any paragraph the request doesn't involve. If nothing concrete is missing, return no actions. Paragraph numbers below are the doc as it is now.\n\nDocument title: ${doc.title}\n\n${listing(ps)}${sourceBlock}`;
     opts.status?.(round === 0 ? `Reading “${doc.title}”…` : "Finishing the rest…");
     const r = await callTool<Plan>({ model: models.smart(), max_tokens: 12000, system: system(opts.rubric ?? ""), tools: [PLAN_TOOL], tool_choice: { type: "auto" }, messages: [{ role: "user", content: msg }] }, PLAN_TOOL.name);
     if (!r.ok) {
@@ -156,5 +235,5 @@ export async function docWork(io: DocIO, ask: string, opts: { rubric?: string; l
     missing = chk.data.missing || "part of the request";
   }
   const end = await io.read();
-  return { ok: true, title: first.title, summary: summary || (applied.length ? "Done." : "I read it."), answer, applied, skipped, skippedWhy, plans, notes, cant, missing, wordsBefore, wordsAfter: docWords(end.content) };
+  return { ok: true, title: first.title, summary: summary || (applied.length ? "Done." : "I read it."), answer, applied, skipped, skippedWhy, plans, notes, offered, offeredCites, sourceSearch: offered.length || WANTS_SOURCES.test(ask) ? lastTopic : "", cant, missing, wordsBefore, wordsAfter: docWords(end.content) };
 }
