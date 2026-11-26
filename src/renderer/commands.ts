@@ -41,7 +41,8 @@ export type Intent =
   | { kind: "no" }
   | { kind: "chat"; text: string };
 
-const WAKE = /^\s*(?:(?:hey|hi|okay|ok|yo|so)\s*,?\s+)?(?:milo|mylo|my low|mila|miilo)\b[\s,.!?:-]*/i;
+// What "Milo" turns into when it's mis-heard at the start: "myelone", "my lo", "mylow", "milo's", or just "My..." cut off.
+const WAKE = /^\s*(?:(?:hey|hi|okay|ok|yo|so)\s*,?\s+)?(?:(?:milo|mylo|my low|mila|miilo|myelone|my lone|my lo|mylow|mi lo|meelo|mylo's|milo's)\b|my\s*(?:\.\.\.|…)(?=\s+\w))[\s,.!?:-]*/i;
 
 const WAKE_ANYWHERE = /\b(?:(?:hey|hi|okay|ok|yo)\s*,?\s+)?(?:milo|mylo|my low|mila|miilo)\b[\s,.!?:-]*/i;
 

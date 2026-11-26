@@ -147,3 +147,17 @@ describe("what kind of edit they asked for", () => {
   });
   it("make it sound better", () => expect(editBrief("look for grammar mistakes and make it sound better")).toMatch(/fix the wording/));
 });
+
+import { stripWake } from "../src/renderer/commands";
+describe("'Milo' heard wrong at the start still wakes him", () => {
+  it.each([
+    ["myelone. Look at the paper that's open in my Google Docs and edit it so that it sounds better.", "Look at the paper"],
+    ["My... look at my paper that's open in my Google Docs and edit it", "look at my paper"],
+    ["Hey mylow, what's due", "what's due"],
+  ])("%s", (s, rest) => {
+    const r = stripWake(s);
+    expect(r.woke).toBe(true);
+    expect(r.rest.startsWith(rest)).toBe(true);
+  });
+  it.each(["My mom is picking me up", "my lord that was long", "Mile marker 5"])("not: %s", (s) => expect(stripWake(s).woke).toBe(false));
+});

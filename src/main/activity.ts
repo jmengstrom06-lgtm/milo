@@ -79,7 +79,8 @@ export function makeActivity(store: ActStore, opts: { now?: () => number; onChan
         e.undone = now();
         delete e.undoError;
         changed();
-        return { ok: true, text: `Undone: ${e.title}` };
+        const backText: Record<string, string> = { doc_edits: "Your paper is back how it was.", doc_cite: "I took the sources back out of your paper.", discussion_delete: "I deleted that post." };
+        return { ok: true, text: backText[e.undo.type] ?? `Undone: ${e.title}` };
       } catch (err) {
         e.undoError = (err as Error).message.slice(0, 160);
         changed();
