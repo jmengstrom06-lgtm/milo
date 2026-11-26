@@ -52,7 +52,7 @@ const CHECK_TOOL = {
   input_schema: {
     type: "object",
     properties: {
-      done: { type: "boolean", description: "true only if EVERY part of the request is done in the doc." },
+      done: { type: "boolean", description: "true if every PART of the request was carried out in the doc, even if it could be done better. false only if a concrete part was not done at all (nothing added where they asked for an addition, a named paragraph not moved/removed, a word target clearly missed, a question unanswered)." },
       missing: { type: "string", description: "If not done: exactly what's still missing or wrong, as an instruction. Else empty." },
       extra: { type: "string", description: "Anything changed that they did NOT ask for, else empty." },
     },
@@ -107,7 +107,7 @@ export async function docWork(io: DocIO, ask: string, opts: { rubric?: string; l
     const ps = paragraphs(doc.content);
     const msg = round === 0
       ? `The student said: "${ask}"\n\nDocument title: ${doc.title}\n\n${listing(ps)}`
-      : `The student said: "${ask}"\n\nYou already made changes, but this is still missing: ${missing}\nDo ONLY what's missing. Paragraph numbers below are the doc as it is now.\n\nDocument title: ${doc.title}\n\n${listing(ps)}`;
+      : `The student said: "${ask}"\n\nYou already made changes, but this is still missing: ${missing}\nDo ONLY what's missing, and don't touch any paragraph the request doesn't involve. If nothing concrete is missing, return no actions. Paragraph numbers below are the doc as it is now.\n\nDocument title: ${doc.title}\n\n${listing(ps)}`;
     opts.status?.(round === 0 ? `Reading “${doc.title}”…` : "Finishing the rest…");
     const r = await callTool<Plan>({ model: models.smart(), max_tokens: 12000, system: system(opts.rubric ?? ""), tools: [PLAN_TOOL], tool_choice: { type: "auto" }, messages: [{ role: "user", content: msg }] }, PLAN_TOOL.name);
     if (!r.ok) {
@@ -139,7 +139,7 @@ export async function docWork(io: DocIO, ask: string, opts: { rubric?: string; l
       {
         model: models.fast(),
         max_tokens: 600,
-        system: "You check a writing assistant's work on a student's Google Doc. Compare the request with the doc as it is now. Be strict about whether every part of the request was done; don't nitpick quality.",
+        system: "You check a writing assistant's work on a student's Google Doc. List the parts of the request, then check each one was carried out in the doc as it is now. Judge whether it was DONE, not how well: improving, rewriting, shortening or strengthening something counts as done once that thing was changed in that direction. Never ask for more polish.",
         tools: [CHECK_TOOL],
         tool_choice: { type: "auto" },
         messages: [{ role: "user", content: `Request: "${ask}"\n\nChanges made:\n${changeList || "(none)"}\n\nThe doc now:\n${listing(after)}` }],
