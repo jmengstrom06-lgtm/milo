@@ -2072,3 +2072,5 @@ a.wc__fine:hover { color: #c4b5fd; }
 .wc__tweak button { border: 1px solid #2e2939; background: #1a1722; color: #d4d4d8; border-radius: 999px; padding: 5px 10px; font-size: 12px; }
 .wc__tweak button:hover { border-color: #8b5cf6; color: #fff; }
 .wc__tweak button:disabled { opacity: .5; cursor: default; }
+
+.wc__warn { color: #fbbf24; }

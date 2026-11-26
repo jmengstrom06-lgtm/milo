@@ -23,6 +23,8 @@ import { closeFlux, fluxAvailable, forceEndTurn, onFlux, openFlux, sendAudio } f
 import { macSpeak } from "./macvoice";
 import { bridgeConnected, call as ext, registerNativeHost, startBridge } from "./bridge";
 import { findDoc } from "./findDoc";
+import { docWork } from "./docWork";
+import { undoChanges, type Change, type DocIO } from "./docAgent";
 import { runWebTask } from "./webagent";
 import { registerKit } from "./kitipc";
 import { registerLibrary } from "./library";
@@ -34,7 +36,7 @@ import { isJob, lastJob, resumable, resumeJob, startJob, type JobDeps } from "./
 import { getProfile, setProfile, type Profile } from "./profile";
 import { usageToday, spentToday } from "./usage";
 import { awayWatch } from "./away";
-import { calendarAdd, calendarBusy, calendarDelete, calendarUpcoming, docsCreate, GoogleNotConnected, googleConnect, googleDisconnect, googleStatus, gmailDeleteDraft, gmailDraft, gmailSendDraft, gmailUnread, hasGmail, refreshGoogleConfig } from "./google";
+import { docsBatch, docsFull, calendarAdd, calendarBusy, calendarDelete, calendarUpcoming, docsCreate, GoogleNotConnected, googleConnect, googleDisconnect, googleStatus, gmailDeleteDraft, gmailDraft, gmailSendDraft, gmailUnread, hasGmail, refreshGoogleConfig } from "./google";
 import { activity, did, registerActivity, metrics } from "./activityLog";
 import { writePaper } from "./paper";
 import { homeWin, openHome, toHome } from "./home";
@@ -650,6 +652,8 @@ const toOverlay = (ch: string, v: unknown) => {
 };
 /** The Google Doc open in Chrome right now (the paper they mean). */
 /** The doc they mean: any Google Doc open in any browser (every window and tab), or a doc link they copied. */
+/** Google Docs, for the doc agent. */
+const docIO = (id: string): DocIO => ({ read: () => docsFull(id), batch: (reqs) => docsBatch(id, reqs) });
 async function openDoc(said = "", picked?: string): Promise<{ id: string; title: string } | { ask: string; docs: { id: string; title: string }[] } | null> {
   if (picked) return { id: picked, title: "your doc" };
   const r = await findDoc(said);
@@ -672,15 +676,17 @@ ipcMain.handle("milo:paper-edit", async (_e, ask: string, picked?: string) => {
     const clip = clipboard.readText().trim();
     const rubric = /\brubric\b/i.test(String(ask)) && looksLikeRubric(clip) ? clip : "";
     toOverlay("milo:writing-live", { stage: "reading", text: `Reading “${doc.title}”…` });
-    const r = await editPaper(doc.id, String(ask ?? ""), {
+    const r = await docWork(docIO(doc.id), String(ask ?? ""), {
       rubric,
-      live: (e, i, n) => toOverlay("milo:writing-live", { stage: "editing", text: `${e.why}`, i: i + 1, n }),
+      status: (t) => toOverlay("milo:writing-live", { stage: "reading", text: t }),
+      live: (c, i, n) => c && toOverlay("milo:writing-live", { stage: "editing", text: `${c.why}`, i: i + 1, n }),
     });
-    track("paper_edit", { ok: r.ok, n: r.ok ? r.applied.length : 0, rubric: !!rubric });
+    track("paper_edit", { ok: r.ok, n: r.ok ? r.applied.length : 0, rubric: !!rubric, answer: r.ok && !!r.answer, missing: r.ok && !!r.missing });
     if (!r.ok) return r;
+    if (!r.applied.length) return { ...r, docId: doc.id, rubric: !!rubric };
     const actId = did({
       kind: "doc",
-      title: `Edited “${r.title}”: ${r.applied.length} change${r.applied.length === 1 ? "" : "s"}`,
+      title: `Worked on “${r.title}”: ${r.applied.length} change${r.applied.length === 1 ? "" : "s"}`,
       detail: r.applied.slice(0, 12).map((a) => `• ${a.why}`).join("\n"),
       link: `https://docs.google.com/document/d/${doc.id}/edit`,
       undo: { type: "doc_edits", data: { docId: doc.id, edits: r.applied } },
@@ -697,12 +703,16 @@ ipcMain.handle("milo:paper-edit", async (_e, ask: string, picked?: string) => {
 /** Undo some of the edits (the card's per-edit undo) or all of them. */
 ipcMain.handle("milo:paper-undo", async (_e, docId: string, edits: { find: string; replace: string; why: string }[]) => {
   try {
-    return await undoEdits(String(docId), Array.isArray(edits) ? edits : []);
+    const r = await undoChanges(docIO(String(docId)), Array.isArray(edits) ? (edits as Change[]) : []);
+    return { ok: r.undone > 0, undone: r.undone };
   } catch {
     return { ok: false, undone: 0 };
   }
 });
-activity.onUndo("doc_edits", async (d) => void (await undoEdits(String(d.docId), (d.edits as { find: string; replace: string; why: string }[]) ?? [])));
+activity.onUndo("doc_edits", async (d) => {
+  const r = await undoChanges(docIO(String(d.docId)), (d.edits as Change[]) ?? []);
+  if (!r.undone && r.missed) throw new Error("the text changed since, so I couldn't find my edits");
+});
 activity.onUndo("doc_cite", async (d) => {
   await undoEdits(String(d.docId), (d.edits as { find: string; replace: string; why: string }[]) ?? []);
   await removeBlock(String(d.docId), String(d.list ?? ""));

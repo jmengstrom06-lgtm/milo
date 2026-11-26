@@ -15,6 +15,9 @@ on:
       - "src/main/discussions.ts"
       - "src/main/reading.ts"
       - "evals/run-writing.ts"
+      - "src/main/docAgent.ts"
+      - "src/main/docWork.ts"
+      - "evals/run-docwork.ts"
 
 jobs:
   writing:
@@ -34,3 +37,8 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           WRITING_ONLY: ${{ github.event.inputs.only }}
         run: npm run eval:writing
+      - name: Doc agent bench (real AI, 18 kinds of request)
+        if: always()
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: npm run eval:doc

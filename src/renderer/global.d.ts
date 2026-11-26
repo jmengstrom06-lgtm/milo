@@ -17,9 +17,9 @@ declare global {
     actions: number;
   };
   type MiloPrefs = { notifyAway: boolean; quiet: boolean; quietFrom: number; quietTo: number; noRecord: string[]; okRecord: string[]; autofill: boolean; preflight: boolean };
-  type MiloEdit = { find: string; replace: string; why: string; kind?: string };
+  type MiloEdit = { find: string; replace: string; why: string; kind?: string; op?: "replace" | "insert" | "delete" | "style"; anchor?: string; styles?: string[]; style?: string; oldStyle?: string };
   type MiloEditResult =
-    | { ok: true; title: string; summary: string; applied: MiloEdit[]; skipped: number; notes: string[]; wordsBefore: number; wordsAfter: number; docId: string; rubric: boolean }
+    | { ok: true; title: string; summary: string; applied: MiloEdit[]; skipped: number; notes: string[]; wordsBefore: number; wordsAfter: number; docId: string; rubric: boolean; answer?: string; cant?: string; missing?: string }
     | { ok: false; text: string; connect?: boolean; docs?: { id: string; title: string }[] };
   type MiloSource = { kind: "article" | "web"; title: string; authors: string[]; year?: number; date?: string; container?: string; site?: string; url: string; why: string };
   type MiloCiteResult = { ok: true; style: "MLA" | "APA"; sources: MiloSource[]; placed: number; addedList: boolean; applied: MiloEdit[]; docId: string } | { ok: false; text: string; connect?: boolean };
