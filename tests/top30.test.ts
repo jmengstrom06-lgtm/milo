@@ -118,9 +118,16 @@ describe("edit my paper, said the long way", () => {
     "I have a paper open in my Google Docs. I want you to look through it and look for any grammar mistakes and correct them",
     "can you go through my essay and fix the spelling",
     "look through the paper and find any grammar or mistakes and correct them",
+    "I have a Google document paper open in the bottom of my screen, why Sleep Matters in college. I want you to look through it and reword anything that sounds off and fix my mistakes.",
   ])("%s", (s) => expect((parseLong(s, {} as never) as { kind: string }).kind).toBe("edit_paper"));
   it.each([
     ["write a paper on the french revolution", "paper"],
     ["find 5 sources for my paper", "cite"],
   ])("%s", (s, k) => expect((parseLong(s, {} as never) as { kind: string }).kind).toBe(k));
+});
+
+import { brainTrouble } from "../src/main/brain";
+describe("brain errors are said plainly", () => {
+  it("out of credits", () => expect(brainTrouble(400, '{"error":{"message":"Your credit balance is too low to access the Anthropic API."}}')).toMatch(/out of credits/));
+  it("never reads JSON", () => expect(brainTrouble(400, '{"type":"error"}')).not.toMatch(/[{}]/));
 });
