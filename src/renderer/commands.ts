@@ -110,7 +110,9 @@ export const EDIT_PAPER =
 /** Said the long way: "I have a paper open… there are grammar mistakes… fix all of it". A paper/essay/draft
  *  plus a fixing word, in one request (new papers were already caught above). */
 export const EDIT_PAPER_TALK =
-  /\b(?:my|this|the|a)\s+(?:[a-z]+\s+){0,2}(?:paper|essay|draft|personal statement)\b(?=[\s\S]*\b(?:fix|correct|proofread|proof read|edit|revise|polish|grammar|spelling|typos|mistakes|errors|run.?on|wording|flow)\b)|\b(?:fix|correct|proofread|edit|revise|polish)\b[^.?!]{0,40}\b(?:my|this|the)\s+(?:[a-z]+\s+)?(?:paper|essay|draft)\b/;
+  /\b(?:my|this|the|a)\s+(?:[a-z]+\s+){0,2}(?:paper|essay|draft|personal statement|google doc|doc)\b(?=[\s\S]*\b(?:fix|correct|proofread|proof read|edit|revise|polish|grammar|spelling|typos|mistakes|errors|run.?on|wording|flow|add|insert|write|put|include|expand|extend|lengthen|shorten|cut|trim|delete|remove|move|swap|reorder|rearrange|reorganize|split|combine|merge|format|heading|headings|title|bold|section|paragraph|conclusion|intro|introduction|thesis|counterargument|sentence)\b)|\b(?:fix|correct|proofread|edit|revise|polish|add|insert|write|put|delete|remove|move|reorganize|format)\b[^.?!]{0,60}\b(?:my|this|the)\s+(?:[a-z]+\s+)?(?:paper|essay|draft|doc)\b/;
+/** A question about their own open paper: the doc agent reads it and answers. */
+export const ASK_PAPER = /^(?:what(?:'s| is| are)|how (?:many|long|good)|is|does|do|can you (?:read|tell me|summarize)|read|summarize|tell me)\b[^.?!]{0,60}\b(?:my|this)\s+(?:[a-z]+\s+)?(?:paper|essay|draft)\b/;
 export const CITE_PAPER =
   /\b(?:find|get|add|give me|look up|search for)\b[^.]{0,20}\b(?:sources|citations|references|articles|scholarly|research)\b[^.]{0,25}\b(?:for|to|in|on|into)\s+(?:my|this|the)\s+(?:[a-z]+\s+){0,2}(?:paper|essay|doc|document|report|draft|project)\b|^(?:cite|add citations to|add in.?text citations to)\s+(?:my|this|the)\s+(?:paper|essay|doc|draft|report)\b|^(?:add|make)\s+(?:a |the |my )?(?:works cited|references|reference list|bibliography)(?: page| list)?\b/;
 export const CITE_PAGE = /^(?:cite|make (?:me )?a citation for|give me (?:a |the )?citation for)\s+(?:this|this page|this article|this website|this site|that)\b/;
@@ -174,13 +176,14 @@ function parseSingle(raw: string, ctx: Ctx): Intent {
   if (/^(keep going|continue|go on|resume|carry on|where were we|pick up where you left off|finish what you were (doing|saying)|ok(ay)? continue)$/.test(t))
     return { kind: "resume" };
   // "write (me) a 5 page paper on…", "draft an essay about…", "help me write a research paper on…"
-  if (/^(?:can you |could you |please |help me |i need (?:you )?to |i have to )?(?:write|draft|type up|start)\b(?! (?:an? |the |my )?(?:email|message|text|poem|song|story|code|program))[^.?!]{0,60}?\b(?:research paper|paper|essay|report)\b/.test(t) && !/\b(read|grade|check|proofread|edit|fix)\b.{0,20}\b(paper|essay)\b/.test(t))
+  if (/^(?:can you |could you |please |help me |i need (?:you )?to |i have to )?(?:write|draft|type up|start)\b(?! (?:an? |the |my )?(?:email|message|text|poem|song|story|code|program))[^.?!]{0,60}?\b(?:research paper|paper|essay|report)\b/.test(t) && !/\b(read|grade|check|proofread|edit|fix)\b.{0,20}\b(paper|essay)\b/.test(t) && !/\b(?:in|to|into|inside|at the (?:end|start|top|bottom) of)\s+(?:my|this|the)\s+(?:[a-z]+\s+)?(?:paper|essay|doc|draft)\b/.test(t))
     return { kind: "paper", text };
   if (!ctx.inLesson) {
     if (CITE_PAGE.test(t)) return { kind: "cite_page", text };
     if (CITE_PAPER.test(t)) return { kind: "cite", text };
     if (EDIT_PAPER.test(t) && !/\b(write|start)\b/.test(t.split(" ")[0])) return { kind: "edit_paper", text };
-    if (EDIT_PAPER_TALK.test(t) && !/\b(write|draft|start|outline)\s+(?:me\s+)?(?:a|an|my)\b/.test(t) && !/\bsources?|citations?|works cited\b/.test(t)) return { kind: "edit_paper", text };
+    if (EDIT_PAPER_TALK.test(t) && !/\b(?:undo|revert|reverse|back (?:to )?how it was|put (?:it|my \w+|the \w+) back)\b/.test(t) && !/\b(write|draft|start|outline)\s+(?:me\s+)?(?:a|an)\s+(?:\d+|one|two|three|four|five|short|long|new)?\s*(?:page\s+|word\s+)?(?:paper|essay|report)\b/.test(t) && !/\b(?:sources?|citations?|works cited|references|bibliography)\b/.test(t)) return { kind: "edit_paper", text };
+    if (ASK_PAPER.test(t) && !/\b(?:due|grade|graded|deadline|submit)\b/.test(t)) return { kind: "edit_paper", text };
     if (DISCUSSION.test(t)) return { kind: "discussion", text };
     if (READING.test(t)) return { kind: "reading", text };
   }

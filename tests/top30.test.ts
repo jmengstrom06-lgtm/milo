@@ -161,3 +161,29 @@ describe("'Milo' heard wrong at the start still wakes him", () => {
   });
   it.each(["My mom is picking me up", "my lord that was long", "Mile marker 5"])("not: %s", (s) => expect(stripWake(s).woke).toBe(false));
 });
+
+describe("anything about my open paper goes to the doc agent", () => {
+  it.each([
+    "Would you look at my paper that's, um, open in my Google Docs, and would you add a section after it that explains your thoughts behind this paper?",
+    "I asked you to read the paper, and then after the entire paper, I want you to add your own section that includes your thoughts",
+    "add a conclusion to my essay",
+    "write a counterargument paragraph in my paper",
+    "move the second paragraph of my essay to the end",
+    "delete the last paragraph of my paper",
+    "add headings to my paper",
+    "make my paper 500 words longer",
+    "what's my thesis in my essay",
+    "is my paper good",
+    "how many words is my essay",
+  ])("%s", (s) => expect((parseLong(s, {} as never) as { kind: string }).kind).toBe("edit_paper"));
+  it.each([
+    ["write a 3 page paper on the french revolution", "paper"],
+    ["add citations to my essay", "cite"],
+    ["find sources for my paper", "cite"],
+    ["when is my paper due", "!edit_paper"],
+  ])("%s", (s, k) => {
+    const got = (parseLong(s, {} as never) as { kind: string } | null)?.kind;
+    if (k.startsWith("!")) expect(got).not.toBe(k.slice(1));
+    else expect(got).toBe(k);
+  });
+});

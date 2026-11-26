@@ -26,7 +26,7 @@ export function EditsCard({ r, style, hover, onClose, onUndone }: { r: Extract<M
     <div className="wc" style={style} onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)} onMouseLeave={() => hover(false)} role="dialog" aria-label="Edits to your paper">
       <div className="wc__head">
         <div>
-          <b>Edited “{r.title}”</b>
+          <b>Changes to “{r.title}”</b>
           <small>
             {r.applied.length - gone.size} change{r.applied.length - gone.size === 1 ? "" : "s"} · {r.wordsBefore} → {r.wordsAfter} words{delta ? ` (${delta > 0 ? "+" : ""}${delta})` : ""}
             {r.rubric ? " · checked against your rubric" : ""}
@@ -37,6 +37,7 @@ export function EditsCard({ r, style, hover, onClose, onUndone }: { r: Extract<M
         </button>
       </div>
       {r.summary && <p className="wc__sum">{r.summary}</p>}
+      {(r.missing || r.cant) && <p className="wc__sum wc__warn">{r.missing ? `Not done yet: ${r.missing}` : ""}{r.missing && r.cant ? " " : ""}{r.cant ? `Can't do here: ${r.cant}` : ""}</p>}
       <ol className="wc__list">
         {r.applied.map((e, i) => (
           <li key={i} className={gone.has(i) ? "is-gone" : ""}>
@@ -46,8 +47,10 @@ export function EditsCard({ r, style, hover, onClose, onUndone }: { r: Extract<M
             </button>
             {open === i && !gone.has(i) && (
               <div className="wc__diff">
-                <del>{e.find}</del>
-                <ins>{e.replace}</ins>
+                {e.op === "style" ? <ins>{`“${e.find.slice(0, 80)}” is now a ${(e.style ?? "").toLowerCase().replace("_", " ")}`}</ins> : <>
+                  {e.find && <del>{e.find}</del>}
+                  {e.replace && <ins style={{ whiteSpace: "pre-wrap" }}>{e.replace}</ins>}
+                </>}
                 <button disabled={busy} onClick={() => void undo([i])}>
                   Undo this one
                 </button>

@@ -1286,13 +1286,20 @@ export default function App() {
       await say(r.text);
       return setBubble(null);
     }
+    if (!r.applied.length) {
+      // a question about the doc (or nothing it could do): just say it
+      setMood("idle");
+      await say([r.answer || r.summary, r.cant ? `I can't do this part here: ${r.cant}` : ""].filter(Boolean).join(" "));
+      return setBubble(null);
+    }
     setBubble(null);
     setMood("happy");
     sfx.success();
     setEdits(r);
-    const d = r.wordsAfter - r.wordsBefore;
     const gist = (r.summary || "Done.").split(/(?<=[.!?])\s+/)[0]; // one sentence out loud; the card has every change
-    await say(`${gist} ${r.applied.length} change${r.applied.length === 1 ? "" : "s"}${d && Math.abs(d) >= 10 ? `, ${Math.abs(d)} words ${d < 0 ? "shorter" : "longer"}` : ""}. Tap any one to see it or undo it.`);
+    const d = r.wordsAfter - r.wordsBefore;
+    const left = r.missing ? ` I couldn't finish everything: ${r.missing}.` : r.cant ? ` One part I can't do here: ${r.cant}.` : "";
+    await say(`${gist}${left} ${r.applied.length} change${r.applied.length === 1 ? "" : "s"}${d && Math.abs(d) >= 10 ? `, ${Math.abs(d)} words ${d < 0 ? "shorter" : "longer"}` : ""}. Tap any one to see it or undo it.`);
     setBubble(null);
   };
   const startCite = async (text: string) => {
