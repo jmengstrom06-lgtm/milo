@@ -7,6 +7,9 @@ on:
       only:
         description: "edit,sources,discussion,reading (empty = all)"
         default: ""
+      doc_only:
+        description: "Doc bench case numbers, comma separated (empty = all)"
+        default: ""
   pull_request:
     paths:
       - "src/main/writing.ts"
@@ -41,4 +44,5 @@ jobs:
         if: always()
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DOC_ONLY: ${{ github.event.inputs.doc_only }}
         run: npm run eval:doc

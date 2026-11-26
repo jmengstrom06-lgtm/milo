@@ -84,7 +84,7 @@ async function main() {
       total += 2;
       if (ok === true) pass++;
       if (undoOk) pass++;
-      line = `${ok === true ? "✓" : "✗"} ${c.ask}${ok === true ? "" : `  (${ok})`}${r.ok ? `  [${r.applied.length} changes${r.missing ? `, missing: ${r.missing.slice(0, 60)}` : ""}]` : ""}${undoOk ? "" : "  ✗ UNDO did not restore the original"}`;
+      line = `${ok === true ? "✓" : "✗"} ${c.ask}${ok === true ? "" : `  (${ok}) plans: ${r.ok ? r.plans.join(" | ") : ""}${r.ok && r.skippedWhy.length ? ` skipped: ${r.skippedWhy.join(", ")}` : ""}`}${r.ok ? `  [${r.applied.length} changes${r.missing ? `, missing: ${r.missing.slice(0, 60)}` : ""}]` : ""}${undoOk ? "" : "  ✗ UNDO did not restore the original"}`;
     } catch (e) {
       total += 2;
       line = `✗ ${c.ask}  (crashed: ${(e as Error).message.slice(0, 120)})`;

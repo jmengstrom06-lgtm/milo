@@ -79,7 +79,7 @@ ${brief.join("\n")}`;
 }
 
 export type DocResult =
-  | { ok: true; title: string; summary: string; answer: string; applied: Change[]; skipped: number; notes: string[]; cant: string; missing: string; wordsBefore: number; wordsAfter: number }
+  | { ok: true; title: string; summary: string; answer: string; applied: Change[]; skipped: number; skippedWhy: string[]; plans: string[]; notes: string[]; cant: string; missing: string; wordsBefore: number; wordsAfter: number }
   | { ok: false; text: string };
 
 /** Do what they asked to the doc, check it, finish what's missing. */
@@ -95,6 +95,8 @@ export async function docWork(io: DocIO, ask: string, opts: { rubric?: string; l
 
   const applied: Change[] = [];
   let skipped = 0;
+  const skippedWhy: string[] = [];
+  const plans: string[] = [];
   let plan: Plan | null = null;
   let missing = "";
   let summary = "";
@@ -120,12 +122,14 @@ export async function docWork(io: DocIO, ask: string, opts: { rubric?: string; l
       cant = plan.cant ?? "";
       notes = plan.notes.slice(0, 3);
     }
+    plans.push(plan.ops.map((o) => `${o.op}(${o.para ?? ""}${o.after !== undefined ? `→${o.after}` : ""})`).join(" ") || `none${plan.cant ? ` cant: ${plan.cant}` : ""}${plan.answer ? " (answered)" : ""}`);
     bb("docwork", "plan", { round, understood: plan.understood?.slice(0, 120), ops: plan.ops.map((o) => o.op), answer: !!plan.answer, cant: !!plan.cant });
     if (!plan.ops.length) break; // a question, or nothing more it can do
     opts.status?.(`Making ${plan.ops.length} change${plan.ops.length === 1 ? "" : "s"}…`);
     const res = await applyPlan(io, plan, opts.live);
     applied.push(...res.changes);
     skipped += res.skipped.length;
+    skippedWhy.push(...res.skipped.map((s) => `${s.op.op}: ${s.why}`));
     if (res.skipped.length) bb("docwork", "skipped", { why: res.skipped.map((s) => s.why) });
 
     // the check: does the doc now match the request?
@@ -152,5 +156,5 @@ export async function docWork(io: DocIO, ask: string, opts: { rubric?: string; l
     missing = chk.data.missing || "part of the request";
   }
   const end = await io.read();
-  return { ok: true, title: first.title, summary: summary || (applied.length ? "Done." : "I read it."), answer, applied, skipped, notes, cant, missing, wordsBefore, wordsAfter: docWords(end.content) };
+  return { ok: true, title: first.title, summary: summary || (applied.length ? "Done." : "I read it."), answer, applied, skipped, skippedWhy, plans, notes, cant, missing, wordsBefore, wordsAfter: docWords(end.content) };
 }
