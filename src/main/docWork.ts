@@ -113,6 +113,7 @@ const NUM: Record<string, number> = { one: 1, a: 1, an: 1, two: 2, three: 3, fou
 
 /** Real sources for this paper, found BEFORE planning, each with its exact in-text citation and list entry.
  *  The agent may only cite from this list, so nothing is ever made up. */
+let lastTopic = "";
 export async function gatherSources(ask: string, docText: string, title: string): Promise<{ style: "MLA" | "APA"; list: { s: Source; inText: string; entry: string; notes: string }[] }> {
   const style = styleOf(ask, docText);
   const m = ask.toLowerCase().match(/\b(\d+|one|a|an|two|three|four|five|six|seven|eight)\s+(?:more\s+)?(?:scholarly\s+|peer.?reviewed\s+|credible\s+|academic\s+|real\s+)?(?:sources?|citations?|references|articles)\b/);
@@ -120,14 +121,25 @@ export async function gatherSources(ask: string, docText: string, title: string)
   const basis = docText.trim().length > 200 ? docText.slice(0, 6000) : `${title}\n${ask}`;
   const q = await callClaude({ model: models.fast(), max_tokens: 60, system: "Reply with only a 3 to 8 word search query for scholarly sources on this paper's topic.", messages: [{ role: "user", content: basis }] });
   const topic = q.ok ? q.data.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join(" ").replace(/["\n]/g, " ").trim().slice(0, 120) : title;
-  const [sch, web] = await Promise.all([scholarly(topic, n + 4).catch(() => []), webSources(topic, 2).catch(() => [])]);
+  let [sch, web] = await Promise.all([scholarly(topic, n + 4).catch(() => []), webSources(topic, 2).catch(() => [])]);
+  let used = topic;
+  if (sch.length + web.length < n) {
+    // too narrow or a hiccup: search again, broader (the paper's title, or the first few words of the query)
+    const broader = (title && !/^untitled/i.test(title) ? title : topic.split(/\s+/).slice(0, 3).join(" ")).replace(/[^\w\s'-]/g, " ").trim();
+    const [s2, w2] = await Promise.all([scholarly(broader, n + 4).catch(() => []), web.length ? Promise.resolve([]) : webSources(broader, 2).catch(() => [])]);
+    const seen = new Set([...sch, ...web].map((x) => x.doi || x.url));
+    sch = [...sch, ...s2.filter((x) => !seen.has(x.doi || x.url))];
+    web = [...web, ...w2.filter((x) => !seen.has(x.doi || x.url))];
+    used = `${topic} | ${broader}`;
+  }
   const pool = [...sch, ...web].slice(0, n + 6);
-  bb("docwork", "sources", { topic, scholarly: sch.length, web: web.length, style });
+  bb("docwork", "sources", { topic: used, scholarly: sch.length, web: web.length, style });
+  lastTopic = `${used} (${sch.length} scholarly, ${web.length} web)`;
   return { style, list: pool.map((s) => ({ s, inText: inText(s, style), entry: citeLine(s, style), notes: ((s as Source & { notes?: string }).notes ?? "").slice(0, 300) })) };
 }
 
 export type DocResult =
-  | { ok: true; title: string; summary: string; answer: string; applied: Change[]; skipped: number; skippedWhy: string[]; plans: string[]; notes: string[]; cant: string; missing: string; wordsBefore: number; wordsAfter: number; offered: string[]; offeredCites: string[] }
+  | { ok: true; title: string; summary: string; answer: string; applied: Change[]; skipped: number; skippedWhy: string[]; plans: string[]; notes: string[]; cant: string; missing: string; wordsBefore: number; wordsAfter: number; offered: string[]; offeredCites: string[]; sourceSearch: string }
   | { ok: false; text: string };
 
 /** Do what they asked to the doc, check it, finish what's missing. */
@@ -220,5 +232,5 @@ export async function docWork(io: DocIO, ask: string, opts: { rubric?: string; l
     missing = chk.data.missing || "part of the request";
   }
   const end = await io.read();
-  return { ok: true, title: first.title, summary: summary || (applied.length ? "Done." : "I read it."), answer, applied, skipped, skippedWhy, plans, notes, offered, offeredCites, cant, missing, wordsBefore, wordsAfter: docWords(end.content) };
+  return { ok: true, title: first.title, summary: summary || (applied.length ? "Done." : "I read it."), answer, applied, skipped, skippedWhy, plans, notes, offered, offeredCites, sourceSearch: offered.length || WANTS_SOURCES.test(ask) ? lastTopic : "", cant, missing, wordsBefore, wordsAfter: docWords(end.content) };
 }
