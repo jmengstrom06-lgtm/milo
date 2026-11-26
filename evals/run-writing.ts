@@ -150,6 +150,6 @@ async function main() {
   const runs: [string, () => Promise<void>][] = [["edit", editCases], ["sources", sourceCases], ["discussion", discussionCases], ["reading", readingCases]];
   for (const [name, fn] of runs) if (!only.length || only.includes(name)) await fn().catch((e) => check(`${name}: ran`, false, (e as Error).message));
   console.log(`\nWriting: ${pass}/${total} checks = ${((pass / Math.max(1, total)) * 100).toFixed(1)}%  (bar ${BAR * 100}%)`);
-  if (pass / Math.max(1, total) < BAR) process.exit(1);
+  if (total && pass / total < BAR) process.exit(1); // nothing asked for (only=none) is not a failure
 }
 main();
