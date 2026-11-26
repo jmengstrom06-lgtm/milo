@@ -341,6 +341,13 @@ export async function runSelfTest(win: BrowserWindow) {
     });
   }
 
+  // Only the writing checks asked for (npm run test:writing): done, report, close. Nothing else to wait on.
+  if ((process.env.MILO_TEST_ONLY || "").trim() === "Q") {
+    off();
+    writeReport(true);
+    return;
+  }
+
   // ======================= SPEED =======================
   await test("S1", "Speed", "'What can you do?' opens his apps", async () => {
     await hear("what can you do");
