@@ -120,7 +120,8 @@ export async function gatherSources(ask: string, docText: string, title: string)
   const n = Math.min(8, Math.max(1, m ? (NUM[m[1]] ?? Number(m[1])) : 3));
   const basis = docText.trim().length > 200 ? docText.slice(0, 6000) : `${title}\n${ask}`;
   const q = await callClaude({ model: models.fast(), max_tokens: 60, system: "Reply with only a 3 to 8 word search query for scholarly sources on this paper's topic.", messages: [{ role: "user", content: basis }] });
-  const topic = q.ok ? q.data.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join(" ").replace(/["\n]/g, " ").trim().slice(0, 120) : title;
+  let topic = q.ok ? q.data.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join(" ").replace(/["\n]/g, " ").trim().slice(0, 120) : "";
+  if (topic.split(/\s+/).length < 2) topic = title; // an empty or one-word answer: use the paper's own title
   let [sch, web] = await Promise.all([scholarly(topic, n + 4).catch(() => []), webSources(topic, 2).catch(() => [])]);
   let used = topic;
   if (sch.length + web.length < n) {
@@ -159,7 +160,9 @@ export async function docWork(io: DocIO, ask: string, opts: { rubric?: string; l
   let offeredCites: string[] = [];
   if (WANTS_SOURCES.test(ask)) {
     opts.status?.("Finding real sources…");
-    const src = await gatherSources(ask, ps0.map((p) => p.text).join("\n"), first.title);
+    // the paper's real title (its Title/Heading line) beats the file name
+    const paperTitle = ps0.find((p) => p.style === "TITLE" || p.style === "HEADING_1")?.text || ps0.find((p) => p.props.alignment === "CENTER" && p.text.split(/\s+/).length <= 12)?.text || first.title;
+    const src = await gatherSources(ask, ps0.map((p) => p.text).join("\n"), paperTitle);
     offered = src.list.map((x) => x.entry);
     offeredCites = src.list.map((x) => x.inText);
     sourceBlock = src.list.length
