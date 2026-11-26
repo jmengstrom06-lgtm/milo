@@ -127,7 +127,7 @@ export async function gatherSources(ask: string, docText: string, title: string)
 }
 
 export type DocResult =
-  | { ok: true; title: string; summary: string; answer: string; applied: Change[]; skipped: number; skippedWhy: string[]; plans: string[]; notes: string[]; cant: string; missing: string; wordsBefore: number; wordsAfter: number; offered: string[] }
+  | { ok: true; title: string; summary: string; answer: string; applied: Change[]; skipped: number; skippedWhy: string[]; plans: string[]; notes: string[]; cant: string; missing: string; wordsBefore: number; wordsAfter: number; offered: string[]; offeredCites: string[] }
   | { ok: false; text: string };
 
 /** Do what they asked to the doc, check it, finish what's missing. */
@@ -144,10 +144,12 @@ export async function docWork(io: DocIO, ask: string, opts: { rubric?: string; l
   // sources first (only when asked): real ones, each with its exact citation, so the plan can't invent any
   let sourceBlock = "";
   let offered: string[] = [];
+  let offeredCites: string[] = [];
   if (WANTS_SOURCES.test(ask)) {
     opts.status?.("Finding real sources…");
     const src = await gatherSources(ask, ps0.map((p) => p.text).join("\n"), first.title);
     offered = src.list.map((x) => x.entry);
+    offeredCites = src.list.map((x) => x.inText);
     sourceBlock = src.list.length
       ? `\n\nREAL SOURCES you may cite (${src.style}). Use ONLY these. Copy the in-text citation and the list entry EXACTLY as written:\n${src.list
           .map((x, i) => `[S${i + 1}] ${x.s.title} (${x.s.year ?? x.s.date ?? "n.d."})${x.notes ? ` — ${x.notes}` : ""}\n   in-text: ${x.inText}\n   entry: ${x.entry}`)
@@ -218,5 +220,5 @@ export async function docWork(io: DocIO, ask: string, opts: { rubric?: string; l
     missing = chk.data.missing || "part of the request";
   }
   const end = await io.read();
-  return { ok: true, title: first.title, summary: summary || (applied.length ? "Done." : "I read it."), answer, applied, skipped, skippedWhy, plans, notes, offered, cant, missing, wordsBefore, wordsAfter: docWords(end.content) };
+  return { ok: true, title: first.title, summary: summary || (applied.length ? "Done." : "I read it."), answer, applied, skipped, skippedWhy, plans, notes, offered, offeredCites, cant, missing, wordsBefore, wordsAfter: docWords(end.content) };
 }

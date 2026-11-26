@@ -41,8 +41,9 @@ function listCheck(a: P, r: R, heading: RegExp, min: number): true | string {
   const fake = entries.filter((e) => !r.offered.some((o) => same(o, e)));
   if (fake.length) return `entry not from a real source: ${fake[0].slice(0, 60)}`;
   const body = t.slice(4, h).join(" ");
-  const cites = (body.match(/\([A-Z][^()]{1,60}?\d{4}[a-z]?\)|\([A-Z][^()]{1,60}?(?:n\.d\.)\)|\([A-Z][A-Za-z'’-]+(?: et al\.)?\)/g) ?? []).length;
-  if (cites < Math.min(min, 1)) return "no in-text citations";
+  const loose = (s: string) => s.replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/\s+/g, " ");
+  const cites = r.offeredCites.filter((c) => loose(body).includes(loose(c).replace(/\)$/, ""))).length; // "(Smith 2020" also matches "(Smith 2020, p. 4)"
+  if (cites < 1) return `no in-text citation from the real sources (offered: ${r.offeredCites.slice(0, 3).join(" ")})`;
   return true;
 }
 const CASES: Case[] = [
