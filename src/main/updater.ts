@@ -7,7 +7,6 @@
 import { app, ipcMain, net, type BrowserWindow } from "electron";
 import { spawn, execFile } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { log as bb } from "./blackbox";
 
@@ -53,7 +52,15 @@ const run = (cmd: string, args: string[]) => new Promise<void>((res, rej) => exe
 export function startUpdates(win: BrowserWindow) {
   if (!app.isPackaged || process.env.MILO_NO_UPDATES === "1" || process.platform !== "darwin") return;
   const appPath = path.resolve(process.execPath, "..", "..", ".."); // /Applications/Milo.app
-  const work = path.join(os.tmpdir(), "milo-update");
+  const work = path.join(app.getPath("userData"), "update"); // survives restarts, unlike /tmp
+  const stagedVersion = () => {
+    try {
+      const plist = fs.readFileSync(path.join(work, "out", "Milo.app", "Contents", "Info.plist"), "utf8");
+      return plist.match(/<key>CFBundleShortVersionString<\/key>\s*<string>([^<]+)<\/string>/)?.[1] ?? null;
+    } catch {
+      return null;
+    }
+  };
   let staged: string | null = null; // unzipped new Milo.app, ready to swap in
   let busy = false;
   let swapping = false;
@@ -85,12 +92,22 @@ export function startUpdates(win: BrowserWindow) {
         bb("update", "cant_write", { appPath });
         return "There's a new Milo, but I can't update myself in this folder. Run the installer once.";
       }
+      if (stagedVersion() === latest) {
+        // already downloaded last time: ready right away
+        staged = path.join(work, "out", "Milo.app");
+        readyVersion = latest;
+        bb("update", "ready", { version: latest, reused: true });
+        onChange();
+        win.webContents.send("milo:update-ready", latest);
+        return `Version ${latest} is ready. Pick "Restart to update".`;
+      }
       const asset = rel.assets.find((x) => x.name === ASSET);
       if (!asset) throw new Error("no Mac download in the release");
       bb("update", "available", { version: latest });
       fs.rmSync(work, { recursive: true, force: true });
       fs.mkdirSync(work, { recursive: true });
       const zip = path.join(work, "Milo.zip");
+      bb("update", "downloading", { version: latest });
       const d = await net.fetch(asset.browser_download_url);
       if (!d.ok) throw new Error(`download ${d.status}`);
       fs.writeFileSync(zip, Buffer.from(await d.arrayBuffer()));
@@ -132,7 +149,21 @@ export function startUpdates(win: BrowserWindow) {
     if (swap(true)) setImmediate(() => app.quit());
   };
   checkNow = () => check(true);
+  const sv = stagedVersion();
+  const tried = path.join(work, "tried.txt");
+  const triedV = (() => { try { return fs.readFileSync(tried, "utf8").trim(); } catch { return ""; } })();
+  if (sv && newer(sv, app.getVersion()) && triedV !== sv && canSwap()) {
+    try { fs.writeFileSync(tried, sv); } catch { /* ignore */ }
+    staged = path.join(work, "out", "Milo.app");
+    readyVersion = sv;
+    bb("update", "install_at_launch", { from: app.getVersion(), to: sv });
+    win.webContents.once("did-finish-load", () => win.webContents.send("milo:updating", sv));
+    setTimeout(() => {
+      if (swap(true)) app.quit();
+    }, 1500);
+    return;
+  }
   app.on("will-quit", () => void swap(false)); // installs the next time Milo quits
-  setTimeout(() => void check(), 45e3);
+  setTimeout(() => void check(), 8e3);
   setInterval(() => void check(), 4 * 3600e3);
 }
