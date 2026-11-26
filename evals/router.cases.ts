@@ -151,6 +151,8 @@ export const CASES: Case[] = [
   { say: "I have 60 pages to read for history tonight, help", expect: { kind: ["reading", "ask"] } },
   { say: "summarize this article for me", expect: { kind: ["reading", "screen_question"] } },
   { say: "write a 3 page essay on the french revolution", expect: { kind: ["task", "chat", "kit"] }, note: "a NEW paper is the paper flow (keyword rule), never edit_paper" },
+  { say: "undo the changes you just made to my paper", expect: { kind: "undo" } },
+  { say: "can you take out the sources you put in my essay", expect: { kind: "undo" } },
   // ---- ask when unsure: vague asks get buttons, clear asks never do ----------------------------
   { say: "help me with bio", expect: { kind: "ask" }, note: "start homework, teach, or quiz?" },
   { say: "make something for stats", expect: { kind: "ask" } },

@@ -131,3 +131,19 @@ describe("brain errors are said plainly", () => {
   it("out of credits", () => expect(brainTrouble(400, '{"error":{"message":"Your credit balance is too low to access the Anthropic API."}}')).toMatch(/out of credits/));
   it("never reads JSON", () => expect(brainTrouble(400, '{"type":"error"}')).not.toMatch(/[{}]/));
 });
+
+describe("undo by voice never becomes computer control", () => {
+  it.each(["undo the changes you just made to my paper", "undo all the edits", "remove the citations you added", "put my paper back", "undo your changes"])("%s", (s) =>
+    expect((parseLong(s, {} as never) as { kind: string }).kind).toBe("undo")
+  );
+});
+import { editBrief } from "../src/main/writing";
+describe("what kind of edit they asked for", () => {
+  it("grammar only", () => expect(editBrief("fix the grammar in my paper")).toMatch(/Fix only grammar/));
+  it("grammar AND wording = both", () => {
+    const b = editBrief("edit any bad grammar and any bad wording");
+    expect(b).not.toMatch(/Fix only grammar/);
+    expect(b).toMatch(/fix the wording/);
+  });
+  it("make it sound better", () => expect(editBrief("look for grammar mistakes and make it sound better")).toMatch(/fix the wording/));
+});

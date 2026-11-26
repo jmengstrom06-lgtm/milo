@@ -188,6 +188,8 @@ function parseSingle(raw: string, ctx: Ctx): Intent {
     if (fb) return { kind: "feedback", text: text.slice(fb[0].length).trim() };
   }
   if (/^(undo( that| it| this| the last (thing|one))?|take (that|it) back|reverse that|cancel what you (just )?did)$/.test(t)) return { kind: "undo" };
+  // "undo the changes you just made to my paper", "put my essay back", "take out the citations you added"
+  if (/^(?:can you |could you |please |go ahead and )?(?:undo|reverse|revert|take back|get rid of|remove|take out)\s+(?:all\s+)?(?:of\s+)?(?:the|those|these|that|your|my|all)?\s*(?:changes|edits|fixes|citations|sources|works cited|stuff|things)\b.*\b(?:you|milo)\b.*\b(?:made|did|added|put)\b|^(?:can you |please )?(?:undo|revert|reverse)\s+(?:all\s+)?(?:the|your|those)\s+(?:changes|edits|fixes)\b|^(?:put|change)\s+(?:my|the)\s+(?:paper|essay|doc|draft)\s+back\b/.test(t)) return { kind: "undo" };
   if (/^(?:(?:can you |please )?(?:open|show|pull up|bring up|go to)(?: me)? (?:my |the )?(?:home|home base|homebase|dashboard|milo app)|(?:take me )?home base)\b/.test(t)) return { kind: "home" };
   if (/^(what (did|have) you (do|done)|what('?d| did) you (just )?do|show me what you (did|done)|what milo did|what you did|your (activity|history)|what happened while i was (gone|away|out))\b/.test(t)) return { kind: "activity" };
   if (/^(stop watching|stop checking|you can stop watching|quit watching)\b/.test(t)) return { kind: "watch", on: false };
