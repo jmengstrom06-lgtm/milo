@@ -52,7 +52,10 @@ function d2lPage(portal: string): Promise<BrowserWindow> {
   return opening;
 }
 async function openD2lPage(portal: string): Promise<BrowserWindow> {
-  if (page && !page.isDestroyed()) page.destroy();
+  // other requests may still be using the old page: retire it in a minute instead of killing it mid-request
+  const old = page;
+  if (old && !old.isDestroyed()) setTimeout(() => !old.isDestroyed() && old !== page && old.destroy(), 60e3);
+  page = null;
   const start = new URL(/^https?:\/\//.test(portal) ? portal : `https://${portal}`).origin;
   page = new BrowserWindow({ show: false, width: 1000, height: 700, webPreferences: { partition: PARTITION, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
   page.webContents.setAudioMuted(true);
@@ -63,8 +66,9 @@ async function openD2lPage(portal: string): Promise<BrowserWindow> {
   const title = page.webContents.getTitle().slice(0, 60);
   bb("d2l", "page", { host: new URL(url || start).host, path: new URL(url || start).pathname.slice(0, 40), title, whoami: status });
   if (status !== 200) {
-    page.destroy();
+    const dead = page;
     page = null;
+    setTimeout(() => !dead.isDestroyed() && dead.destroy(), 60e3);
     // a login page (or the school's sign-in) = not signed in inside Milo; anything else = D2L is having a moment
     if (status === 401 || status === 403 || !/\/d2l\/(home|lp\/homepage|le\/)/.test(url)) throw new SignInNeeded("Sign in to D2L first.");
     throw new Error(`D2L's data feed answered ${status} at ${new URL(url).host}`);
@@ -92,8 +96,16 @@ export const d2lVia = () => via;
 type Raw = { s: number; t: string; b: string | null; url?: string };
 /** Chrome's answer, asked twice before giving up: right after Milo starts, the first answer can be a page instead of data. */
 /** Chrome's extension naps (Chrome stops idle extensions) and reconnects within a few seconds: wait for it. */
+let chromeAbsentAt = 0; // Chrome's extension wasn't there: ask again (and wait for it) only once a minute
 async function bridgeReady(ms = 5000): Promise<boolean> {
   if (bridgeConnected()) return true;
+  if (Date.now() - chromeAbsentAt < 60e3) return false;
+  if (waitingChrome) return waitingChrome;
+  waitingChrome = waitForChrome(ms).finally(() => (waitingChrome = null));
+  return waitingChrome;
+}
+let waitingChrome: Promise<boolean> | null = null;
+async function waitForChrome(ms: number): Promise<boolean> {
   const t0 = Date.now();
   while (Date.now() - t0 < ms) {
     await new Promise((r) => setTimeout(r, 250));
@@ -102,6 +114,7 @@ async function bridgeReady(ms = 5000): Promise<boolean> {
       return true;
     }
   }
+  chromeAbsentAt = Date.now();
   bb("d2l", "chrome_not_connected", {});
   return false;
 }
@@ -177,12 +190,15 @@ async function api<T>(portal: string, path: string): Promise<T> {
     // absolute URL: the hidden page may have wandered off D2L (a session refresh, the school's login), and a
     // relative fetch from there hits the wrong site and looks like "signed out"
     const url = /^https?:/.test(path) ? path : `${origin || originOf(portal)}${path}`;
-    return (await w.webContents.executeJavaScript(
+    const run = w.webContents.executeJavaScript(
       `fetch(${JSON.stringify(url)}, { headers: { Accept: "application/json" }, credentials: "include" }).then(async (r) => ({ s: r.status, t: r.headers.get("content-type") || "", b: await r.text(), at: location.host }))`,
       true
-    )) as R;
+    ) as Promise<R>;
+    // a request can never hang: a page that went away (or a stuck one) = "no answer"
+    return Promise.race([run.catch(() => ({ s: 0, t: "", b: "", at: "gone" })), new Promise<R>((ok) => setTimeout(() => ok({ s: 0, t: "", b: "", at: "timeout" }), 20000))]);
   };
   let r = await ask();
+  if (r.s === 404) throw new Error(`D2L said 404 for ${path}`); // that thing isn't there (e.g. no final grade yet): an answer, not a sign-in problem
   if (r.s !== 200 || !r.t.includes("json")) {
     bb("d2l", "api_miss", { path: path.split("?")[0], status: r.s, type: r.t.slice(0, 40), pageAt: r.at });
     if (r.s !== 401 && r.s !== 403) {
@@ -192,6 +208,7 @@ async function api<T>(portal: string, path: string): Promise<T> {
       bb("d2l", r.s === 200 && r.t.includes("json") ? "api_retry_ok" : "api_retry_miss", { path: path.split("?")[0], status: r.s, pageAt: r.at });
     }
   }
+  if (r.s === 404) throw new Error(`D2L said 404 for ${path}`);
   if (r.s === 401 || r.s === 403 || !r.t.includes("json")) {
     pageAt = 0; // session may have expired: reopen (and re-check sign-in) next time
     throw new SignInNeeded("Sign in to D2L first.");

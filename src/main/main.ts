@@ -1887,23 +1887,45 @@ ipcMain.on("milo:home-route", (_e, text: string) => overlay?.webContents.send("m
 ipcMain.on("milo:home-action", (_e, a: unknown) => overlay?.webContents.send("milo:home-action", a));
 ipcMain.on("milo:home-talk", () => !isPaused() && overlay?.webContents.send("milo:talk"));
 ipcMain.on("milo:echo", (_e, kind: string, payload: unknown) => toHome("milo:echo", { kind: String(kind), payload }));
-let gradeCache: { at: number; portal: string; list: { name: string; grade: number | null }[] } | null = null;
+// The class list's grades. The last good ones are kept on disk, so a slow D2L, a sign-in that ran out or Chrome
+// being closed never blanks them: Home shows what it last knew and fills in fresh numbers when D2L answers.
+type HomeGrade = { name: string; grade: number | null };
+const gradeFile = () => path.join(app.getPath("userData"), "home-grades.json");
+let gradeCache: { at: number; portal: string; list: HomeGrade[] } | null = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(gradeFile(), "utf8"));
+  } catch {
+    return null;
+  }
+})();
 ipcMain.handle("milo:home-grades", async (_e, portal: string, fresh?: boolean) => {
   const p = String(portal ?? "");
   if (!p) return [];
-  if (!fresh && gradeCache && gradeCache.portal === p && Date.now() - gradeCache.at < 30 * 60e3) return gradeCache.list;
+  const last = gradeCache?.portal === p ? gradeCache.list : [];
+  if (!fresh && gradeCache && gradeCache.portal === p && Date.now() - gradeCache.at < 30 * 60e3 && last.some((x) => x.grade != null)) return last;
+  const t0 = Date.now();
   try {
-    const list = await Promise.all(
-      (await d2lCourses(p))
-        .filter((c) => !/ Lab$/.test(c.short))
-        .map(async (c) => ({ name: c.short, grade: (await d2lSheet(p, c).catch(() => null))?.sheet.current_percent ?? null }))
-    );
-    gradeCache = { at: Date.now(), portal: p, list };
-    bb("home", "grades", { n: list.length, known: list.filter((x) => x.grade != null).length });
+    let failed = 0;
+    const one = (c: Course) =>
+      Promise.race([d2lSheet(p, c), new Promise<null>((ok) => setTimeout(() => ok(null), 25000))])
+        .then((d) => d?.sheet.current_percent ?? null)
+        .catch(() => (failed++, null));
+    const read = await Promise.all((await d2lCourses(p)).filter((c) => !/ Lab$/.test(c.short)).map(async (c) => ({ name: c.short, grade: await one(c) })));
+    // a class that couldn't be read this time keeps its last known grade
+    const list = read.map((x) => (x.grade == null ? { ...x, grade: last.find((y) => y.name === x.name)?.grade ?? null } : x));
+    if (list.some((x) => x.grade != null) || !last.length) {
+      gradeCache = { at: Date.now(), portal: p, list };
+      try {
+        fs.writeFileSync(gradeFile(), JSON.stringify(gradeCache));
+      } catch {
+        /* not fatal */
+      }
+    }
+    bb("home", "grades", { n: list.length, known: read.filter((x) => x.grade != null).length, kept: list.filter((x, i) => x.grade != null && read[i].grade == null).length, failed, ms: Date.now() - t0 });
     return list;
   } catch (e) {
-    bb("home", "grades_failed", { error: (e as Error).message.slice(0, 100) });
-    return gradeCache?.list ?? [];
+    bb("home", "grades_failed", { error: (e as Error).message.slice(0, 100), showing: last.length, ms: Date.now() - t0 });
+    return last;
   }
 });
 // Tester feedback: one tap, their words + the last few event names (never what they said or saw).
