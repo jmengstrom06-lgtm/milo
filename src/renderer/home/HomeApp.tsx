@@ -197,6 +197,7 @@ export default function HomeApp() {
     if (r && r.ok) {
       setDue(r.items);
       setDueErr(null);
+      void M.home.grades(portal).then(setGrades); // D2L is answering: make sure the grades are there too (cached = instant)
     } else setDueErr(r && !r.ok && r.signin ? "signin" : "offline");
   }, [portal]);
   useEffect(() => {
@@ -211,6 +212,7 @@ export default function HomeApp() {
     void M.google.status().then((g) => setGoogle(g));
     if (portal) void M.d2lCheck(portal).then((c) => setD2l({ ok: c.ok, via: c.via }));
     const t = window.setInterval(() => setNow(Date.now()), 30e3);
+    const g = window.setInterval(() => portal && void M.home.grades(portal).then(setGrades), 10 * 60e3);
     const on = () => setOnline(true);
     const off = () => setOnline(false);
     window.addEventListener("online", on);
@@ -218,6 +220,7 @@ export default function HomeApp() {
     const d = window.setInterval(() => void loadDue(), 10 * 60e3);
     return () => {
       window.clearInterval(t);
+      window.clearInterval(g);
       window.clearInterval(d);
       window.removeEventListener("online", on);
       window.removeEventListener("offline", off);
@@ -371,6 +374,13 @@ export default function HomeApp() {
   const next = useMemo(() => firstOffer(week.map((d) => ({ ...d, urgent: d.due_iso ? new Date(d.due_iso).getTime() - now < 48 * 3600e3 : false })), now), [week, now]);
   const exam = week.find((d) => d.kind === "exam" && d.due_iso && new Date(d.due_iso).getTime() - now < 36 * 3600e3);
   const classOf = (name: string) => classes.find((c) => c.name === name || name.startsWith(c.name) || c.name.startsWith(name)) ?? null;
+  // D2L just came back (signed in again, Chrome reopened): fill the grades in right away, don't wait 10 minutes
+  const d2lWas = useRef<boolean | null>(null);
+  useEffect(() => {
+    const ok = d2l?.ok ?? null;
+    if (ok && d2lWas.current === false && portal) void M.home.grades(portal, true).then(setGrades);
+    d2lWas.current = ok;
+  }, [d2l?.ok, portal]);
   const gradeOf = (name: string) => grades.find((g) => g.name === name || g.name.startsWith(name) || name.startsWith(g.name))?.grade ?? null;
   // ---- checkup: run on open and every 30 minutes; fixes rerun it ----
   const [check, setCheck] = useState<MiloCheckItem[] | null>(null);
