@@ -273,6 +273,8 @@ contextBridge.exposeInMainWorld("milo", {
   checkupFix: (kind: string) => ipcRenderer.invoke("milo:checkup-fix", kind),
   syllabus: (course: string) => ipcRenderer.invoke("milo:syllabus", course),
   exam: (q: { course: string; kind?: string; extra?: string }) => ipcRenderer.invoke("milo:exam", q),
+  classesAsk: (q: { ask: string; portal: string; fresh?: boolean }) => ipcRenderer.invoke("milo:classes-ask", q),
+  quizPrep: (q: { portal: string; course?: string; quiz?: string }) => ipcRenderer.invoke("milo:quiz-prep", q),
   feedFetch: (url: string) => ipcRenderer.invoke("milo:feed-fetch", url),
   feedConnect: (url?: string) => ipcRenderer.invoke("milo:feed-connect", url),
   jobStart: (goal: string, opts?: { approved?: boolean }) => ipcRenderer.invoke("milo:job-start", goal, opts),

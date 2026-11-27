@@ -2115,3 +2115,9 @@ a.wc__fine:hover { color: #c4b5fd; }
 .pp__req small { color: #8b8b93; }
 .pp__answer { color: #c4b5fd; }
 .pp__li { display: inline-block; min-width: 18px; color: #3f3b48; font-weight: 700; }
+.cc__row { padding: 7px 6px; border-bottom: 1px solid #1f1b27; }
+.cc__row:last-child { border-bottom: 0; }
+.cc__line { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; }
+.cc__label { color: #ededef; min-width: 0; }
+.cc__value { color: #c4b5fd; font-weight: 700; white-space: nowrap; }
+.cc__note { display: block; color: #a1a1aa; font-size: 11.5px; margin-top: 3px; line-height: 1.35; }

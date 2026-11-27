@@ -159,9 +159,11 @@ export function DiscussionCard({
         </button>
       </div>
       <div className="wc__checks">
-        <span className={wordsOk ? "ok" : "no"}>
-          {wordsOk ? "✓" : "!"} {n} words{r.req.minWords ? ` (needs ${r.req.minWords})` : ""}
-        </span>
+        {!r.repliesOnly && (
+          <span className={wordsOk ? "ok" : "no"}>
+            {wordsOk ? "✓" : "!"} {n} words{r.req.minWords ? ` (needs ${r.req.minWords})` : ""}
+          </span>
+        )}
         {r.req.replies > 0 && (
           <span className={repliesOk ? "ok" : "no"}>
             {repliesOk ? "✓" : "!"} {d.replies.length} of {r.req.replies} replies
@@ -173,11 +175,13 @@ export function DiscussionCard({
           </span>
         ))}
       </div>
-      <label className="wc__field">
-        <small>Your post</small>
-        <input value={d.subject} onChange={(e) => setD({ ...d, subject: e.target.value })} aria-label="Subject" />
-        <textarea value={d.body} onChange={(e) => setD({ ...d, body: e.target.value })} rows={8} aria-label="Post" />
-      </label>
+      {!r.repliesOnly && (
+        <label className="wc__field">
+          <small>Your post</small>
+          <input value={d.subject} onChange={(e) => setD({ ...d, subject: e.target.value })} aria-label="Subject" />
+          <textarea value={d.body} onChange={(e) => setD({ ...d, body: e.target.value })} rows={8} aria-label="Post" />
+        </label>
+      )}
       {d.replies.map((x, i) => (
         <label className="wc__field" key={i}>
           <small>
@@ -206,9 +210,47 @@ export function DiscussionCard({
             onPost(d);
           }}
         >
-          {sure ? `Yes, post${d.replies.length ? ` + ${d.replies.length} repl${d.replies.length > 1 ? "ies" : "y"}` : ""}` : "Post to D2L"}
+          {sure ? (r.repliesOnly ? `Yes, post ${d.replies.length} repl${d.replies.length > 1 ? "ies" : "y"}` : `Yes, post${d.replies.length ? ` + ${d.replies.length} repl${d.replies.length > 1 ? "ies" : "y"}` : ""}`) : "Post to D2L"}
         </button>
       </div>
+    </div>
+  );
+}
+
+/** "Ask anything about my classes": Milo's answer, the D2L facts behind it, and a link to the page. */
+export function ClassesCard({ r, style, hover, onClose }: { r: Extract<MiloClassesResult, { ok: true }>; style: React.CSSProperties; hover: Hover; onClose: () => void }) {
+  return (
+    <div className="wc" style={style} onMouseEnter={() => hover(true)} onMouseMove={() => hover(true)} onMouseLeave={() => hover(false)} role="dialog" aria-label="Your classes">
+      <div className="wc__head">
+        <div>
+          <b>{r.course || "Your classes"}</b>
+          <small>from D2L, just now</small>
+        </div>
+        <button className="wc__x" onClick={onClose} aria-label="Close">
+          ✕
+        </button>
+      </div>
+      <p className="wc__sum">{r.answer}</p>
+      {r.rows.length > 0 && (
+        <ul className="wc__list">
+          {r.rows.map((x, i) => (
+            <li key={i} className="cc__row">
+              <div className="cc__line">
+                <span className="cc__label">{x.label}</span>
+                <span className="cc__value">{x.value}</span>
+              </div>
+              {x.note && <small className="cc__note">{x.note}</small>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {r.url && (
+        <div className="wc__foot">
+          <a className="wc__fine" href={r.url} onClick={(e) => (e.preventDefault(), window.milo.openUrl(r.url!))}>
+            Open it in D2L
+          </a>
+        </div>
+      )}
     </div>
   );
 }
