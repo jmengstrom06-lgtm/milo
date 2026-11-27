@@ -125,7 +125,7 @@ const CASES: Case[] = [
   { ask: "how many attempts do I get on the stats quiz", check: spoken(/\b(2|two)\b/i) },
   { ask: "is there a time limit on my psych quiz", check: all(spoken(/no|doesn't|not|isn't/i), not(/\b\d+\s*min/i)) },
   { ask: "when does the bio quiz open", check: spoken(/sat|tomorrow|nov(ember)? 28|28/i) },
-  { ask: "do I have any quizzes in english", check: all(spoken(/couldn't|could not|can't|wasn't able|unable|not able|didn't/i), not(/\bno quizzes\b/i)) },
+  { ask: "do I have any quizzes in english", check: all(act("none"), spoken(/couldn't|could not|can't|wasn't able|unable|not able|didn't/i), not(/\bno quizzes\b/i)) },
   { ask: "what's on the stats quiz", check: spoken(/chapter 7|sampling/i) },
   // discussions
   { ask: "did I post in psych this week", check: all(spoken(/\bno\b|haven't|not yet|didn't/i), spoken(/social influence|week 13/i)) },

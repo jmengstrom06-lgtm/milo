@@ -75,11 +75,22 @@ export async function answerClasses(ask: string, snap: Snapshot, now = Date.now(
     TOOL.name
   );
   if (!r.ok) return { ok: false, text: r.text };
-  return { ok: true, data: cleanAnswer(r.data) };
+  return { ok: true, data: cleanAnswer(r.data, ask) };
 }
 
-/** Tidy what the model gave: known action kinds only, rows capped, no em dashes. (pure) */
-export function cleanAnswer(d: { answer?: string; course?: string; rows?: { label: string; value: string; note?: string }[]; action?: Record<string, string>; need_more?: boolean }): ClassAnswer {
+/** Did they actually ask for this to be done? An answer to a question never opens tabs or starts drafts. (pure) */
+export function askedFor(kind: ClassAction["kind"], ask: string): boolean {
+  const a = ask.toLowerCase().replace(/^(?:hey |ok |okay )?milo,?\s*/, "");
+  const status = /^(?:did|have|has|was|were|is|are|am|when|what|what's|whats|which|how many|how long|do i have)\b/.test(a); // a question, not a request
+  if (status && kind !== "open" && kind !== "forecast") return false;
+  if (kind === "open") return /\b(open|pull (?:it |them )?up|bring up|show|see|go to|take me|look at|navigate)\b/.test(a);
+  if (kind === "discussion") return /\b(write|do|draft|start|reply|respond|post|help me with|work on|finish)\b/.test(a);
+  if (kind === "quiz_prep") return /\b(study|prep|prepare|ready|practice|review|quiz me|help me (?:with|for)|cram)\b/.test(a);
+  return true;
+}
+
+/** Tidy what the model gave: known action kinds only (and only if asked), rows capped, no em dashes. (pure) */
+export function cleanAnswer(d: { answer?: string; course?: string; rows?: { label: string; value: string; note?: string }[]; action?: Record<string, string>; need_more?: boolean }, ask = ""): ClassAnswer {
   const a = d.action ?? {};
   const s = (x: unknown) => (typeof x === "string" ? x.trim() : "");
   const course = s(a.course) || s(d.course);
@@ -94,12 +105,13 @@ export function cleanAnswer(d: { answer?: string; course?: string; rows?: { labe
           : a.kind === "quiz_prep"
             ? { kind: "quiz_prep", course, quiz: s(a.quiz) }
             : { kind: "none" };
+  const act: ClassAction = !ask || askedFor(action.kind, ask) ? action : { kind: "none" };
   const dash = (t: string) => t.replace(/\s*[—–]\s*/g, ", ");
   return {
     answer: dash(s(d.answer)) || "I couldn't find that in D2L.",
     course: s(d.course),
     rows: (Array.isArray(d.rows) ? d.rows : []).filter((x) => x && s(x.label)).slice(0, 8).map((x) => ({ label: dash(s(x.label)).slice(0, 80), value: dash(s(x.value)).slice(0, 80), ...(s(x.note) ? { note: dash(s(x.note)).slice(0, 300) } : {}) })),
-    action,
+    action: act,
     needMore: !!d.need_more,
   };
 }

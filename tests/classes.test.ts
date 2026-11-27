@@ -169,6 +169,12 @@ describe("cleanAnswer", () => {
     expect(cleanAnswer({ answer: "x", action: { kind: "submit_quiz" } }).action.kind).toBe("none");
     expect(cleanAnswer({ answer: "x", action: { kind: "open", course: "bio", page: "nope" } }).action).toEqual({ kind: "open", course: "bio", page: "home" });
   });
+  it("a plain question never opens a page or starts a draft", () => {
+    expect(cleanAnswer({ answer: "x", action: { kind: "open", course: "english", page: "quizzes" } }, "do I have any quizzes in english").action.kind).toBe("none");
+    expect(cleanAnswer({ answer: "x", action: { kind: "open", course: "stats", page: "grades" } }, "pull up my stats grades").action.kind).toBe("open");
+    expect(cleanAnswer({ answer: "x", action: { kind: "discussion", course: "psych" } }, "did I post in psych").action.kind).toBe("none");
+    expect(cleanAnswer({ answer: "x", action: { kind: "quiz_prep", course: "bio" } }, "help me get ready for my bio quiz").action.kind).toBe("quiz_prep");
+  });
   it("forecast without a letter isn't a forecast", () => expect(cleanAnswer({ answer: "x", action: { kind: "forecast" } }).action.kind).toBe("none"));
 });
 
