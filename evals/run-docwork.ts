@@ -87,6 +87,8 @@ const CASES: Case[] = [
   // ---- several things at once
   { ask: "fix the grammar, add a heading above each body paragraph, and double space it", check: (a, _r, d) => { const t = T(a).join(" "); return /their nights/.test(t) && a.filter((p) => /HEADING/.test(p[1])).length >= 2 && d.full().every((p) => p.ps.lineSpacing === 200) ? true : "missed a part"; } },
   { ask: "delete the CDC paragraph and add a new conclusion at the end", check: (a) => (!T(a).some((x) => /CDC/.test(x)) && a.length >= ORIG.length && !same(T(a)[T(a).length - 1], ORIG[7]) ? true : "missed a part") },
+  // ---- Jake's real request (it looped 3 passes before the checker could see formatting)
+  { ask: "edit it so that it's double spaced and has correct indents and make it just sound better", check: (a, r, d) => { const f = d.full(); const ds = f.every((p) => p.ps.lineSpacing === 200); const ind = f.slice(4).some((p) => (p.ps.indentFirstLine as { magnitude?: number })?.magnitude); const reworded = !unchanged(a, [4, 5, 6]); return ds && ind && reworded && r.plans.length <= 2 ? true : `double: ${ds}, indents: ${ind}, reworded: ${reworded}, passes: ${r.plans.length}`; } },
   // ---- can't do: say so, don't fake it, don't break anything
   { ask: "add a table comparing screen time and sleep hours to my paper", check: (a, r) => (r.cant.length > 0 ? true : "didn't say it can't add tables") },
   { ask: "leave a comment on my thesis saying it needs work", check: (a, r) => (r.cant.length > 0 && a.length === ORIG.length ? true : "didn't say it can't comment") },
@@ -104,7 +106,9 @@ async function main() {
     const before = d.full();
     let line = "";
     try {
+      const t0 = Date.now();
       const r = await docWork(d.io(), c.ask);
+      const secs = ((Date.now() - t0) / 1000).toFixed(0);
       const after = d.paras();
       const ok = r.ok ? c.check(after, r, d) : `failed: ${r.text}`;
       // what the panel previewed must be exactly what gets written to the real doc
@@ -125,7 +129,7 @@ async function main() {
       total += 2;
       if (ok === true) pass++;
       if (undoOk) pass++;
-      line = `${ok === true ? "✓" : "✗"} ${c.ask}${ok === true ? "" : `  (${ok}) plans: ${r.ok ? r.plans.join(" | ") : ""}${r.ok && r.sourceSearch ? ` sources: ${r.sourceSearch}` : ""}${r.ok && r.skippedWhy.length ? ` skipped: ${r.skippedWhy.join(", ")}` : ""}`}${r.ok ? `  [${r.applied.length} changes${r.missing ? `, missing: ${r.missing.slice(0, 60)}` : ""}]` : ""}${undoOk ? "" : "  ✗ UNDO did not restore the original"}${sameOk ? "" : "  ✗ WRITING to the doc didn't match the preview"}`;
+      line = `${ok === true ? "✓" : "✗"} ${secs}s ${r.ok ? `${r.plans.length} pass${r.plans.length === 1 ? "" : "es"} ` : ""}${c.ask}${ok === true ? "" : `  (${ok}) plans: ${r.ok ? r.plans.join(" | ") : ""}${r.ok && r.sourceSearch ? ` sources: ${r.sourceSearch}` : ""}${r.ok && r.skippedWhy.length ? ` skipped: ${r.skippedWhy.join(", ")}` : ""}`}${r.ok ? `  [${r.applied.length} changes${r.missing ? `, missing: ${r.missing.slice(0, 60)}` : ""}]` : ""}${undoOk ? "" : "  ✗ UNDO did not restore the original"}${sameOk ? "" : "  ✗ WRITING to the doc didn't match the preview"}`;
     } catch (e) {
       total += 3;
       line = `✗ ${c.ask}  (crashed: ${(e as Error).message.slice(0, 120)})`;

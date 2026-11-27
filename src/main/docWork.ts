@@ -214,12 +214,20 @@ export async function docWork(io: DocIO, ask: string, opts: { rubric?: string; l
     // the check: does the doc now match the request?
     opts.status?.("Checking it's what you asked…");
     const after = paragraphs((await io.read()).content);
-    const changeList = applied.map((c) => `- ${c.op}: ${c.find ? `"${c.find.slice(0, 120)}" → ` : ""}${c.replace ? `"${c.replace.slice(0, 200)}"` : "(removed)"}`).join("\n");
+    const changeList = applied
+      .map((c) =>
+        c.op === "format"
+          ? `- format ${c.find === "(the whole paper)" ? "the whole paper" : `"${c.find.slice(0, 80)}"`}: ${JSON.stringify({ ...c.after?.ps, ...c.after?.ts })}`
+          : c.op === "style"
+            ? `- "${c.find.slice(0, 80)}" is now ${c.style}`
+            : `- ${c.op}: ${c.find ? `"${c.find.slice(0, 120)}" → ` : ""}${c.replace ? `"${c.replace.slice(0, 200)}"` : "(removed)"}`
+      )
+      .join("\n");
     const chk = await callTool<{ done: boolean; missing: string; extra: string }>(
       {
         model: models.fast(),
         max_tokens: 600,
-        system: "You check a writing assistant's work on a student's Google Doc. List the parts of the request, then check each one was carried out in the doc as it is now. Judge whether it was DONE, not how well: improving, rewriting, shortening or strengthening something counts as done once that thing was changed in that direction. Never ask for more polish.",
+        system: "You check a writing assistant's work on a student's Google Doc. List the parts of the request, then check each one was carried out in the doc as it is now. Formatting shows in [brackets] after each paragraph number (e.g. double spaced, indent 36pt, centered, Times New Roman, 12pt); a changes list entry 'format' also means it was applied. Judge whether it was DONE, not how well: improving, rewriting, shortening or strengthening something counts as done once that thing was changed in that direction. Never ask for more polish. If something is missing, say exactly what, in a few words.",
         tools: [CHECK_TOOL],
         tool_choice: { type: "auto" },
         messages: [{ role: "user", content: `Request: "${ask}"\n\nChanges made:\n${changeList || "(none)"}\n\nThe doc now:\n${listing(after)}` }],
@@ -232,7 +240,12 @@ export async function docWork(io: DocIO, ask: string, opts: { rubric?: string; l
       missing = "";
       break;
     }
-    missing = chk.data.missing || "part of the request";
+    missing = (chk.data.missing || "").trim();
+    if (!missing || /^part of the request$/i.test(missing)) {
+      // the checker couldn't say what's missing: nothing concrete to do, so stop here
+      missing = "";
+      break;
+    }
   }
   const end = await io.read();
   return { ok: true, title: first.title, summary: summary || (applied.length ? "Done." : "I read it."), answer, applied, skipped, skippedWhy, plans, notes, offered, offeredCites, sourceSearch: offered.length || WANTS_SOURCES.test(ask) ? lastTopic : "", cant, missing, wordsBefore, wordsAfter: docWords(end.content) };
