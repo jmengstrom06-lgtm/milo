@@ -147,7 +147,20 @@ export function paragraphs(content: DocEl[] = []): Para[] {
 export function listing(ps: Para[]): string {
   return ps
     .map((p) => {
-      const tags = [p.style !== "NORMAL_TEXT" ? p.style : "", p.props.alignment && p.props.alignment !== "START" ? String(p.props.alignment).toLowerCase() : "", p.runs.length && p.runs.every((r) => r.ts.bold) ? "bold" : "", (p.props.indentStart as { magnitude?: number })?.magnitude ? "hanging" : ""].filter(Boolean);
+      const sp = p.props.lineSpacing as number | undefined;
+      const ind = (p.props.indentFirstLine as { magnitude?: number } | undefined)?.magnitude;
+      const font = (p.runs[0]?.ts.weightedFontFamily as { fontFamily?: string } | undefined)?.fontFamily;
+      const size = (p.runs[0]?.ts.fontSize as { magnitude?: number } | undefined)?.magnitude;
+      const tags = [
+        p.style !== "NORMAL_TEXT" ? p.style : "",
+        p.props.alignment && p.props.alignment !== "START" ? String(p.props.alignment).toLowerCase() : "",
+        p.runs.length && p.runs.every((r) => r.ts.bold) ? "bold" : "",
+        (p.props.indentStart as { magnitude?: number })?.magnitude ? "hanging" : "",
+        sp && sp !== 100 ? (sp >= 200 ? "double spaced" : `spacing ${sp}`) : "",
+        ind ? `indent ${ind}pt` : "",
+        font ? font : "",
+        size ? `${size}pt` : "",
+      ].filter(Boolean);
       return `P${p.n}${tags.length ? ` [${tags.join(", ")}]` : ""}: ${p.text || "(blank line)"}`;
     })
     .join("\n");
@@ -370,6 +383,15 @@ export async function applyPlan(io: DocIO, plan: Plan, live?: (c: Change, i: num
             continue;
           }
           targets.push({ p, from: loc?.from ?? 0, to: loc?.to ?? p.text.length });
+        }
+        // only paragraphs that actually look different afterwards
+        const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+        const needs = (t: { p: Para; from: number; to: number }) =>
+          d.pf.some((k) => !same(t.p.props[k], d.ps[k])) || (d.tf.length > 0 && t.p.runs.some((r) => r.to > t.from && r.from < t.to && d.tf.some((k) => !same(r.ts[k], d.ts[k]))));
+        for (let k = targets.length - 1; k >= 0; k--) if (!needs(targets[k])) targets.splice(k, 1);
+        if (!targets.length) {
+          skipped.push({ op, why: "already formatted that way" });
+          continue;
         }
         const reqs: unknown[] = [];
         const before: NonNullable<Change["before"]> = [];

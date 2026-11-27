@@ -236,3 +236,14 @@ describe("preview on a copy, then write to the real doc: identical result", () =
     expect(SimDoc.fromContent(a.content()).full()).toEqual(a.full());
   });
 });
+
+describe("no busywork", () => {
+  it("formatting that's already there is skipped, not repeated", async () => {
+    const d = new SimDoc(PAPER);
+    const r1 = await applyPlan(d.io(), plan([{ op: "format", target: "all", format: { lineSpacing: 200, firstLineIndent: 36 } }]));
+    expect(r1.changes.length).toBe(1);
+    const r2 = await applyPlan(d.io(), plan([{ op: "format", target: "all", format: { lineSpacing: 200, firstLineIndent: 36 } }, { op: "format", para: 2, format: { lineSpacing: 200 } }]));
+    expect(r2.changes.length).toBe(0);
+    expect(r2.skipped.map((s) => s.why)).toEqual(["already formatted that way", "already formatted that way"]);
+  });
+});
