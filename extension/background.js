@@ -28,6 +28,7 @@ async function connect() {
     if (!cfg?.port || !cfg?.token) throw new Error("no config yet");
     const sock = new WebSocket(`ws://127.0.0.1:${cfg.port}/?token=${encodeURIComponent(cfg.token)}`);
     sock.onopen = () => {
+      if (ws && ws !== sock && ws.readyState === 1) ws.close(); // keep one connection, the newest
       ws = sock;
       // Talking every 20 s keeps Chrome from putting this worker to sleep (which drops the connection).
       clearInterval(self.miloBeat);
@@ -51,6 +52,8 @@ async function connect() {
       }
     };
     sock.onclose = () => {
+      // an extra connection Milo closed (two opened at once) isn't "off": only the live one counts
+      if (ws && ws !== sock && ws.readyState === 1) return;
       if (ws === sock) ws = null;
       chrome.action.setBadgeText({ text: "off" });
       chrome.action.setBadgeBackgroundColor({ color: "#6b7280" });
