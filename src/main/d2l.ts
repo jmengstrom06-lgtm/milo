@@ -535,3 +535,55 @@ export async function deletePost(portal: string, ou: number, t: Pick<DTopic, "fo
     .catch(() => 0)) as number;
   return s === 200;
 }
+
+// ---------- assignments (the prompt + rubric behind a paper) ----------
+export type DAssignment = { id: number; course: Course; name: string; due: string | null; instructions: string; rubric: string; attachments: { fileId: number; name: string; size: number }[] };
+type DFolder = {
+  Id: number;
+  Name: string;
+  DueDate?: string | null;
+  IsHidden?: boolean;
+  CustomInstructions?: { Text?: string; Html?: string };
+  Attachments?: { FileId: number; FileName: string; Size?: number }[];
+  Assessment?: { ScoreDenominator?: number | null; Rubrics?: DRubric[] };
+};
+type DRubric = {
+  Name?: string;
+  Description?: { Text?: string };
+  CriteriaGroups?: { Name?: string; Levels?: { Id: number; Name?: string; Points?: number | null }[]; Criteria?: { Name?: string; Cells?: { LevelId?: number; Description?: { Text?: string }; Points?: number | null }[] }[] }[];
+};
+/** A rubric as plain lines: each criterion with what its best level asks for. (pure) */
+export function rubricText(rs: DRubric[] = []): string {
+  const out: string[] = [];
+  for (const r of rs) {
+    out.push(`Rubric: ${r.Name ?? "rubric"}`);
+    for (const g of r.CriteriaGroups ?? []) {
+      const levels = g.Levels ?? [];
+      const top = levels.reduce((a, l) => ((l.Points ?? 0) > (a?.Points ?? -1) ? l : a), levels[0]);
+      for (const c of g.Criteria ?? []) {
+        const best = c.Cells?.find((x) => x.LevelId === top?.Id) ?? c.Cells?.[0];
+        const desc = (best?.Description?.Text ?? "").replace(/\s+/g, " ").trim();
+        const pts = best?.Points ?? top?.Points;
+        out.push(`- ${c.Name ?? "criterion"}${pts !== undefined && pts !== null ? ` (${pts} pts)` : ""}${desc ? `: ${desc}` : ""}`);
+      }
+    }
+  }
+  return out.join("\n").slice(0, 5000);
+}
+/** The assignments (dropbox folders) in a class, with instructions and rubric. */
+export async function assignmentsFor(portal: string, c: Course): Promise<DAssignment[]> {
+  const fs = await api<DFolder[]>(portal, `/d2l/api/le/${LE}/${c.id}/dropbox/folders/`).catch(() => [] as DFolder[]);
+  return (fs ?? [])
+    .filter((f) => !f.IsHidden)
+    .map((f) => ({
+      id: f.Id,
+      course: c,
+      name: f.Name,
+      due: f.DueDate ?? null,
+      instructions: (f.CustomInstructions?.Text || strip(f.CustomInstructions?.Html ?? "")).replace(/\n{3,}/g, "\n\n").trim().slice(0, 6000),
+      rubric: rubricText(f.Assessment?.Rubrics),
+      attachments: (f.Attachments ?? []).map((a) => ({ fileId: a.FileId, name: a.FileName, size: a.Size ?? 0 })),
+    }));
+}
+/** The link to an assignment attachment (the prompt PDF / Word file). */
+export const assignmentFileUrl = (portal: string, ou: number, folderId: number, fileId: number) => `${originOf(portal)}/d2l/api/le/${LE}/${ou}/dropbox/folders/${folderId}/attachments/${fileId}`;

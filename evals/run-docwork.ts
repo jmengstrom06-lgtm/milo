@@ -30,7 +30,24 @@ const same = (a: string, b: string) => a.replace(/\s+/g, " ").trim() === b.repla
 const unchanged = (ps: P, idx: number[]) => idx.every((i) => ps.some((p) => same(p[0], ORIG[i])));
 
 type R = Extract<Awaited<ReturnType<typeof docWork>>, { ok: true }>;
-type Case = { ask: string; check: (after: P, r: R, d: SimDoc) => true | string };
+type Case = { ask: string; check: (after: P, r: R, d: SimDoc) => true | string; assignment?: boolean };
+const ASSIGNMENT = {
+  label: "Persuasive Essay · ENGL 10803",
+  brief: `Assignment: Persuasive Essay (ENGL 10803 Composition), due Friday
+Instructions:
+Write a 300-450 word persuasive essay about a problem that affects teenagers. Your essay must include:
+- a clear thesis statement at the end of your introduction
+- at least one counterargument paragraph that presents an opposing view and rebuts it
+- a conclusion with a call to action
+- MLA format: double spaced, Times New Roman 12 pt, MLA header
+Rubric: Persuasive Essay Rubric
+- Thesis (20 pts): A clear, arguable thesis that previews the main points.
+- Counterargument (20 pts): Fairly presents an opposing view and convincingly rebuts it.
+- Evidence (20 pts): Claims are supported with specific evidence.
+- Conclusion (15 pts): Restates the thesis and ends with a call to action.
+- MLA format (10 pts): Double spaced, Times New Roman 12, correct header.
+- Mechanics (15 pts): Few or no grammar, spelling, or punctuation errors.`,
+};
 /** Everything after the Works Cited / References heading must be a real offered entry. */
 function listCheck(a: P, r: R, heading: RegExp, min: number): true | string {
   const t = T(a);
@@ -89,6 +106,28 @@ const CASES: Case[] = [
   { ask: "delete the CDC paragraph and add a new conclusion at the end", check: (a) => (!T(a).some((x) => /CDC/.test(x)) && a.length >= ORIG.length && !same(T(a)[T(a).length - 1], ORIG[7]) ? true : "missed a part") },
   // ---- Jake's real request (it looped 3 passes before the checker could see formatting)
   { ask: "edit it so that it's double spaced and has correct indents and make it just sound better", check: (a, r, d) => { const f = d.full(); const ds = f.every((p) => p.ps.lineSpacing === 200); const ind = f.slice(4).some((p) => (p.ps.indentFirstLine as { magnitude?: number })?.magnitude); const reworded = !unchanged(a, [4, 5, 6]); return ds && ind && reworded && r.plans.length <= 2 ? true : `double: ${ds}, indents: ${ind}, reworded: ${reworded}, passes: ${r.plans.length}`; } },
+  // ---- assignment-aware (the D2L prompt + rubric this paper is for)
+  {
+    assignment: true,
+    ask: "edit my paper so it meets the assignment",
+    check: (a, r, d) => {
+      const t = T(a).slice(4).join(" ");
+      const counter = /\b(critics|opponents|some (people )?(argue|say|believe)|others argue|on the other hand|however, some|it could be argued)\b/i.test(t);
+      const ds = d.full().every((p) => p.ps.lineSpacing === 200);
+      const n = bodyWords(a);
+      return counter && ds && n >= 260 && r.requirements.length >= 4 ? true : `counter: ${counter}, double: ${ds}, words: ${n}, checklist: ${r.requirements.length}`;
+    },
+  },
+  {
+    assignment: true,
+    ask: "does my paper meet the assignment requirements?",
+    check: (a, r) => (r.applied.length === 0 && r.requirements.some((x) => !x.met && /counter/i.test(x.req)) && r.answer.length > 20 ? true : `changes: ${r.applied.length}, checklist: ${JSON.stringify(r.requirements.map((x) => [x.req.slice(0, 20), x.met]))}`),
+  },
+  {
+    assignment: true,
+    ask: "double space my paper",
+    check: (a, r, d) => (unchanged(a, [4, 5, 6, 7]) && d.full().every((p) => p.ps.lineSpacing === 200) && r.requirements.length > 0 ? true : "changed words, missed spacing, or no checklist"),
+  },
   // ---- can't do: say so, don't fake it, don't break anything
   { ask: "add a table comparing screen time and sleep hours to my paper", check: (a, r) => (r.cant.length > 0 ? true : "didn't say it can't add tables") },
   { ask: "leave a comment on my thesis saying it needs work", check: (a, r) => (r.cant.length > 0 && a.length === ORIG.length ? true : "didn't say it can't comment") },
@@ -107,7 +146,7 @@ async function main() {
     let line = "";
     try {
       const t0 = Date.now();
-      const r = await docWork(d.io(), c.ask);
+      const r = await docWork(d.io(), c.ask, c.assignment ? { assignment: ASSIGNMENT } : {});
       const secs = ((Date.now() - t0) / 1000).toFixed(0);
       const after = d.paras();
       const ok = r.ok ? c.check(after, r, d) : `failed: ${r.text}`;

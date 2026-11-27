@@ -25,6 +25,7 @@ import { bridgeConnected, call as ext, registerNativeHost, startBridge } from ".
 import { findDoc } from "./findDoc";
 import { firstLook, propose, preview, applyToDoc, exportText, type Source as PaperSource } from "./paperFlow";
 import { SimDoc } from "./docSim";
+import { findAssignment } from "./assignmentMatch";
 import { undoChanges, type Change, type DocIO } from "./docAgent";
 import { runWebTask } from "./webagent";
 import { registerKit } from "./kitipc";
@@ -666,7 +667,8 @@ async function openDoc(said = "", picked?: string): Promise<{ id: string; title:
 const NO_DOC = "I don't see a Google Doc open in Chrome or Safari. Open your paper in Google Docs, or copy its link, then ask me again. (A Word file: open it in Google Docs first.)";
 let writingBusy = false;
 /** "Fix my paper": read it, do the work on a copy, show it in the paper panel. Nothing is written until they accept. */
-async function paperPropose(ask: string, read: () => Promise<{ title: string; content: import("./docEdit").DocEl[] }>, source: PaperSource) {
+let lastPortal = "";
+async function paperPropose(ask: string, read: () => Promise<{ title: string; content: import("./docEdit").DocEl[] }>, source: PaperSource, portal = "") {
   if (writingBusy) return { ok: false, text: "I'm still working on the last one. One sec." };
   writingBusy = true;
   try {
@@ -675,7 +677,17 @@ async function paperPropose(ask: string, read: () => Promise<{ title: string; co
     // the panel opens right away with the paper; the changes arrive when they're ready
     const first = await read();
     toOverlay("milo:paper-open", { title: first.title, rows: firstLook(first.content), source: source.type });
-    const r = await propose(async () => first, String(ask ?? ""), source, { rubric, status: (t) => toOverlay("milo:writing-live", { stage: "reading", text: t }) });
+    // which D2L assignment is this paper for? (its instructions and rubric guide the work)
+    const text = firstLook(first.content).map((r) => r.text).join("\n");
+    toOverlay("milo:writing-live", { stage: "reading", text: "Finding your assignment in D2L…" });
+    const assignment = await findAssignment(portal || lastPortal, { key: source.type === "gdoc" ? source.docId : first.title, title: first.title, text }, String(ask ?? "")).catch(() => null);
+    if (assignment) toOverlay("milo:writing-live", { stage: "reading", text: `Checking it against “${assignment.name}”…` });
+    const r = await propose(async () => first, String(ask ?? ""), source, {
+      assignment,
+      rubric,
+      status: (t) => toOverlay("milo:writing-live", { stage: "reading", text: t }),
+      rows: (rows, n) => toOverlay("milo:paper-rows", { rows, n }),
+    });
     track("paper_edit", { ok: r.ok, n: r.ok && r.view ? r.view.groups.length : 0, rubric: !!rubric, source: source.type, answer: r.ok && !!r.answer });
     return r;
   } catch (e) {
@@ -685,21 +697,24 @@ async function paperPropose(ask: string, read: () => Promise<{ title: string; co
     writingBusy = false;
   }
 }
-ipcMain.handle("milo:paper-edit", async (_e, ask: string, picked?: string) => {
+ipcMain.handle("milo:paper-edit", async (_e, ask: string, picked?: string, portal?: string) => {
+  if (portal) lastPortal = String(portal);
   if (!googleStatus().connected) return { ok: false, connect: true, text: "Connect Google first so I can work on your doc. Say “connect Google.”" };
   const found = await openDoc(String(ask ?? ""), typeof picked === "string" ? picked : undefined);
   if (!found) return { ok: false, text: NO_DOC };
   if ("ask" in found) return { ok: false, text: found.ask, docs: found.docs };
-  return paperPropose(String(ask ?? ""), () => docsFull(found.id), { type: "gdoc", docId: found.id });
+  return paperPropose(String(ask ?? ""), () => docsFull(found.id), { type: "gdoc", docId: found.id }, lastPortal);
 });
 /** A pasted paper or a Word/text file: same panel; it comes back out as a Google Doc, a Word file or copied. */
-ipcMain.handle("milo:paper-edit-text", async (_e, ask: string, text: string, title?: string) => {
+ipcMain.handle("milo:paper-edit-text", async (_e, ask: string, text: string, title?: string, portal?: string) => {
+  if (portal) lastPortal = String(portal);
   const body = String(text ?? "");
   if (body.trim().split(/\s+/).length < 30) return { ok: false, text: "Paste the whole paper (or drop the file on me) and I'll work on it." };
   const sim = SimDoc.fromText(body);
   return paperPropose(String(ask ?? ""), async () => ({ title: String(title || "Your paper"), content: sim.content() }), { type: "text" });
 });
-ipcMain.handle("milo:paper-edit-file", async (_e, file: string, ask: string) => {
+ipcMain.handle("milo:paper-edit-file", async (_e, file: string, ask: string, portal?: string) => {
+  if (portal) lastPortal = String(portal);
   const f = String(file ?? "");
   if (!/\.(docx?|rtf|odt|txt|md|html?)$/i.test(f) || !fs.existsSync(f)) return { ok: false, text: "I can work on Word, text and RTF files. For a Google Doc, just open it." };
   let text = "";
@@ -1933,6 +1948,7 @@ ipcMain.handle("milo:perms", () => {
 });
 /** At startup: is everything Milo needs actually working? Problems are said up front, not mid-question. */
 ipcMain.handle("milo:startup-check", async (_e, portal?: string) => {
+  if (portal) lastPortal = String(portal);
   if (selfTestOn() || jobBenchOn()) return { problems: [] };
   const problems: { kind: string; text: string }[] = [];
   if (process.platform === "darwin") {

@@ -212,12 +212,17 @@ contextBridge.exposeInMainWorld("milo", {
   },
   paper: (request: string, name?: string) => ipcRenderer.invoke("milo:paper", request, name),
   paperStop: () => ipcRenderer.invoke("milo:paper-stop"),
-  paperEdit: (ask: string, docId?: string) => ipcRenderer.invoke("milo:paper-edit", ask, docId),
-  paperEditText: (ask: string, text: string, title?: string) => ipcRenderer.invoke("milo:paper-edit-text", ask, text, title),
-  paperEditFile: (file: string, ask: string) => ipcRenderer.invoke("milo:paper-edit-file", file, ask),
+  paperEdit: (ask: string, docId?: string, portal?: string) => ipcRenderer.invoke("milo:paper-edit", ask, docId, portal),
+  paperEditText: (ask: string, text: string, title?: string, portal?: string) => ipcRenderer.invoke("milo:paper-edit-text", ask, text, title, portal),
+  paperEditFile: (file: string, ask: string, portal?: string) => ipcRenderer.invoke("milo:paper-edit-file", file, ask, portal),
   paperPreview: (id: string, rejected: number[]) => ipcRenderer.invoke("milo:paper-preview", id, rejected),
   paperApply: (id: string, rejected: number[]) => ipcRenderer.invoke("milo:paper-apply", id, rejected),
   paperExport: (id: string, rejected: number[], to: "google" | "word" | "copy") => ipcRenderer.invoke("milo:paper-export", id, rejected, to),
+  onPaperRows: (cb: (p: { rows: unknown[]; n: number }) => void) => {
+    const h = (_e: unknown, p: { rows: unknown[]; n: number }) => cb(p);
+    ipcRenderer.on("milo:paper-rows", h);
+    return () => ipcRenderer.removeListener("milo:paper-rows", h);
+  },
   onPaperOpen: (cb: (p: { title: string; rows: unknown[]; source: string }) => void) => {
     const h = (_e: unknown, p: { title: string; rows: unknown[]; source: string }) => cb(p);
     ipcRenderer.on("milo:paper-open", h);

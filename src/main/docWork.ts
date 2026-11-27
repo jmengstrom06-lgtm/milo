@@ -7,7 +7,8 @@ import { scholarly, webSources } from "./writing";
 import { citeLine, inText, styleOf, type Source } from "./citations";
 import { log as bb } from "./blackbox";
 import { models } from "./gateway";
-import { applyPlan, docWords, listing, paragraphs, type Change, type DocIO, type Plan } from "./docAgent";
+import { docWords, listing, opApplier, paragraphs, type Change, type DocIO, type Op, type Plan } from "./docAgent";
+import { completedItems, streamTool } from "./toolStream";
 
 const PLAN_TOOL = {
   name: "doc_plan",
@@ -70,6 +71,11 @@ const PLAN_TOOL = {
       summary: { type: "string", description: "One plain sentence for the student, past tense: what you did (or the answer, short)." },
       cant: { type: "string", description: "Anything they asked that you can't do in a Google Doc from here (images, tables, comments, fonts/colors, page setup, sharing), else empty." },
       notes: { type: "array", items: { type: "string" }, description: "Up to 3 short tips for things only the student can do (e.g. a claim that needs a source)." },
+      requirements: {
+        type: "array",
+        description: "Only when THE ASSIGNMENT is given: each concrete requirement and whether the paper meets it AFTER your changes.",
+        items: { type: "object", properties: { req: { type: "string", description: "A few words, e.g. '1,000–1,200 words' or '3 scholarly sources, MLA'." }, met: { type: "boolean" }, note: { type: "string", description: "A few words: why, or what's left." } }, required: ["req", "met"] },
+      },
     },
     required: ["understood", "answer", "ops", "summary", "cant", "notes"],
   },
@@ -89,7 +95,7 @@ const CHECK_TOOL = {
   },
 };
 
-function system(rubric: string): string {
+function system(rubric: string, assignment?: { label: string; brief: string }): string {
   // No keyword rules here (they misfire: "move X right after my intro" is not "edit only the intro").
   // The request itself says what to do and where; the agent reads it whole.
   return `${persona()}
@@ -105,7 +111,19 @@ You work on a college student's own Google Doc while they watch. Do EXACTLY what
 - Word targets ("cut to 500 words") count the body, not the header block.
 - A part of the paper named in the request ("my intro", "the CDC paragraph") is WHERE to act or a reference point, not a limit on everything else they asked.
 - Can't be done from here: tables, images, comments, page numbers or headers/footers, page setup. Do the rest and say so in "cant".
-${rubric ? `Grade it against this rubric and make changes that close the gaps:\n${rubric.slice(0, 4000)}` : ""}`;
+${rubric ? `Grade it against this rubric and make changes that close the gaps:\n${rubric.slice(0, 4000)}` : ""}${
+    assignment
+      ? `
+
+THE ASSIGNMENT this paper is for (from the student's D2L):
+${assignment.brief}
+
+- Use it to do what they asked the way the professor wants it (length, sections, sources, citation style, format, focus).
+- If they asked for a general edit, to improve it, or to make it meet the assignment: also close the gaps you can (missing sections, format, length). If they asked for something specific, do only that.
+- Never invent requirements, and never write things only the student can supply (their own interview, data, or experience): put those in notes.
+- Always fill "requirements" from it. If they asked whether the paper meets the assignment, answer from that checklist.`
+      : ""
+  }`;
 }
 
 const WANTS_SOURCES = /\b(sources?|cite|citing|citations?|works cited|references|bibliography|scholarly|peer.?reviewed|research to back|evidence from)\b/i;
@@ -140,11 +158,15 @@ export async function gatherSources(ask: string, docText: string, title: string)
 }
 
 export type DocResult =
-  | { ok: true; title: string; summary: string; answer: string; applied: Change[]; skipped: number; skippedWhy: string[]; plans: string[]; notes: string[]; cant: string; missing: string; wordsBefore: number; wordsAfter: number; offered: string[]; offeredCites: string[]; sourceSearch: string }
+  | { ok: true; title: string; summary: string; answer: string; applied: Change[]; skipped: number; skippedWhy: string[]; plans: string[]; notes: string[]; cant: string; missing: string; wordsBefore: number; wordsAfter: number; offered: string[]; offeredCites: string[]; sourceSearch: string; requirements: { req: string; met: boolean; note?: string }[]; assignment: string }
   | { ok: false; text: string };
 
 /** Do what they asked to the doc, check it, finish what's missing. */
-export async function docWork(io: DocIO, ask: string, opts: { rubric?: string; live?: (c: Change, i: number, n: number) => void; status?: (t: string) => void } = {}): Promise<DocResult> {
+export async function docWork(
+  io: DocIO,
+  ask: string,
+  opts: { rubric?: string; assignment?: { label: string; brief: string }; live?: (c: Change, i: number, n: number) => void; status?: (t: string) => void; progress?: (changes: Change[]) => void; stream?: boolean } = {}
+): Promise<DocResult> {
   const first = await io.read();
   const ps0 = paragraphs(first.content);
   const wordsBefore = docWords(first.content);
@@ -182,6 +204,7 @@ export async function docWork(io: DocIO, ask: string, opts: { rubric?: string; l
   let answer = "";
   let cant = "";
   let notes: string[] = [];
+  let requirements: { req: string; met: boolean; note?: string }[] = [];
   for (let round = 0; round < 3; round++) {
     const doc = round === 0 ? first : await io.read();
     const ps = paragraphs(doc.content);
@@ -189,27 +212,50 @@ export async function docWork(io: DocIO, ask: string, opts: { rubric?: string; l
       ? `The student said: "${ask}"\n\nDocument title: ${doc.title}\n\n${listing(ps)}${sourceBlock}`
       : `The student said: "${ask}"\n\nYou already made changes, but this is still missing: ${missing}\nDo ONLY what's missing, and don't touch any paragraph the request doesn't involve. If nothing concrete is missing, return no actions. Paragraph numbers below are the doc as it is now.\n\nDocument title: ${doc.title}\n\n${listing(ps)}${sourceBlock}`;
     opts.status?.(round === 0 ? `Reading “${doc.title}”…` : "Finishing the rest…");
-    const r = await callTool<Plan>({ model: models.smart(), max_tokens: 12000, system: system(opts.rubric ?? ""), tools: [PLAN_TOOL], tool_choice: { type: "auto" }, messages: [{ role: "user", content: msg }] }, PLAN_TOOL.name);
+    // stream the plan: each action is applied to the doc (Milo's copy) the moment it's written
+    const applier = opApplier(io, opts.live, { groupBase: round * 1000 });
+    const body = { model: models.smart(), max_tokens: 12000, system: system(opts.rubric ?? "", opts.assignment), tools: [PLAN_TOOL], messages: [{ role: "user", content: msg }] };
+    let sent = 0;
+    let chain = Promise.resolve();
+    const feed = (ops: Op[]) => {
+      for (; sent < ops.length; sent++) {
+        const op = ops[sent];
+        const k = sent;
+        chain = chain.then(async () => {
+          await applier.apply(op, k);
+          opts.progress?.([...applied, ...applier.changes]);
+        });
+      }
+    };
+    let r = opts.stream === false ? null : await streamTool<Plan>(body, PLAN_TOOL.name, (json) => feed(completedItems<Op>(json, "ops")));
+    await chain;
+    if (!r || (!r.ok && sent === 0)) {
+      // no streaming (or it failed before any action): the plain call
+      if (r && !r.ok) bb("docwork", "stream_fallback", { why: r.text.slice(0, 120) });
+      r = await callTool<Plan>({ ...body, tool_choice: { type: "auto" } }, PLAN_TOOL.name);
+    }
     if (!r.ok) {
-      if (!applied.length) return { ok: false, text: r.text };
+      if (!applied.length && !applier.changes.length) return { ok: false, text: r.text };
+      applied.push(...applier.changes);
       break;
     }
     plan = { ...r.data, ops: Array.isArray(r.data.ops) ? r.data.ops : [], notes: r.data.notes ?? [] };
+    feed(plan.ops); // anything the stream didn't hand over yet
+    await chain;
     if (round === 0) {
       summary = plan.summary;
       answer = plan.answer ?? "";
       cant = plan.cant ?? "";
       notes = plan.notes.slice(0, 3);
     }
+    if (Array.isArray(plan.requirements) && plan.requirements.length) requirements = plan.requirements.slice(0, 12);
     plans.push(plan.ops.map((o) => `${o.op}(${o.para ?? ""}${o.after !== undefined ? `→${o.after}` : ""})`).join(" ") || `none${plan.cant ? ` cant: ${plan.cant}` : ""}${plan.answer ? " (answered)" : ""}`);
-    bb("docwork", "plan", { round, understood: plan.understood?.slice(0, 120), ops: plan.ops.map((o) => o.op), answer: !!plan.answer, cant: !!plan.cant });
+    bb("docwork", "plan", { round, understood: plan.understood?.slice(0, 120), ops: plan.ops.map((o) => o.op), answer: !!plan.answer, cant: !!plan.cant, streamed: opts.stream !== false });
+    applied.push(...applier.changes);
+    skipped += applier.skipped.length;
+    skippedWhy.push(...applier.skipped.map((x) => `${x.op.op}: ${x.why}`));
+    if (applier.skipped.length) bb("docwork", "skipped", { why: applier.skipped.map((x) => x.why) });
     if (!plan.ops.length) break; // a question, or nothing more it can do
-    opts.status?.(`Making ${plan.ops.length} change${plan.ops.length === 1 ? "" : "s"}…`);
-    const res = await applyPlan(io, plan, opts.live, { groupBase: round * 1000 });
-    applied.push(...res.changes);
-    skipped += res.skipped.length;
-    skippedWhy.push(...res.skipped.map((s) => `${s.op.op}: ${s.why}`));
-    if (res.skipped.length) bb("docwork", "skipped", { why: res.skipped.map((s) => s.why) });
 
     // the check: does the doc now match the request?
     opts.status?.("Checking it's what you asked…");
@@ -248,5 +294,5 @@ export async function docWork(io: DocIO, ask: string, opts: { rubric?: string; l
     }
   }
   const end = await io.read();
-  return { ok: true, title: first.title, summary: summary || (applied.length ? "Done." : "I read it."), answer, applied, skipped, skippedWhy, plans, notes, offered, offeredCites, sourceSearch: offered.length || WANTS_SOURCES.test(ask) ? lastTopic : "", cant, missing, wordsBefore, wordsAfter: docWords(end.content) };
+  return { ok: true, title: first.title, summary: summary || (applied.length ? "Done." : "I read it."), answer, applied, skipped, skippedWhy, plans, notes, requirements, assignment: opts.assignment?.label ?? "", offered, offeredCites, sourceSearch: offered.length || WANTS_SOURCES.test(ask) ? lastTopic : "", cant, missing, wordsBefore, wordsAfter: docWords(end.content) };
 }
