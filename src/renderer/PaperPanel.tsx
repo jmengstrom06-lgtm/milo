@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 // The paper panel: the student's paper beside Milo with his changes shown like tracked changes
 // (red = out, green = in, new sections highlighted, formatting tagged). Tap any change to keep your original.
@@ -47,6 +47,7 @@ function Text({ r, off }: { r: MiloPaperRow; off: boolean }) {
 
 export function PaperPanel({ p, rejected, style, hover, onToggle, onAccept, onExport, onClose }: Props) {
   const body = useRef<HTMLDivElement>(null);
+  const [reqOpen, setReqOpen] = useState(false);
   const v = p.view;
   const changedRows = useMemo(() => p.rows.filter((r) => r.kind !== "same"), [p.rows]);
   const total = v?.groups.length ?? 0;
@@ -82,6 +83,29 @@ export function PaperPanel({ p, rejected, style, hover, onToggle, onAccept, onEx
           {v.missing && v.cant ? " " : ""}
           {v.cant ? `Can't do here: ${v.cant}` : ""}
         </p>
+      )}
+      {p.phase === "review" && v && v.assignment && v.requirements.length > 0 && (
+        <div className="pp__req">
+          <button className="pp__reqhead" onClick={() => setReqOpen((o) => !o)} aria-expanded={reqOpen}>
+            <span>
+              📋 {v.assignment} · <b>{v.requirements.filter((r) => r.met).length}/{v.requirements.length}</b> requirements met
+            </span>
+            <span>{reqOpen ? "▾" : "▸"}</span>
+          </button>
+          {reqOpen && (
+            <ul>
+              {v.requirements.map((r, i) => (
+                <li key={i} className={r.met ? "is-met" : "is-miss"}>
+                  <span>{r.met ? "✓" : "○"}</span>
+                  <span>
+                    {r.req}
+                    {r.note ? <small> · {r.note}</small> : null}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
       <div ref={body} className={`pp__paper${p.phase === "reading" ? " is-reading" : ""}`}>
         {p.rows.map((r, i) => {

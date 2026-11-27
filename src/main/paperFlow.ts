@@ -32,7 +32,10 @@ export type PaperView = {
   groups: { id: number; why: string; kind: string }[];
   wordsBefore: number;
   wordsAfter: number;
+  requirements: Req[];
+  assignment: string;
 };
+type Req = { req: string; met: boolean; note?: string };
 
 /** The view of the paper before any work (the panel opens with this right away). */
 export function firstLook(content: DocEl[]): Row[] {
@@ -45,17 +48,28 @@ export async function propose(
   read: () => Promise<{ title: string; content: DocEl[] }>,
   ask: string,
   source: Source,
-  opts: { rubric?: string; status?: (t: string) => void } = {}
-): Promise<{ ok: true; view: PaperView | null; answer: string; summary: string; cant: string } | { ok: false; text: string }> {
+  opts: { rubric?: string; assignment?: { label: string; brief: string } | null; status?: (t: string) => void; rows?: (rows: Row[], changes: number) => void } = {}
+): Promise<{ ok: true; view: PaperView | null; answer: string; summary: string; cant: string; requirements: Req[]; assignment: string } | { ok: false; text: string }> {
   const real = await read();
   const copy = SimDoc.fromContent(real.content);
   const before = copy.full();
   const io: DocIO = { read: async () => ({ title: real.title, content: copy.content() }), batch: async (r) => copy.apply(r) };
   const t0 = Date.now();
-  const r: DocResult = await docWork(io, ask, { rubric: opts.rubric, status: opts.status });
+  let lastSent = 0;
+  const r: DocResult = await docWork(io, ask, {
+    rubric: opts.rubric,
+    assignment: opts.assignment ?? undefined,
+    status: opts.status,
+    // each change shows in the panel as soon as it's made (at most ~6 updates a second)
+    progress: (ch) => {
+      if (!opts.rows || Date.now() - lastSent < 150) return;
+      lastSent = Date.now();
+      opts.rows(paperRows(before, copy.full(), ch), new Set(ch.map((c) => c.group)).size);
+    },
+  });
   if (!r.ok) return r;
   bb("paper", "proposed", { ms: Date.now() - t0, changes: r.applied.length, answer: !!r.answer, missing: !!r.missing, source: source.type });
-  if (!r.applied.length) return { ok: true, view: null, answer: r.answer, summary: r.summary, cant: r.cant };
+  if (!r.applied.length) return { ok: true, view: null, answer: r.answer, summary: r.summary, cant: r.cant, requirements: r.requirements, assignment: r.assignment };
   const id = `p${Date.now().toString(36)}`;
   proposals.set(id, { id, title: real.title, ask, source, orig: real.content, changes: r.applied, at: Date.now() });
   for (const [k, p] of proposals) if (Date.now() - p.at > 6 * 3600e3) proposals.delete(k);
@@ -65,6 +79,8 @@ export async function propose(
     answer: r.answer,
     summary: r.summary,
     cant: r.cant,
+    requirements: r.requirements,
+    assignment: r.assignment,
     view: {
       id,
       title: real.title,
@@ -78,6 +94,8 @@ export async function propose(
       groups,
       wordsBefore: r.wordsBefore,
       wordsAfter: r.wordsAfter,
+      requirements: r.requirements,
+      assignment: r.assignment,
     },
   };
 }

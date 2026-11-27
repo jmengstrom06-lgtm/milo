@@ -101,7 +101,7 @@ export type Op = {
   format?: Fmt;
   why?: string;
 };
-export type Plan = { understood: string; answer: string; ops: Op[]; summary: string; cant: string; notes: string[] };
+export type Plan = { understood: string; answer: string; ops: Op[]; summary: string; cant: string; notes: string[]; requirements?: { req: string; met: boolean; note?: string }[] };
 
 export type DocIO = {
   read: () => Promise<{ title: string; content: DocEl[] }>;
@@ -263,14 +263,20 @@ function within(p: Para, find: string): { from: number; to: number } | null {
 
 /** Apply a plan to the doc, one action at a time (re-reading in between, so positions are always fresh).
  *  Paragraph numbers refer to the doc as it was when planned; we track each one's current text. */
-export async function applyPlan(io: DocIO, plan: Plan, live?: (c: Change, i: number, n: number) => void, opts?: { groupBase?: number }): Promise<{ changes: Change[]; skipped: { op: Op; why: string }[] }> {
-  const start = paragraphs((await io.read()).content);
-  const cur = new Map<number, string | null>(start.map((p) => [p.n, p.text])); // null = deleted
-  const occ = new Map<number, number>(start.map((p) => [p.n, start.filter((q) => q.n < p.n && norm(q.text) === norm(p.text)).length]));
+export function opApplier(io: DocIO, live?: (c: Change, i: number, n: number) => void, opts?: { groupBase?: number }) {
+  let cur = new Map<number, string | null>(); // the doc's paragraphs as planned, by number: their text now (null = deleted)
+  let occ = new Map<number, number>();
+  let ready: Promise<void> | null = null;
+  const init = () =>
+    (ready ??= (async () => {
+      const start = paragraphs((await io.read()).content);
+      cur = new Map<number, string | null>(start.map((p) => [p.n, p.text]));
+      occ = new Map<number, number>(start.map((p) => [p.n, start.filter((q) => q.n < p.n && norm(q.text) === norm(p.text)).length]));
+    })());
   const tail = new Map<number, string>(); // after paragraph n, the last thing we inserted (so several inserts stay in order)
   const changes: Change[] = [];
   const skipped: { op: Op; why: string }[] = [];
-  const total = plan.ops.length;
+  let total = -1;
   const gid = (i: number) => (opts?.groupBase ?? 0) + i;
 
   const locateOrig = (ps: Para[], n?: number): Para | null => {
@@ -294,141 +300,156 @@ export async function applyPlan(io: DocIO, plan: Plan, live?: (c: Change, i: num
     return { para: null, text: "" };
   };
 
-  for (let i = 0; i < plan.ops.length; i++) {
-    const op = plan.ops[i];
-    const ps = paragraphs((await io.read()).content);
-    const why = op.why || "";
-    try {
-      if (op.op === "replace_text") {
-        const p = locateOrig(ps, op.para);
-        const loc = p && op.find ? within(p, op.find) : null;
-        if (!p || !loc || !op.replace || norm(op.find ?? "") === norm(op.replace)) {
-          skipped.push({ op, why: !p ? "paragraph gone" : !loc ? "text not found" : "no change" });
-          continue;
-        }
-        const old = p.text.slice(loc.from, loc.to);
-        const oldRuns = runsIn(p, loc.from, loc.to);
-        await io.batch(replaceRequests(p, loc.from, loc.to, op.replace));
-        cur.set(op.para!, p.text.slice(0, loc.from) + op.replace.replace(/\n+/g, " ") + p.text.slice(loc.to));
-        changes.push({ op: "replace", find: old, replace: op.replace.replace(/\n+/g, " "), why, kind: "edit", oldRuns });
-      } else if (op.op === "rewrite_paragraph") {
-        const p = locateOrig(ps, op.para);
-        const text = (op.text ?? "").replace(/\n+/g, " ").trim();
-        if (!p || !text || norm(text) === norm(p.text)) {
-          skipped.push({ op, why: !p ? "paragraph gone" : "no change" });
-          continue;
-        }
-        const oldRuns = runsIn(p, 0, p.text.length);
-        await io.batch(replaceRequests(p, 0, p.text.length, text));
-        if (p.text) changes.push({ op: "replace", find: p.text, replace: text, why, kind: "rewrite", oldRuns });
-        else changes.push({ op: "insert", find: "", replace: text, why, kind: "add", anchor: ps[ps.indexOf(p) - 1]?.text ?? "", styles: [p.style] });
-        cur.set(op.para!, text);
-      } else if (op.op === "insert") {
-        const items = (op.paragraphs ?? (op.text ? [{ text: op.text, style: op.style }] : [])).filter((x) => x.text?.trim());
-        if (!items.length) {
-          skipped.push({ op, why: "nothing to add" });
-          continue;
-        }
-        const a = anchorFor(ps, op.after ?? ps.length);
-        const texts = items.map((x) => x.text.replace(/\n+/g, " ").trim());
-        const styles = items.map((x) => asStyle(x.style));
-        await io.batch(insertRequests(ps, a?.para ?? null, texts, styles, items));
-        tail.set(op.after ?? ps.length, texts[texts.length - 1]);
-        changes.push({ op: "insert", find: "", replace: texts.join("\n"), why, kind: "add", anchor: a?.text ?? "", styles, fmts: items.map((x) => ({ align: x.align, bold: x.bold, italic: x.italic, underline: x.underline, hanging: x.hanging })), anchorIndex: a?.para ? ps.indexOf(a.para) + 1 : 0, group: gid(i) });
-      } else if (op.op === "delete") {
-        const p = locateOrig(ps, op.para);
-        if (!p) {
-          skipped.push({ op, why: "paragraph gone" });
-          continue;
-        }
-        const idx = ps.indexOf(p);
-        await io.batch(deleteRequests(ps, [p]));
-        cur.set(op.para!, null);
-        changes.push({ op: "delete", find: p.text, replace: "", why, kind: "cut", anchor: ps[idx - 1]?.text ?? "", styles: [p.style], oldRuns: runsIn(p, 0, p.text.length), oldProps: pick(p.props, PARA_FIELDS) });
-      } else if (op.op === "move") {
-        const p = locateOrig(ps, op.para);
-        if (!p || op.after === op.para) {
-          skipped.push({ op, why: !p ? "paragraph gone" : "no change" });
-          continue;
-        }
-        const idx = ps.indexOf(p);
-        const keepRuns = runsIn(p, 0, p.text.length);
-        const keepProps = pick(p.props, PARA_FIELDS);
-        await io.batch(deleteRequests(ps, [p]));
-        changes.push({ op: "delete", find: p.text, replace: "", why, kind: "move", anchor: ps[idx - 1]?.text ?? "", styles: [p.style], oldRuns: keepRuns, oldProps: keepProps });
-        cur.set(op.para!, null);
-        const ps2 = paragraphs((await io.read()).content);
-        const a = anchorFor(ps2, op.after ?? 0);
-        await io.batch(insertRequests(ps2, a?.para ?? null, [p.text], [p.style]));
-        {
-          const ps3 = paragraphs((await io.read()).content);
-          const at = a?.para ? ps3.findIndex((q) => q.start >= (a.para as Para).end - 1 && norm(q.text) === norm(p.text)) : ps3.findIndex((q) => norm(q.text) === norm(p.text));
-          if (at >= 0) await io.batch(restoreReqs(ps3[at], 0, keepRuns, keepProps));
-        }
-        changes.push({ op: "insert", find: "", replace: p.text, why, kind: "move", anchor: a?.text ?? "", styles: [p.style], oldRuns: keepRuns, oldProps: keepProps, anchorIndex: a?.para ? ps2.indexOf(a.para) + 1 : 0 });
-        tail.set(op.after ?? 0, p.text);
-      } else if (op.op === "format") {
-        const d = fmtToDocs(op.format ?? {});
-        if (!d.tf.length && !d.pf.length) {
-          skipped.push({ op, why: "no formatting given" });
-          continue;
-        }
-        const targets: { p: Para; from: number; to: number }[] = [];
-        if (op.target === "all") for (const p of ps) { if (!p.text.startsWith("[table:")) targets.push({ p, from: 0, to: p.text.length }); }
-        else {
+  /** Apply one action (they can arrive one at a time while the AI is still writing the rest). */
+  async function one(op: Op, i: number) {
+      const ps = paragraphs((await io.read()).content);
+      const why = op.why || "";
+      try {
+        if (op.op === "replace_text") {
           const p = locateOrig(ps, op.para);
           const loc = p && op.find ? within(p, op.find) : null;
-          if (!p || (op.find && !loc)) {
-            skipped.push({ op, why: !p ? "paragraph gone" : "text not found" });
-            continue;
+          if (!p || !loc || !op.replace || norm(op.find ?? "") === norm(op.replace)) {
+            skipped.push({ op, why: !p ? "paragraph gone" : !loc ? "text not found" : "no change" });
+            return;
           }
-          targets.push({ p, from: loc?.from ?? 0, to: loc?.to ?? p.text.length });
-        }
-        // only paragraphs that actually look different afterwards
-        const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
-        const needs = (t: { p: Para; from: number; to: number }) =>
-          d.pf.some((k) => !same(t.p.props[k], d.ps[k])) || (d.tf.length > 0 && t.p.runs.some((r) => r.to > t.from && r.from < t.to && d.tf.some((k) => !same(r.ts[k], d.ts[k]))));
-        for (let k = targets.length - 1; k >= 0; k--) if (!needs(targets[k])) targets.splice(k, 1);
-        if (!targets.length) {
-          skipped.push({ op, why: "already formatted that way" });
-          continue;
-        }
-        const reqs: unknown[] = [];
-        const before: NonNullable<Change["before"]> = [];
-        for (const t of targets) {
-          const occN = ps.filter((q) => q.n < t.p.n && norm(q.text) === norm(t.p.text)).length;
-          before.push({ text: t.p.text, occ: occN, props: pick(t.p.props, d.pf), runs: t.p.runs.filter((r) => r.to > t.from && r.from < t.to).map((r) => ({ from: Math.max(r.from, t.from), to: Math.min(r.to, t.to), ts: pick(r.ts, d.tf) })), range: { from: t.from, to: t.to } });
-          if (d.pf.length) reqs.push({ updateParagraphStyle: { range: { startIndex: t.p.start, endIndex: t.p.end }, paragraphStyle: d.ps, fields: d.pf.join(",") } });
-          if (d.tf.length && t.to > t.from) {
-            const s = t.p.at[t.from] ?? t.p.start;
-            const e = (t.p.at[t.to - 1] ?? s) + 1;
-            reqs.push({ updateTextStyle: { range: { startIndex: s, endIndex: e }, textStyle: d.ts, fields: d.tf.join(",") } });
+          const old = p.text.slice(loc.from, loc.to);
+          const oldRuns = runsIn(p, loc.from, loc.to);
+          await io.batch(replaceRequests(p, loc.from, loc.to, op.replace));
+          cur.set(op.para!, p.text.slice(0, loc.from) + op.replace.replace(/\n+/g, " ") + p.text.slice(loc.to));
+          changes.push({ op: "replace", find: old, replace: op.replace.replace(/\n+/g, " "), why, kind: "edit", oldRuns });
+        } else if (op.op === "rewrite_paragraph") {
+          const p = locateOrig(ps, op.para);
+          const text = (op.text ?? "").replace(/\n+/g, " ").trim();
+          if (!p || !text || norm(text) === norm(p.text)) {
+            skipped.push({ op, why: !p ? "paragraph gone" : "no change" });
+            return;
           }
-        }
-        if (!reqs.length) {
-          skipped.push({ op, why: "nothing to format" });
-          continue;
-        }
-        await io.batch(reqs);
-        changes.push({ op: "format", find: op.target === "all" ? "(the whole paper)" : (targets[0].p.text.slice(targets[0].from, targets[0].to) || targets[0].p.text), replace: "", why, kind: "format", before, fields: { text: d.tf, para: d.pf }, after: { ts: d.ts, ps: d.ps } });
-      } else if (op.op === "set_style") {
-        const p = locateOrig(ps, op.para);
-        const style = asStyle(op.style);
-        if (!p || p.style === style) {
-          skipped.push({ op, why: !p ? "paragraph gone" : "no change" });
-          continue;
-        }
-        await io.batch([styleReq(p.start, p.end, style)]);
-        changes.push({ op: "style", find: p.text, replace: p.text, why, kind: "format", style, oldStyle: p.style });
-      } else skipped.push({ op, why: "unknown action" });
-      for (let k = changes.length - 1; k >= 0 && changes[k].group === undefined; k--) changes[k].group = gid(i);
-      live?.(changes[changes.length - 1], i, total);
-    } catch (e) {
-      skipped.push({ op, why: `Docs refused: ${(e as Error).message.slice(0, 80)}` });
-      if (!changes.length && /403/.test((e as Error).message)) throw e;
-    }
-  }
-  return { changes, skipped };
+          const oldRuns = runsIn(p, 0, p.text.length);
+          await io.batch(replaceRequests(p, 0, p.text.length, text));
+          if (p.text) changes.push({ op: "replace", find: p.text, replace: text, why, kind: "rewrite", oldRuns });
+          else changes.push({ op: "insert", find: "", replace: text, why, kind: "add", anchor: ps[ps.indexOf(p) - 1]?.text ?? "", styles: [p.style] });
+          cur.set(op.para!, text);
+        } else if (op.op === "insert") {
+          const items = (op.paragraphs ?? (op.text ? [{ text: op.text, style: op.style }] : [])).filter((x) => x.text?.trim());
+          if (!items.length) {
+            skipped.push({ op, why: "nothing to add" });
+            return;
+          }
+          const a = anchorFor(ps, op.after ?? ps.length);
+          const texts = items.map((x) => x.text.replace(/\n+/g, " ").trim());
+          const styles = items.map((x) => asStyle(x.style));
+          await io.batch(insertRequests(ps, a?.para ?? null, texts, styles, items));
+          tail.set(op.after ?? ps.length, texts[texts.length - 1]);
+          changes.push({ op: "insert", find: "", replace: texts.join("\n"), why, kind: "add", anchor: a?.text ?? "", styles, fmts: items.map((x) => ({ align: x.align, bold: x.bold, italic: x.italic, underline: x.underline, hanging: x.hanging })), anchorIndex: a?.para ? ps.indexOf(a.para) + 1 : 0, group: gid(i) });
+        } else if (op.op === "delete") {
+          const p = locateOrig(ps, op.para);
+          if (!p) {
+            skipped.push({ op, why: "paragraph gone" });
+            return;
+          }
+          const idx = ps.indexOf(p);
+          await io.batch(deleteRequests(ps, [p]));
+          cur.set(op.para!, null);
+          changes.push({ op: "delete", find: p.text, replace: "", why, kind: "cut", anchor: ps[idx - 1]?.text ?? "", styles: [p.style], oldRuns: runsIn(p, 0, p.text.length), oldProps: pick(p.props, PARA_FIELDS) });
+        } else if (op.op === "move") {
+          const p = locateOrig(ps, op.para);
+          if (!p || op.after === op.para) {
+            skipped.push({ op, why: !p ? "paragraph gone" : "no change" });
+            return;
+          }
+          const idx = ps.indexOf(p);
+          const keepRuns = runsIn(p, 0, p.text.length);
+          const keepProps = pick(p.props, PARA_FIELDS);
+          await io.batch(deleteRequests(ps, [p]));
+          changes.push({ op: "delete", find: p.text, replace: "", why, kind: "move", anchor: ps[idx - 1]?.text ?? "", styles: [p.style], oldRuns: keepRuns, oldProps: keepProps });
+          cur.set(op.para!, null);
+          const ps2 = paragraphs((await io.read()).content);
+          const a = anchorFor(ps2, op.after ?? 0);
+          await io.batch(insertRequests(ps2, a?.para ?? null, [p.text], [p.style]));
+          {
+            const ps3 = paragraphs((await io.read()).content);
+            const at = a?.para ? ps3.findIndex((q) => q.start >= (a.para as Para).end - 1 && norm(q.text) === norm(p.text)) : ps3.findIndex((q) => norm(q.text) === norm(p.text));
+            if (at >= 0) await io.batch(restoreReqs(ps3[at], 0, keepRuns, keepProps));
+          }
+          changes.push({ op: "insert", find: "", replace: p.text, why, kind: "move", anchor: a?.text ?? "", styles: [p.style], oldRuns: keepRuns, oldProps: keepProps, anchorIndex: a?.para ? ps2.indexOf(a.para) + 1 : 0 });
+          tail.set(op.after ?? 0, p.text);
+        } else if (op.op === "format") {
+          const d = fmtToDocs(op.format ?? {});
+          if (!d.tf.length && !d.pf.length) {
+            skipped.push({ op, why: "no formatting given" });
+            return;
+          }
+          const targets: { p: Para; from: number; to: number }[] = [];
+          if (op.target === "all") for (const p of ps) { if (!p.text.startsWith("[table:")) targets.push({ p, from: 0, to: p.text.length }); }
+          else {
+            const p = locateOrig(ps, op.para);
+            const loc = p && op.find ? within(p, op.find) : null;
+            if (!p || (op.find && !loc)) {
+              skipped.push({ op, why: !p ? "paragraph gone" : "text not found" });
+              return;
+            }
+            targets.push({ p, from: loc?.from ?? 0, to: loc?.to ?? p.text.length });
+          }
+          // only paragraphs that actually look different afterwards
+          const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+          const needs = (t: { p: Para; from: number; to: number }) =>
+            d.pf.some((k) => !same(t.p.props[k], d.ps[k])) || (d.tf.length > 0 && t.p.runs.some((r) => r.to > t.from && r.from < t.to && d.tf.some((k) => !same(r.ts[k], d.ts[k]))));
+          for (let k = targets.length - 1; k >= 0; k--) if (!needs(targets[k])) targets.splice(k, 1);
+          if (!targets.length) {
+            skipped.push({ op, why: "already formatted that way" });
+            return;
+          }
+          const reqs: unknown[] = [];
+          const before: NonNullable<Change["before"]> = [];
+          for (const t of targets) {
+            const occN = ps.filter((q) => q.n < t.p.n && norm(q.text) === norm(t.p.text)).length;
+            before.push({ text: t.p.text, occ: occN, props: pick(t.p.props, d.pf), runs: t.p.runs.filter((r) => r.to > t.from && r.from < t.to).map((r) => ({ from: Math.max(r.from, t.from), to: Math.min(r.to, t.to), ts: pick(r.ts, d.tf) })), range: { from: t.from, to: t.to } });
+            if (d.pf.length) reqs.push({ updateParagraphStyle: { range: { startIndex: t.p.start, endIndex: t.p.end }, paragraphStyle: d.ps, fields: d.pf.join(",") } });
+            if (d.tf.length && t.to > t.from) {
+              const s = t.p.at[t.from] ?? t.p.start;
+              const e = (t.p.at[t.to - 1] ?? s) + 1;
+              reqs.push({ updateTextStyle: { range: { startIndex: s, endIndex: e }, textStyle: d.ts, fields: d.tf.join(",") } });
+            }
+          }
+          if (!reqs.length) {
+            skipped.push({ op, why: "nothing to format" });
+            return;
+          }
+          await io.batch(reqs);
+          changes.push({ op: "format", find: op.target === "all" ? "(the whole paper)" : (targets[0].p.text.slice(targets[0].from, targets[0].to) || targets[0].p.text), replace: "", why, kind: "format", before, fields: { text: d.tf, para: d.pf }, after: { ts: d.ts, ps: d.ps } });
+        } else if (op.op === "set_style") {
+          const p = locateOrig(ps, op.para);
+          const style = asStyle(op.style);
+          if (!p || p.style === style) {
+            skipped.push({ op, why: !p ? "paragraph gone" : "no change" });
+            return;
+          }
+          await io.batch([styleReq(p.start, p.end, style)]);
+          changes.push({ op: "style", find: p.text, replace: p.text, why, kind: "format", style, oldStyle: p.style });
+        } else skipped.push({ op, why: "unknown action" });
+        for (let k = changes.length - 1; k >= 0 && changes[k].group === undefined; k--) changes[k].group = gid(i);
+        live?.(changes[changes.length - 1], i, total);
+      } catch (e) {
+        skipped.push({ op, why: `Docs refused: ${(e as Error).message.slice(0, 80)}` });
+        if (!changes.length && /403/.test((e as Error).message)) throw e;
+      }  }
+  return {
+    changes,
+    skipped,
+    apply: async (op: Op, i: number, n = -1) => {
+      await init();
+      total = n;
+      await one(op, i);
+    },
+  };
+}
+
+/** Apply a whole plan, action by action (re-reading in between, so positions are always fresh).
+ *  Paragraph numbers refer to the doc as it was when planned; each one's current text is tracked. */
+export async function applyPlan(io: DocIO, plan: Plan, live?: (c: Change, i: number, n: number) => void, opts?: { groupBase?: number }): Promise<{ changes: Change[]; skipped: { op: Op; why: string }[] }> {
+  const a = opApplier(io, live, opts);
+  for (let i = 0; i < plan.ops.length; i++) await a.apply(plan.ops[i], i, plan.ops.length);
+  return { changes: a.changes, skipped: a.skipped };
 }
 
 /** Take changes back, newest first, each found by its text (so it works even if the student typed elsewhere). */

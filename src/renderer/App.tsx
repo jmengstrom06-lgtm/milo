@@ -1263,6 +1263,15 @@ export default function App() {
       }),
     []
   );
+  // changes stream into the panel as Milo writes them
+  useEffect(
+    () =>
+      window.milo.onPaperRows((p) => {
+        if (!writingOn.current) return;
+        setPaper((x) => (x && x.phase === "reading" ? { ...x, rows: p.rows, status: `Writing changes… ${p.n}` } : x));
+      }),
+    []
+  );
   // the paper panel opens the moment the paper is read (the changes arrive a few seconds later)
   useEffect(
     () =>
@@ -1313,7 +1322,9 @@ export default function App() {
       // a question about the paper (or nothing to change): just say it
       setPaper(null);
       setMood("idle");
-      await say([r.answer || r.summary, r.cant ? `I can't do this part here: ${r.cant}` : ""].filter(Boolean).join(" "));
+      const miss = r.requirements.filter((x) => !x.met);
+      const checklist = r.assignment && r.requirements.length && !/\brequire|meet|rubric|assignment\b/i.test(r.answer) ? ` For ${r.assignment.split(" · ")[0]}: ${r.requirements.length - miss.length} of ${r.requirements.length} met${miss.length ? `; still missing ${miss.slice(0, 3).map((x) => x.req).join(", ")}` : ""}.` : "";
+      await say([r.answer || r.summary, checklist, r.cant ? `I can't do this part here: ${r.cant}` : ""].filter(Boolean).join(" "));
       return setBubble(null);
     }
     const v = r.view;
@@ -1325,23 +1336,25 @@ export default function App() {
     const gist = (v.summary || "Done.").split(/(?<=[.!?])\s+/)[0];
     const left = v.missing ? ` I couldn't finish everything: ${v.missing}.` : v.cant ? ` One part I can't do here: ${v.cant}.` : "";
     const next = v.source === "gdoc" ? "Say accept, or tap any change to keep your original." : "Tap any change to keep your original, then save it as a Google Doc or a Word file.";
-    await say(`${gist}${left} ${next}`);
+    const met = v.requirements.filter((x) => x.met).length;
+    const asg = v.assignment && v.requirements.length ? ` I checked it against ${v.assignment.split(" · ")[0]}: ${met} of ${v.requirements.length} requirements met.` : "";
+    await say(`${gist}${left}${asg} ${next}`);
     setBubble(null);
   };
   const startEdit = async (text: string, docId?: string) => {
     if (!docId && (await heldBack("write", text))) return;
     // a whole paper pasted in (Home base, or the chat): work on that text
     const pasted = splitPasted(text);
-    if (pasted) return void runPaper(() => window.milo.paperEditText(pasted.ask, pasted.body, pasted.title));
+    if (pasted) return void runPaper(() => window.milo.paperEditText(pasted.ask, pasted.body, pasted.title, localStorage.getItem("milo.portal") || ""));
     return void runPaper(
-      () => window.milo.paperEdit(text, docId),
+      () => window.milo.paperEdit(text, docId, localStorage.getItem("milo.portal") || ""),
       (docs) => {
         editAsk.current = text;
         setOffer({ seen: "Which paper?", options: docs.map((d) => ({ label: d.title.slice(0, 40) || "Untitled doc", say: `__editdoc:${d.id}` })) });
       }
     );
   };
-  const startEditFile = (file: string, ask = "edit my paper") => void runPaper(() => window.milo.paperEditFile(file, ask));
+  const startEditFile = (file: string, ask = "edit my paper") => void runPaper(() => window.milo.paperEditFile(file, ask, localStorage.getItem("milo.portal") || ""));
   const paperAccept = async () => {
     const pp = paperRef.current;
     if (!pp?.view || pp.phase !== "review") return;
