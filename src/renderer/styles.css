@@ -2113,3 +2113,5 @@ a.wc__fine:hover { color: #c4b5fd; }
 .pp__req li.is-met > span:first-child { color: #4ade80; }
 .pp__req li.is-miss > span:first-child { color: #fbbf24; }
 .pp__req small { color: #8b8b93; }
+.pp__answer { color: #c4b5fd; }
+.pp__li { display: inline-block; min-width: 18px; color: #3f3b48; font-weight: 700; }

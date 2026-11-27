@@ -114,21 +114,31 @@ export function pickDoc(tabs: DocTab[], said: string, order: string[] = []): { p
 export async function findDoc(said: string): Promise<{ doc: DocTab | null; choices: DocTab[]; why: string; elsewhere?: string }> {
   const tabs: DocTab[] = [];
   const errors: Record<string, string> = {};
-  await Promise.all(
-    [...CHROMIUM, "Safari"].map(async (b) => {
-      const r = await osa(tabScript(b));
+  const t0 = Date.now();
+  const slow: string[] = [];
+  // every browser at once; a busy browser (Chrome opening a sign-in, say) can't hold everyone up:
+  // after 2.5 s we go with what we have, unless nothing's been found yet
+  const each = [...CHROMIUM, "Safari"].map((b) =>
+    osa(tabScript(b)).then((r) => {
       if (r.err) errors[b] = r.err;
+      if (Date.now() - t0 > 1500) slow.push(`${b} ${Date.now() - t0}ms`);
       tabs.push(...parseTabs(b, r.out));
     })
   );
-  // Chrome's extension sees tabs even when macOS hasn't allowed Milo to ask Chrome directly
-  if (bridgeConnected()) {
-    const xs = (await ext<{ title: string; url: string; active: boolean }[]>("tabs", {}, 3000).catch(() => [])) ?? [];
-    for (const t of xs) {
-      const id = docIdFrom(t.url ?? "");
-      if (id && !tabs.some((x) => x.id === id)) tabs.push({ id, title: (t.title ?? "").replace(/ - Google Docs$/, ""), browser: "Chrome (extension)", frontWindow: true, active: !!t.active });
-    }
-  }
+  // Chrome's extension sees tabs even when macOS hasn't allowed Milo to ask Chrome directly (and it's fast)
+  const viaExt = bridgeConnected()
+    ? ext<{ title: string; url: string; active: boolean }[]>("tabs", {}, 2500)
+        .then((xs) => {
+          for (const t of xs ?? []) {
+            const id = docIdFrom(t.url ?? "");
+            if (id && !tabs.some((x) => x.id === id)) tabs.push({ id, title: (t.title ?? "").replace(/ - Google Docs$/, ""), browser: "Chrome (extension)", frontWindow: true, active: !!t.active });
+          }
+        })
+        .catch(() => undefined)
+    : Promise.resolve();
+  const all = Promise.all([...each, viaExt]);
+  await Promise.race([all, new Promise((r) => setTimeout(r, 2500))]);
+  if (!tabs.length) await Promise.race([all, new Promise((r) => setTimeout(r, 4000))]);
   const clipId = docIdFrom(clipboard.readText().trim());
   if (clipId && !tabs.some((x) => x.id === clipId)) tabs.push({ id: clipId, title: "the doc link you copied", browser: "clipboard", frontWindow: false, active: false });
   const ord = await osa(ORDER_SCRIPT, 3000);
@@ -143,6 +153,6 @@ export async function findDoc(said: string): Promise<{ doc: DocTab | null; choic
     const first = w.out.split("\n").find(Boolean);
     if (first) elsewhere = first.split("\t")[0];
   }
-  bb("writing", "doc_lookup", { found: tabs.length, why: r.why, pick: r.pick?.title?.slice(0, 60) ?? null, browsers: [...new Set(tabs.map((t) => t.browser))], order: order.slice(0, 6), elsewhere: elsewhere ?? null, errors });
+  bb("writing", "doc_lookup", { ms: Date.now() - t0, slow, found: tabs.length, why: r.why, pick: r.pick?.title?.slice(0, 60) ?? null, browsers: [...new Set(tabs.map((t) => t.browser))], order: order.slice(0, 6), elsewhere: elsewhere ?? null, errors });
   return { doc: r.pick, choices: r.choices, why: r.why, elsewhere };
 }

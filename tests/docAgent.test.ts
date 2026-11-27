@@ -247,3 +247,62 @@ describe("no busywork", () => {
     expect(r2.skipped.map((s) => s.why)).toEqual(["already formatted that way", "already formatted that way"]);
   });
 });
+
+describe("bullet and numbered lists", () => {
+  const withList = () => {
+    const d = new SimDoc(["Tips for better sleep:", "Go to bed at the same time.", "Put the phone away.", "Skip late caffeine.", "That's it."]);
+    const c = d.content();
+    d.apply([{ createParagraphBullets: { range: { startIndex: c[1].startIndex, endIndex: c[3].endIndex }, bulletPreset: "BULLET_DISC_CIRCLE_SQUARE" } }]);
+    return d;
+  };
+  const bullets = (d: SimDoc) => d.full().map((p) => p.bullet ?? "-");
+  it("makes paragraphs a numbered list, and undoes it exactly", async () => {
+    const d = new SimDoc(PAPER);
+    const before = d.full();
+    const r = await applyPlan(d.io(), plan([2, 3, 4].map((n) => ({ op: "format", para: n, format: { list: "numbered" } }) as Op)));
+    expect(bullets(d)).toEqual(["-", "numbered", "numbered", "numbered", "-"]);
+    await undoChanges(d.io(), r.changes);
+    expect(d.full()).toEqual(before);
+  });
+  it("adds list items in a new section", async () => {
+    const d = new SimDoc(PAPER);
+    await applyPlan(d.io(), plan([{ op: "insert", after: 5, paragraphs: [{ text: "Key steps", style: "HEADING_2" }, { text: "Sleep 8 hours.", list: "bullet" }, { text: "No screens late.", list: "bullet" }] }]));
+    expect(bullets(d).slice(-3)).toEqual(["-", "bullet", "bullet"]);
+  });
+  it("a line added after a list item is NOT a list item unless asked", async () => {
+    const d = withList();
+    await applyPlan(d.io(), plan([{ op: "insert", after: 4, paragraphs: [{ text: "Those three habits matter most." }] }]));
+    expect(bullets(d)).toEqual(["-", "bullet", "bullet", "bullet", "-", "-"]);
+  });
+  it("a new item added inside a list joins it", async () => {
+    const d = withList();
+    await applyPlan(d.io(), plan([{ op: "insert", after: 3, paragraphs: [{ text: "Keep the room cool.", list: "bullet" }] }]));
+    expect(bullets(d)).toEqual(["-", "bullet", "bullet", "bullet", "bullet", "-"]);
+  });
+  it("list back to prose, deleting and moving list items: all undo exactly, and the copy matches the real doc", async () => {
+    const a = withList();
+    const before = a.full();
+    const r = await applyPlan(a.io(), plan([
+      { op: "move", para: 4, after: 1 },
+      { op: "format", para: 2, format: { list: "none" } },
+      { op: "delete", para: 3 },
+      { op: "insert", after: 5, paragraphs: [{ text: "Bonus tip.", list: "numbered" }] },
+    ]));
+    expect(r.skipped).toEqual([]);
+    const b = withList();
+    const w = await redoChanges(b.io(), r.changes);
+    expect(w.missed).toEqual([]);
+    expect(b.full()).toEqual(a.full());
+    await undoChanges(a.io(), r.changes);
+    expect(a.full()).toEqual(before);
+  });
+  it("deleting a list item at the very end leaves the line above as it was", async () => {
+    const d = new SimDoc(["Intro.", "One.", "Two."]);
+    const c = d.content();
+    d.apply([{ createParagraphBullets: { range: { startIndex: c[2].startIndex, endIndex: c[2].endIndex }, bulletPreset: "BULLET_DISC_CIRCLE_SQUARE" } }]);
+    const r = await applyPlan(d.io(), plan([{ op: "delete", para: 3 }]));
+    expect(bullets(d)).toEqual(["-", "-"]);
+    await undoChanges(d.io(), r.changes);
+    expect(bullets(d)).toEqual(["-", "-", "bullet"]);
+  });
+});

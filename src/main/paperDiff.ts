@@ -10,10 +10,11 @@ export type Row = {
   style: string; // TITLE / HEADING_1 / NORMAL_TEXT ...
   align?: string;
   bold?: boolean;
+  bullet?: string; // "bullet" | "numbered"
   tags: string[]; // "centered", "double spaced", "heading"...
   groups: number[];
 };
-type P = { text: string; ps: Record<string, unknown>; runs: { text: string; ts: Record<string, unknown> }[] };
+type P = { text: string; ps: Record<string, unknown>; runs: { text: string; ts: Record<string, unknown> }[]; bullet?: string };
 type C = { op: string; find: string; replace: string; group?: number; before?: { text: string }[] };
 
 const norm = (s: string) => s.replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/\s+/g, " ").trim().toLowerCase();
@@ -85,6 +86,7 @@ function look(p: P) {
     size: (p.runs[0]?.ts.fontSize as { magnitude?: number } | undefined)?.magnitude,
     hanging: !!(p.ps.indentStart as { magnitude?: number } | undefined)?.magnitude,
     indent: (p.ps.indentFirstLine as { magnitude?: number } | undefined)?.magnitude,
+    bullet: p.bullet ?? "",
   };
 }
 function lookTags(a: P | null, b: P): string[] {
@@ -99,6 +101,7 @@ function lookTags(a: P | null, b: P): string[] {
   if (x && x.size !== y.size && y.size) tags.push(`${y.size} pt`);
   if (x && x.hanging !== y.hanging && y.hanging) tags.push("hanging indent");
   if (x && x.indent !== y.indent && y.indent) tags.push("indented");
+  if (x && x.bullet !== y.bullet) tags.push(y.bullet === "numbered" ? "numbered list" : y.bullet ? "bulleted list" : "not a list");
   return tags;
 }
 
@@ -110,7 +113,7 @@ export function paperRows(orig: P[], fin: P[], changes: C[] = []): Row[] {
   let j = 0;
   const mk = (kind: Row["kind"], p: P, extra: Partial<Row> = {}): Row => {
     const l = look(p);
-    return { kind, text: p.text, style: l.style, align: l.align, bold: l.bold, tags: [], groups: [], ...extra };
+    return { kind, text: p.text, style: l.style, align: l.align, bold: l.bold, bullet: p.bullet, tags: [], groups: [], ...extra };
   };
   const flush = (ri: number, rj: number) => {
     const removed = orig.slice(i, ri);

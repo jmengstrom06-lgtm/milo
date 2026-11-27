@@ -14,12 +14,26 @@ const STYLES: Style[] = ["NORMAL_TEXT", "TITLE", "SUBTITLE", "HEADING_1", "HEADI
 
 type Obj = Record<string, unknown>;
 /** A paragraph: text, where it is, its style, and its text-style runs (offsets within the paragraph). */
-export type Para = { n: number; text: string; start: number; end: number; style: Style; at: number[]; props: Obj; runs: { from: number; to: number; ts: Obj }[] };
+export type Para = { n: number; text: string; start: number; end: number; style: Style; at: number[]; props: Obj; runs: { from: number; to: number; ts: Obj }[]; bullet: "bullet" | "numbered" | null };
+type ListKind = "bullet" | "numbered" | null;
+/** Make paragraphs [start, end) a bulleted/numbered list, or not a list. (pure) */
+function listReq(start: number, end: number, kind: ListKind): unknown {
+  return kind
+    ? { createParagraphBullets: { range: { startIndex: start, endIndex: end }, bulletPreset: kind === "numbered" ? "NUMBERED_DECIMAL_ALPHA_ROMAN" : "BULLET_DISC_CIRCLE_SQUARE" } }
+    : { deleteParagraphBullets: { range: { startIndex: start, endIndex: end } } };
+}
+/** Requests to take a paragraph from list state `has` to `want` (nothing if they match). (pure) */
+function listFix(start: number, end: number, has: ListKind, want: ListKind): unknown[] {
+  if ((has ?? null) === (want ?? null)) return [];
+  if (has && want) return [listReq(start, end, null), listReq(start, end, want)];
+  return [listReq(start, end, want ?? null)];
+}
 
 // Formatting Milo can change, and how each maps to Docs.
 const TEXT_FIELDS = ["bold", "italic", "underline", "fontSize", "weightedFontFamily"] as const;
 const PARA_FIELDS = ["alignment", "lineSpacing", "indentFirstLine", "indentStart", "spaceAbove", "spaceBelow"] as const;
-export type Fmt = { bold?: boolean; italic?: boolean; underline?: boolean; font?: string; size?: number; align?: "START" | "CENTER" | "END" | "JUSTIFIED"; lineSpacing?: number; firstLineIndent?: number; hanging?: boolean; noSpacing?: boolean };
+export type Fmt = { bold?: boolean; italic?: boolean; underline?: boolean; font?: string; size?: number; align?: "START" | "CENTER" | "END" | "JUSTIFIED"; lineSpacing?: number; firstLineIndent?: number; hanging?: boolean; noSpacing?: boolean; list?: "bullet" | "numbered" | "none" };
+const wantList = (f?: Fmt): ListKind | undefined => (f?.list === "bullet" || f?.list === "numbered" ? f.list : f?.list === "none" ? null : undefined);
 /** A plain format request -> Docs styles + the field masks to send. (pure) */
 export function fmtToDocs(f: Fmt): { ts: Obj; tf: string[]; ps: Obj; pf: string[] } {
   const ts: Obj = {};
@@ -46,8 +60,9 @@ const pick = (o: Obj, keys: readonly string[] | string[]) => Object.fromEntries(
 const runsIn = (p: Para, from: number, to: number) =>
   p.runs.filter((r) => r.to > from && r.from < to).map((r) => ({ from: Math.max(r.from, from) - from, to: Math.min(r.to, to) - from, ts: pick(r.ts, TEXT_FIELDS) }));
 /** Put formatting back on text that starts at `offset` in paragraph p (and the paragraph's look). (pure) */
-function restoreReqs(p: Para, offset: number, runs: { from: number; to: number; ts: Obj }[] = [], props?: Obj): unknown[] {
+function restoreReqs(p: Para, offset: number, runs: { from: number; to: number; ts: Obj }[] = [], props?: Obj, list?: ListKind): unknown[] {
   const out: unknown[] = [];
+  if (list !== undefined) out.push(...listFix(p.start, p.end, p.bullet, list));
   if (props) out.push({ updateParagraphStyle: { range: { startIndex: p.start, endIndex: p.end }, paragraphStyle: pick(props, PARA_FIELDS), fields: PARA_FIELDS.join(",") } });
   for (const r of runs) {
     const a = offset + r.from;
@@ -72,7 +87,7 @@ export type Change = {
   style?: Style; // style change: new
   oldStyle?: Style; // style change: old
   /** format: what each touched paragraph looked like before, and which fields changed */
-  before?: { text: string; occ: number; props: Obj; runs: { from: number; to: number; ts: Obj }[]; range?: { from: number; to: number } }[];
+  before?: { text: string; occ: number; props: Obj; runs: { from: number; to: number; ts: Obj }[]; range?: { from: number; to: number }; list?: ListKind }[];
   fields?: { text: string[]; para: string[] };
   /** format: the new look (so the change can be replayed on the real doc) */
   after?: { ts: Obj; ps: Obj };
@@ -85,6 +100,8 @@ export type Change = {
   /** replace/delete: the old text's formatting (runs relative to `find`) and paragraph look, restored on undo */
   oldRuns?: { from: number; to: number; ts: Obj }[];
   oldProps?: Obj;
+  oldList?: ListKind; // delete/move: was it a list item
+  newList?: ListKind; // format: list state after
 };
 
 export type Op = {
@@ -135,9 +152,10 @@ export function paragraphs(content: DocEl[] = []): Para[] {
         at: f.at,
         props: { ...(el.paragraph.paragraphStyle ?? {}) },
         runs,
+        bullet: el.paragraph.bullet ? (el.paragraph.bullet.kind === "numbered" ? "numbered" : "bullet") : null,
       });
     } else if (el.table) {
-      out.push({ n: out.length + 1, text: "[table: Milo can't edit tables yet]", start: el.startIndex ?? 0, end: el.endIndex ?? 0, style: "NORMAL_TEXT", at: [], props: {}, runs: [] });
+      out.push({ n: out.length + 1, text: "[table: Milo can't edit tables yet]", start: el.startIndex ?? 0, end: el.endIndex ?? 0, style: "NORMAL_TEXT", at: [], props: {}, runs: [], bullet: null });
     }
   }
   return out;
@@ -160,6 +178,7 @@ export function listing(ps: Para[]): string {
         ind ? `indent ${ind}pt` : "",
         font ? font : "",
         size ? `${size}pt` : "",
+        p.bullet === "numbered" ? "numbered list" : p.bullet ? "bulleted list" : "",
       ].filter(Boolean);
       return `P${p.n}${tags.length ? ` [${tags.join(", ")}]` : ""}: ${p.text || "(blank line)"}`;
     })
@@ -190,9 +209,11 @@ export function insertRequests(ps: Para[], after: Para | null, texts: string[], 
     const block = clean.join("\n") + "\n";
     reqs.push({ insertText: { location: { index: at }, text: block } });
     let s = at;
+    const inherit = ps[0]?.bullet ?? null;
     clean.forEach((t, i) => {
       reqs.push(styleReq(s, s + t.length + 1, styles[i] ?? "NORMAL_TEXT"));
       reqs.push(...fmtReqs(s, s + t.length, fmts[i]));
+      reqs.push(...listFix(s, s + t.length + 1, inherit, wantList(fmts[i]) ?? null));
       s += t.length + 1;
     });
     return reqs;
@@ -200,9 +221,11 @@ export function insertRequests(ps: Para[], after: Para | null, texts: string[], 
   const at = after.end - 1; // just before the paragraph's own line break
   reqs.push({ insertText: { location: { index: at }, text: "\n" + clean.join("\n") } });
   let s = at + 1;
+  const inherit = after.bullet ?? null; // a line added after a list item starts out as a list item too
   clean.forEach((t, i) => {
     reqs.push(styleReq(s, s + t.length + 1, styles[i] ?? "NORMAL_TEXT"));
     reqs.push(...fmtReqs(s, s + t.length, fmts[i]));
+    reqs.push(...listFix(s, s + t.length + 1, inherit, wantList(fmts[i]) ?? null));
     s += t.length + 1;
   });
   return reqs;
@@ -235,6 +258,7 @@ export function deleteRequests(ps: Para[], run: Para[]): unknown[] {
     return [
       { deleteContentRange: { range: { startIndex: first.start - 1, endIndex: last.end - 1 } } },
       { updateParagraphStyle: { range: { startIndex: prev.start, endIndex: prev.end }, paragraphStyle: pick(prev.props, keep), fields: keep.join(",") } },
+      ...listFix(prev.start, prev.end, last.bullet, prev.bullet),
     ];
   }
   return [{ deleteContentRange: { range: { startIndex: first.start, endIndex: last.end } } }];
@@ -340,7 +364,7 @@ export function opApplier(io: DocIO, live?: (c: Change, i: number, n: number) =>
           const styles = items.map((x) => asStyle(x.style));
           await io.batch(insertRequests(ps, a?.para ?? null, texts, styles, items));
           tail.set(op.after ?? ps.length, texts[texts.length - 1]);
-          changes.push({ op: "insert", find: "", replace: texts.join("\n"), why, kind: "add", anchor: a?.text ?? "", styles, fmts: items.map((x) => ({ align: x.align, bold: x.bold, italic: x.italic, underline: x.underline, hanging: x.hanging })), anchorIndex: a?.para ? ps.indexOf(a.para) + 1 : 0, group: gid(i) });
+          changes.push({ op: "insert", find: "", replace: texts.join("\n"), why, kind: "add", anchor: a?.text ?? "", styles, fmts: items.map((x) => ({ align: x.align, bold: x.bold, italic: x.italic, underline: x.underline, hanging: x.hanging, list: x.list })), anchorIndex: a?.para ? ps.indexOf(a.para) + 1 : 0, group: gid(i) });
         } else if (op.op === "delete") {
           const p = locateOrig(ps, op.para);
           if (!p) {
@@ -350,7 +374,7 @@ export function opApplier(io: DocIO, live?: (c: Change, i: number, n: number) =>
           const idx = ps.indexOf(p);
           await io.batch(deleteRequests(ps, [p]));
           cur.set(op.para!, null);
-          changes.push({ op: "delete", find: p.text, replace: "", why, kind: "cut", anchor: ps[idx - 1]?.text ?? "", styles: [p.style], oldRuns: runsIn(p, 0, p.text.length), oldProps: pick(p.props, PARA_FIELDS) });
+          changes.push({ op: "delete", find: p.text, replace: "", why, kind: "cut", anchor: ps[idx - 1]?.text ?? "", styles: [p.style], oldRuns: runsIn(p, 0, p.text.length), oldProps: pick(p.props, PARA_FIELDS), oldList: p.bullet });
         } else if (op.op === "move") {
           const p = locateOrig(ps, op.para);
           if (!p || op.after === op.para) {
@@ -360,8 +384,9 @@ export function opApplier(io: DocIO, live?: (c: Change, i: number, n: number) =>
           const idx = ps.indexOf(p);
           const keepRuns = runsIn(p, 0, p.text.length);
           const keepProps = pick(p.props, PARA_FIELDS);
+          const keepList = p.bullet;
           await io.batch(deleteRequests(ps, [p]));
-          changes.push({ op: "delete", find: p.text, replace: "", why, kind: "move", anchor: ps[idx - 1]?.text ?? "", styles: [p.style], oldRuns: keepRuns, oldProps: keepProps });
+          changes.push({ op: "delete", find: p.text, replace: "", why, kind: "move", anchor: ps[idx - 1]?.text ?? "", styles: [p.style], oldRuns: keepRuns, oldProps: keepProps, oldList: keepList });
           cur.set(op.para!, null);
           const ps2 = paragraphs((await io.read()).content);
           const a = anchorFor(ps2, op.after ?? 0);
@@ -369,13 +394,14 @@ export function opApplier(io: DocIO, live?: (c: Change, i: number, n: number) =>
           {
             const ps3 = paragraphs((await io.read()).content);
             const at = a?.para ? ps3.findIndex((q) => q.start >= (a.para as Para).end - 1 && norm(q.text) === norm(p.text)) : ps3.findIndex((q) => norm(q.text) === norm(p.text));
-            if (at >= 0) await io.batch(restoreReqs(ps3[at], 0, keepRuns, keepProps));
+            if (at >= 0) await io.batch(restoreReqs(ps3[at], 0, keepRuns, keepProps, keepList));
           }
-          changes.push({ op: "insert", find: "", replace: p.text, why, kind: "move", anchor: a?.text ?? "", styles: [p.style], oldRuns: keepRuns, oldProps: keepProps, anchorIndex: a?.para ? ps2.indexOf(a.para) + 1 : 0 });
+          changes.push({ op: "insert", find: "", replace: p.text, why, kind: "move", anchor: a?.text ?? "", styles: [p.style], oldRuns: keepRuns, oldProps: keepProps, oldList: keepList, anchorIndex: a?.para ? ps2.indexOf(a.para) + 1 : 0 });
           tail.set(op.after ?? 0, p.text);
         } else if (op.op === "format") {
           const d = fmtToDocs(op.format ?? {});
-          if (!d.tf.length && !d.pf.length) {
+          const wl = wantList(op.format);
+          if (!d.tf.length && !d.pf.length && wl === undefined) {
             skipped.push({ op, why: "no formatting given" });
             return;
           }
@@ -393,7 +419,7 @@ export function opApplier(io: DocIO, live?: (c: Change, i: number, n: number) =>
           // only paragraphs that actually look different afterwards
           const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
           const needs = (t: { p: Para; from: number; to: number }) =>
-            d.pf.some((k) => !same(t.p.props[k], d.ps[k])) || (d.tf.length > 0 && t.p.runs.some((r) => r.to > t.from && r.from < t.to && d.tf.some((k) => !same(r.ts[k], d.ts[k]))));
+            d.pf.some((k) => !same(t.p.props[k], d.ps[k])) || (d.tf.length > 0 && t.p.runs.some((r) => r.to > t.from && r.from < t.to && d.tf.some((k) => !same(r.ts[k], d.ts[k])))) || (wl !== undefined && (t.p.bullet ?? null) !== (wl ?? null));
           for (let k = targets.length - 1; k >= 0; k--) if (!needs(targets[k])) targets.splice(k, 1);
           if (!targets.length) {
             skipped.push({ op, why: "already formatted that way" });
@@ -403,7 +429,7 @@ export function opApplier(io: DocIO, live?: (c: Change, i: number, n: number) =>
           const before: NonNullable<Change["before"]> = [];
           for (const t of targets) {
             const occN = ps.filter((q) => q.n < t.p.n && norm(q.text) === norm(t.p.text)).length;
-            before.push({ text: t.p.text, occ: occN, props: pick(t.p.props, d.pf), runs: t.p.runs.filter((r) => r.to > t.from && r.from < t.to).map((r) => ({ from: Math.max(r.from, t.from), to: Math.min(r.to, t.to), ts: pick(r.ts, d.tf) })), range: { from: t.from, to: t.to } });
+            before.push({ text: t.p.text, occ: occN, props: pick(t.p.props, d.pf), runs: t.p.runs.filter((r) => r.to > t.from && r.from < t.to).map((r) => ({ from: Math.max(r.from, t.from), to: Math.min(r.to, t.to), ts: pick(r.ts, d.tf) })), range: { from: t.from, to: t.to }, list: t.p.bullet });
             if (d.pf.length) reqs.push({ updateParagraphStyle: { range: { startIndex: t.p.start, endIndex: t.p.end }, paragraphStyle: d.ps, fields: d.pf.join(",") } });
             if (d.tf.length && t.to > t.from) {
               const s = t.p.at[t.from] ?? t.p.start;
@@ -411,12 +437,25 @@ export function opApplier(io: DocIO, live?: (c: Change, i: number, n: number) =>
               reqs.push({ updateTextStyle: { range: { startIndex: s, endIndex: e }, textStyle: d.ts, fields: d.tf.join(",") } });
             }
           }
+          // a list: consecutive paragraphs become one list (one request over the whole run)
+          if (wl !== undefined) {
+            const runsOf: Para[][] = [];
+            for (const t of [...targets].sort((x, y) => x.p.start - y.p.start)) {
+              const last = runsOf[runsOf.length - 1];
+              if (last && ps.indexOf(last[last.length - 1]) + 1 === ps.indexOf(t.p)) last.push(t.p);
+              else runsOf.push([t.p]);
+            }
+            for (const run of runsOf) {
+              const has = run.every((x) => x.bullet === run[0].bullet) ? run[0].bullet : "bullet";
+              reqs.push(...listFix(run[0].start, run[run.length - 1].end, has, wl));
+            }
+          }
           if (!reqs.length) {
             skipped.push({ op, why: "nothing to format" });
             return;
           }
           await io.batch(reqs);
-          changes.push({ op: "format", find: op.target === "all" ? "(the whole paper)" : (targets[0].p.text.slice(targets[0].from, targets[0].to) || targets[0].p.text), replace: "", why, kind: "format", before, fields: { text: d.tf, para: d.pf }, after: { ts: d.ts, ps: d.ps } });
+          changes.push({ op: "format", find: op.target === "all" ? "(the whole paper)" : (targets[0].p.text.slice(targets[0].from, targets[0].to) || targets[0].p.text), replace: "", why, kind: "format", before, fields: { text: d.tf, para: d.pf }, after: { ts: d.ts, ps: d.ps }, newList: wl });
         } else if (op.op === "set_style") {
           const p = locateOrig(ps, op.para);
           const style = asStyle(op.style);
@@ -486,7 +525,7 @@ export async function undoChanges(io: DocIO, changes: Change[]): Promise<{ undon
         if (c.oldRuns || c.oldProps) {
           const ps2 = paragraphs((await io.read()).content);
           const back = after ? ps2.find((q) => q.start === after.end) : ps2[0];
-          if (back && norm(back.text) === norm(c.find)) await io.batch(restoreReqs(back, 0, c.oldRuns ?? [], c.oldProps));
+          if (back && norm(back.text) === norm(c.find)) await io.batch(restoreReqs(back, 0, c.oldRuns ?? [], c.oldProps, c.oldList ?? null));
         }
         ok = true;
       }
@@ -495,6 +534,7 @@ export async function undoChanges(io: DocIO, changes: Change[]): Promise<{ undon
       for (const b of c.before) {
         const p = findPara(ps, b.text, b.occ);
         if (!p) continue;
+        if (c.newList !== undefined) reqs.push(...listFix(p.start, p.end, p.bullet, b.list ?? null));
         // send each changed field with its old value; a field that wasn't set goes back to default
         if (c.fields.para.length) reqs.push({ updateParagraphStyle: { range: { startIndex: p.start, endIndex: p.end }, paragraphStyle: b.props, fields: c.fields.para.join(",") } });
         if (c.fields.text.length) {
@@ -547,7 +587,7 @@ export async function redoChanges(io: DocIO, changes: Change[]): Promise<{ done:
         if (c.oldRuns || c.oldProps) {
           const ps2 = paragraphs((await io.read()).content);
           const back = after ? ps2.find((q) => q.start === after!.end) : ps2[0];
-          if (back) await io.batch(restoreReqs(back, 0, c.oldRuns ?? [], c.oldProps));
+          if (back) await io.batch(restoreReqs(back, 0, c.oldRuns ?? [], c.oldProps, c.oldList ?? null));
         }
         ok = true;
       }
@@ -569,6 +609,7 @@ export async function redoChanges(io: DocIO, changes: Change[]): Promise<{ done:
         const p = findPara(ps, b.text, b.occ);
         if (!p) continue;
         if (c.fields.para.length) reqs.push({ updateParagraphStyle: { range: { startIndex: p.start, endIndex: p.end }, paragraphStyle: c.after.ps, fields: c.fields.para.join(",") } });
+        if (c.newList !== undefined) reqs.push(...listFix(p.start, p.end, p.bullet, c.newList));
         const r = b.range ?? { from: 0, to: p.text.length };
         if (c.fields.text.length && r.to > r.from && r.to <= p.text.length) {
           const s = p.at[r.from] ?? p.start;

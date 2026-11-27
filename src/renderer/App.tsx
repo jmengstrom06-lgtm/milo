@@ -1338,7 +1338,9 @@ export default function App() {
     const next = v.source === "gdoc" ? "Say accept, or tap any change to keep your original." : "Tap any change to keep your original, then save it as a Google Doc or a Word file.";
     const met = v.requirements.filter((x) => x.met).length;
     const asg = v.assignment && v.requirements.length ? ` I checked it against ${v.assignment.split(" · ")[0]}: ${met} of ${v.requirements.length} requirements met.` : "";
-    await say(`${gist}${left}${asg} ${next}`);
+    // they also asked something ("rate it out of 10"): answer that too
+    const ans = v.answer ? ` ${v.answer.split(/(?<=[.!?])\s+/).slice(0, 2).join(" ")}` : "";
+    await say(`${gist}${ans}${left}${asg} ${next}`);
     setBubble(null);
   };
   const startEdit = async (text: string, docId?: string) => {

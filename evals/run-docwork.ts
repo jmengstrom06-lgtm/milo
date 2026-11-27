@@ -106,6 +106,9 @@ const CASES: Case[] = [
   { ask: "delete the CDC paragraph and add a new conclusion at the end", check: (a) => (!T(a).some((x) => /CDC/.test(x)) && a.length >= ORIG.length && !same(T(a)[T(a).length - 1], ORIG[7]) ? true : "missed a part") },
   // ---- Jake's real request (it looped 3 passes before the checker could see formatting)
   { ask: "edit it so that it's double spaced and has correct indents and make it just sound better", check: (a, r, d) => { const f = d.full(); const ds = f.every((p) => p.ps.lineSpacing === 200); const ind = f.slice(4).some((p) => (p.ps.indentFirstLine as { magnitude?: number })?.magnitude); const reworded = !unchanged(a, [4, 5, 6]); return ds && ind && reworded && r.plans.length <= 2 ? true : `double: ${ds}, indents: ${ind}, reworded: ${reworded}, passes: ${r.plans.length}`; } },
+  // ---- lists
+  { ask: "add a numbered list of 3 tips for better sleep at the end of my paper", check: (_a, _r, d) => { const f = d.full(); const nums = f.filter((p) => p.bullet === "numbered"); return nums.length >= 3 && f[f.length - 1].bullet === "numbered" ? true : `numbered items: ${nums.length}`; } },
+  { ask: "after my intro, add a short bulleted list of the paper's main points", check: (_a, _r, d) => { const f = d.full(); const i = f.findIndex((p) => p.text.startsWith("Social media have changed") || /teenagers spend/i.test(p.text)); const after = f.slice(i + 1, i + 6).filter((p) => p.bullet === "bullet"); return i >= 0 && after.length >= 2 ? true : `bullets after intro: ${after.length}`; } },
   // ---- assignment-aware (the D2L prompt + rubric this paper is for)
   {
     assignment: true,

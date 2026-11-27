@@ -77,6 +77,7 @@ export function PaperPanel({ p, rejected, style, hover, onToggle, onAccept, onEx
         </button>
       </div>
       {p.phase === "review" && v?.summary && <p className="wc__sum">{v.summary}</p>}
+      {p.phase === "review" && v?.answer && <p className="wc__sum pp__answer">{v.answer}</p>}
       {p.phase === "review" && (v?.missing || v?.cant) && (
         <p className="wc__sum wc__warn">
           {v.missing ? `Not done yet: ${v.missing}` : ""}
@@ -110,6 +111,9 @@ export function PaperPanel({ p, rejected, style, hover, onToggle, onAccept, onEx
       <div ref={body} className={`pp__paper${p.phase === "reading" ? " is-reading" : ""}`}>
         {p.rows.map((r, i) => {
           const off = isOff(r, rejected);
+          // a numbered list counts up within each run of numbered items
+          let num = 0;
+          if (r.bullet === "numbered") for (let k = i; k >= 0 && p.rows[k].bullet === "numbered"; k--) if (p.rows[k].kind !== "removed") num++;
           const live = r.kind !== "same" && r.groups.length > 0;
           const delay = r.kind !== "same" ? reveal++ * 70 : 0;
           return (
@@ -120,6 +124,7 @@ export function PaperPanel({ p, rejected, style, hover, onToggle, onAccept, onEx
               onClick={live ? () => onToggle(r.groups) : undefined}
               title={live ? (off ? "Tap to use Milo's change" : "Tap to keep your original") : undefined}
             >
+              {r.bullet && <span className="pp__li">{r.bullet === "numbered" ? `${num}.` : "•"}</span>}
               <Text r={r} off={off} />
               {r.tags.length > 0 && !off && (
                 <span className="pp__tags">
