@@ -6,8 +6,8 @@
 import path from "node:path";
 import dotenv from "dotenv";
 import { docWork } from "../src/main/docWork";
-import { undoChanges } from "../src/main/docAgent";
-import { SimDoc } from "../tests/docSim";
+import { redoChanges, undoChanges } from "../src/main/docAgent";
+import { SimDoc } from "../src/main/docSim";
 
 dotenv.config({ path: path.join(__dirname, "..", ".env") });
 const BAR = 0.9;
@@ -107,6 +107,15 @@ async function main() {
       const r = await docWork(d.io(), c.ask);
       const after = d.paras();
       const ok = r.ok ? c.check(after, r, d) : `failed: ${r.text}`;
+      // what the panel previewed must be exactly what gets written to the real doc
+      let sameOk = true;
+      if (r.ok && r.applied.length) {
+        const real = new SimDoc(PAPER);
+        const w = await redoChanges(real.io(), r.applied);
+        sameOk = w.missed.length === 0 && JSON.stringify(real.full()) === JSON.stringify(d.full());
+      }
+      total++;
+      if (sameOk) pass++;
       // and every change must undo back to the original, exactly
       let undoOk = true;
       if (r.ok && r.applied.length) {
@@ -116,9 +125,9 @@ async function main() {
       total += 2;
       if (ok === true) pass++;
       if (undoOk) pass++;
-      line = `${ok === true ? "✓" : "✗"} ${c.ask}${ok === true ? "" : `  (${ok}) plans: ${r.ok ? r.plans.join(" | ") : ""}${r.ok && r.sourceSearch ? ` sources: ${r.sourceSearch}` : ""}${r.ok && r.skippedWhy.length ? ` skipped: ${r.skippedWhy.join(", ")}` : ""}`}${r.ok ? `  [${r.applied.length} changes${r.missing ? `, missing: ${r.missing.slice(0, 60)}` : ""}]` : ""}${undoOk ? "" : "  ✗ UNDO did not restore the original"}`;
+      line = `${ok === true ? "✓" : "✗"} ${c.ask}${ok === true ? "" : `  (${ok}) plans: ${r.ok ? r.plans.join(" | ") : ""}${r.ok && r.sourceSearch ? ` sources: ${r.sourceSearch}` : ""}${r.ok && r.skippedWhy.length ? ` skipped: ${r.skippedWhy.join(", ")}` : ""}`}${r.ok ? `  [${r.applied.length} changes${r.missing ? `, missing: ${r.missing.slice(0, 60)}` : ""}]` : ""}${undoOk ? "" : "  ✗ UNDO did not restore the original"}${sameOk ? "" : "  ✗ WRITING to the doc didn't match the preview"}`;
     } catch (e) {
-      total += 2;
+      total += 3;
       line = `✗ ${c.ask}  (crashed: ${(e as Error).message.slice(0, 120)})`;
     }
     console.log(line);

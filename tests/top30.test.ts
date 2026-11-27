@@ -187,3 +187,20 @@ describe("anything about my open paper goes to the doc agent", () => {
     else expect(got).toBe(k);
   });
 });
+
+describe("the long ways students name their paper", () => {
+  it.each([
+    "I have a why sleep matters in college paper open in my Chrome. It's a Google Doc. I want you to look through it and correct any grammar and make the whole thing look better and sound better.",
+    "fix my english 101 final draft essay",
+    "look at my sleep and college students research paper and add a conclusion",
+  ])("%s", (s) => expect((parseLong(s, {} as never) as { kind: string }).kind).toBe("edit_paper"));
+});
+
+import { splitPasted } from "../src/renderer/commands";
+describe("a whole paper pasted with the request", () => {
+  const body = Array.from({ length: 30 }, (_, i) => `Sentence number ${i} about why sleep matters for students.`).join(" ");
+  it("instruction on the first line", () => expect(splitPasted(`fix the grammar in this essay\nWhy Sleep Matters\n${body}`)).toMatchObject({ ask: "fix the grammar in this essay", title: "Why Sleep Matters" }));
+  it("instruction then a colon", () => expect(splitPasted(`can you edit my paper: ${body}`)?.ask).toBe("can you edit my paper"));
+  it("a short request is not a pasted paper", () => expect(splitPasted("fix the grammar in my paper")).toBeNull());
+  it("a long chat message without a request isn't either", () => expect(splitPasted(body)).toBeNull());
+});

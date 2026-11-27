@@ -1,8 +1,10 @@
+// An in-memory Google Doc. Milo works on this copy first (preview, self-check), then writes only what the
+// student accepts to the real doc. Also what the tests and benches run against.
 // A stand-in for Google Docs: paragraphs with paragraph styles, characters with text styles, and the
 // requests Milo sends (insertText, deleteContentRange, updateParagraphStyle, updateTextStyle), including
 // Docs' field-mask rule: a field named in `fields` but left out of the style resets it to default.
 // Indexes work like Docs: the body starts at 1 and every paragraph ends with "\n".
-import type { DocEl } from "../src/main/docEdit";
+import type { DocEl } from "./docEdit";
 
 type TS = Record<string, unknown>;
 type PS = Record<string, unknown>;
@@ -12,6 +14,32 @@ const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x));
 export class SimDoc {
   chars: Ch[] = [];
   revisions = 0;
+  /** A copy of a real doc (tables and images become a read-only line: Milo never edits those). */
+  static fromContent(content: DocEl[]): SimDoc {
+    const d = new SimDoc([]);
+    for (const el of content) {
+      if (el.paragraph) {
+        const ps = { ...(el.paragraph.paragraphStyle ?? {}) } as PS;
+        if (!ps.namedStyleType) ps.namedStyleType = "NORMAL_TEXT";
+        for (const r of el.paragraph.elements ?? []) {
+          const t = (r.textRun?.content ?? "").replace(/\n/g, "");
+          for (const c of t) d.chars.push({ c, ts: clone(r.textRun?.textStyle ?? {}) });
+        }
+        d.chars.push({ c: "\n", ts: {}, ps });
+      } else if (el.table) {
+        for (const c of "[table: Milo can't edit tables yet]") d.chars.push({ c, ts: {} });
+        d.chars.push({ c: "\n", ts: {}, ps: { namedStyleType: "NORMAL_TEXT" } });
+      }
+    }
+    if (!d.chars.length) d.chars.push({ c: "\n", ts: {}, ps: { namedStyleType: "NORMAL_TEXT" } });
+    return d;
+  }
+  /** A doc from plain text (a pasted paper, a Word file): one paragraph per line. */
+  static fromText(text: string): SimDoc {
+    const lines = text.replace(/\r\n?/g, "\n").split("\n").map((l) => l.replace(/\s+$/, ""));
+    while (lines.length && !lines[lines.length - 1]) lines.pop();
+    return new SimDoc(lines.length ? lines : [""]);
+  }
   constructor(paras: (string | [string, string])[]) {
     for (const p of paras) {
       const [t, st] = typeof p === "string" ? [p, "NORMAL_TEXT"] : p;

@@ -62,7 +62,7 @@ export async function pdfParts(bytes: Uint8Array, per = PART_PAGES): Promise<{ b
 }
 
 /** Word, RTF, HTML, OpenDocument: macOS turns them into text itself (textutil). */
-function textOf(file: string): Promise<string> {
+export function textOf(file: string): Promise<string> {
   return new Promise((resolve) => execFile("textutil", ["-convert", "txt", "-stdout", file], { maxBuffer: 50e6, timeout: 30000 }, (err, out) => resolve(err ? "" : String(out))));
 }
 

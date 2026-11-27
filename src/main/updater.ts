@@ -104,7 +104,8 @@ export function startUpdates(win: BrowserWindow) {
       const asset = rel.assets.find((x) => x.name === ASSET);
       if (!asset) throw new Error("no Mac download in the release");
       bb("update", "available", { version: latest });
-      fs.rmSync(work, { recursive: true, force: true });
+      // not fs.rmSync: Electron's fs treats the old download's app.asar as a folder and the delete fails (ENOTDIR)
+      await run("/bin/rm", ["-rf", work]);
       fs.mkdirSync(work, { recursive: true });
       const zip = path.join(work, "Milo.zip");
       bb("update", "downloading", { version: latest });

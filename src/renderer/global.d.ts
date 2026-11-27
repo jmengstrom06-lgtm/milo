@@ -18,6 +18,9 @@ declare global {
   };
   type MiloPrefs = { notifyAway: boolean; quiet: boolean; quietFrom: number; quietTo: number; noRecord: string[]; okRecord: string[]; autofill: boolean; preflight: boolean };
   type MiloEdit = { find: string; replace: string; why: string; kind?: string; op?: "replace" | "insert" | "delete" | "style"; anchor?: string; styles?: string[]; style?: string; oldStyle?: string };
+  type MiloPaperRow = { kind: "same" | "changed" | "added" | "removed" | "restyled"; text: string; segs?: { t: string; op: "=" | "+" | "-" }[]; style: string; align?: string; bold?: boolean; tags: string[]; groups: number[] };
+  type MiloPaperView = { id: string; title: string; source: "gdoc" | "text"; file?: string; summary: string; cant: string; missing: string; notes: string[]; rows: MiloPaperRow[]; groups: { id: number; why: string; kind: string }[]; wordsBefore: number; wordsAfter: number };
+  type MiloPaperResult = { ok: true; view: MiloPaperView | null; answer: string; summary: string; cant: string } | { ok: false; text: string; connect?: boolean; docs?: { id: string; title: string }[] };
   type MiloEditResult =
     | { ok: true; title: string; summary: string; applied: MiloEdit[]; skipped: number; notes: string[]; wordsBefore: number; wordsAfter: number; docId: string; rubric: boolean; answer?: string; cant?: string; missing?: string }
     | { ok: false; text: string; connect?: boolean; docs?: { id: string; title: string }[] };
@@ -260,7 +263,13 @@ declare global {
         busy: () => Promise<{ ok: boolean; events: { title: string; start: number; end: number }[]; text?: string }>;
         apply: (blocks: { title: string; course: string; start: number; end: number }[]) => Promise<{ ok: boolean; added: number; failed: number; text: string }>;
       };
-      paperEdit: (ask: string, docId?: string) => Promise<MiloEditResult>;
+      paperEdit: (ask: string, docId?: string) => Promise<MiloPaperResult>;
+      paperEditText: (ask: string, text: string, title?: string) => Promise<MiloPaperResult>;
+      paperEditFile: (file: string, ask: string) => Promise<MiloPaperResult>;
+      paperPreview: (id: string, rejected: number[]) => Promise<{ rows: MiloPaperRow[]; wordsAfter: number } | null>;
+      paperApply: (id: string, rejected: number[]) => Promise<{ ok: true; n: number; missed: number; actId: string } | { ok: false; text: string }>;
+      paperExport: (id: string, rejected: number[], to: "google" | "word" | "copy") => Promise<{ ok: boolean; text: string; url?: string; file?: string }>;
+      onPaperOpen: (cb: (p: { title: string; rows: MiloPaperRow[]; source: string }) => void) => () => void;
       paperUndo: (docId: string, edits: MiloEdit[]) => Promise<{ ok: boolean; undone: number }>;
       paperCite: (ask: string) => Promise<MiloCiteResult>;
       citePage: (ask: string) => Promise<{ ok: true; line: string; style: "MLA" | "APA" } | { ok: false; text: string }>;

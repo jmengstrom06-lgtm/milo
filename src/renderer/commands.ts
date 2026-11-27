@@ -110,7 +110,11 @@ export const EDIT_PAPER =
 /** Said the long way: "I have a paper open… there are grammar mistakes… fix all of it". A paper/essay/draft
  *  plus a fixing word, in one request (new papers were already caught above). */
 export const EDIT_PAPER_TALK =
-  /\b(?:my|this|the|a)\s+(?:[a-z]+\s+){0,2}(?:paper|essay|draft|personal statement|google doc|doc)\b(?=[\s\S]*\b(?:fix|correct|proofread|proof read|edit|revise|polish|grammar|spelling|typos|mistakes|errors|run.?on|wording|flow|add|insert|write|put|include|expand|extend|lengthen|shorten|cut|trim|delete|remove|move|swap|reorder|rearrange|reorganize|split|combine|merge|format|heading|headings|title|bold|section|paragraph|conclusion|intro|introduction|thesis|counterargument|sentence)\b)|\b(?:fix|correct|proofread|edit|revise|polish|add|insert|write|put|delete|remove|move|reorganize|format)\b[^.?!]{0,60}\b(?:my|this|the)\s+(?:[a-z]+\s+)?(?:paper|essay|draft|doc)\b/;
+  /\b(?:my|this|the|a)\s+(?:[\w'’]+\s+){0,7}(?:paper|essay|draft|personal statement|google doc|doc)\b(?=[\s\S]*\b(?:fix|correct|proofread|proof read|edit|revise|polish|grammar|spelling|typos|mistakes|errors|run.?on|wording|flow|add|insert|write|put|include|expand|extend|lengthen|shorten|cut|trim|delete|remove|move|swap|reorder|rearrange|reorganize|split|combine|merge|format|heading|headings|title|bold|section|paragraph|conclusion|intro|introduction|thesis|counterargument|sentence)\b)|\b(?:fix|correct|proofread|edit|revise|polish|add|insert|write|put|delete|remove|move|reorganize|format)\b[^.?!]{0,60}\b(?:my|this|the)\s+(?:[\w'’]+\s+){0,5}(?:paper|essay|draft|doc)\b/;
+/** Writing work on a document. Never done by clicking around the screen (Google Docs is a canvas: menus and
+ *  clicks there are slow and fragile): it always goes to the doc agent. */
+export const WRITING_WORK = /\b(?:paper|essay|draft|google doc|doc|document|personal statement)\b/;
+export const WRITING_VERB = /\b(?:grammar|spelling|typos?|proofread|fix|correct|edit|revise|rewrite|reword|polish|sound better|look better|wording|add|insert|write|cite|citations?|sources|works cited|format|mla|apa|double.?space|shorten|cut|expand|lengthen|conclusion|intro|thesis|paragraph|heading)\b/;
 /** A question about their own open paper: the doc agent reads it and answers. */
 export const ASK_PAPER = /^(?:what(?:'s| is| are)|how (?:many|long|good)|is|does|do|can you (?:read|tell me|summarize)|read|summarize|tell me)\b[^.?!]{0,60}\b(?:my|this)\s+(?:[a-z]+\s+)?(?:paper|essay|draft)\b/;
 export const CITE_PAPER =
@@ -283,4 +287,25 @@ export function soundsUnfinished(text: string): boolean {
   if (/\d/.test(t) && t.split(/\s+/).length <= 4) return false; // spoken answers like "0.69"
   if (/\b(to|the|a|an|and|or|but|in|on|at|with|for|of|my|your|then|so|open|type|write|search|about|into|onto|from|like|um|uh|is|are|can you|could you|please|go|go to|and then|some)$/.test(t)) return true;
   return t.split(/\s+/).length === 1 && !/^(hi|hello|hey|help|chrome|notes|spotify)$/.test(t);
+}
+
+/** A whole paper pasted in with the request ("fix this: <500 words>"): the instruction and the paper. (pure) */
+export function splitPasted(text: string): { ask: string; body: string; title: string } | null {
+  const t = text.replace(/\r\n?/g, "\n").trim();
+  if (t.split(/\s+/).length < 150) return null;
+  let ask = "";
+  let body = "";
+  const nl = t.indexOf("\n");
+  if (nl > 0 && nl < 400) {
+    ask = t.slice(0, nl).trim();
+    body = t.slice(nl + 1).trim();
+  } else {
+    const m = t.match(/^(.{5,300}?(?:[:.?!]|\bpaper\b|\bessay\b))\s+/i);
+    if (!m) return null;
+    ask = m[1].trim();
+    body = t.slice(m[0].length).trim();
+  }
+  if (body.split(/\s+/).length < 100 || !/\b(fix|edit|proofread|revise|improve|check|grammar|rewrite|polish|format|cite|sources|shorten|cut|add|make)\b/i.test(ask)) return null;
+  const firstLine = body.split("\n").find((l) => l.trim() && l.trim().split(/\s+/).length <= 12 && !/[.!?]$/.test(l.trim()));
+  return { ask: ask.replace(/[:\s]+$/, ""), body, title: firstLine?.trim() || "Your paper" };
 }

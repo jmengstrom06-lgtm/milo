@@ -261,16 +261,30 @@ export async function runSelfTest(win: BrowserWindow) {
           const t0 = Date.now();
           await reset();
           await hear(phrase);
+          // the paper panel shows the changes; nothing is written until they say "accept"
+          let panelMs = -1;
+          let accepted = false;
           let after = before;
-          while (Date.now() - t0 < 90000) {
-            await sleep(2000);
+          while (Date.now() - t0 < 120000) {
+            await sleep(700);
+            if (!accepted) {
+              const ready = await js<boolean>("!!document.querySelector('.pp .wc__go:not([disabled])')").catch(() => false);
+              if (ready) {
+                panelMs = Date.now() - t0;
+                const untouched = clean(await docsText(d.id)) === clean(before);
+                if (!untouched) return { score: 0, detail: "the doc changed BEFORE accepting" };
+                await hear("accept it");
+                accepted = true;
+              }
+              continue;
+            }
             after = await docsText(d.id);
-            if (clean(after) !== clean(before) && Date.now() - t0 > 8000) break;
+            if (clean(after) !== clean(before)) break;
           }
           const look = events.find((e) => e.line.startsWith("writing/doc_lookup"))?.line ?? "no lookup logged";
           const route = events.find((e) => e.line.startsWith("ipc/route"))?.line.match(/"kind":"(\w+)"/)?.[1] ?? "?";
           const fixed = clean(after) !== clean(before);
-          return { ms: Date.now() - t0, score: fixed ? 1 : 0, detail: fixed ? `routed to ${route}, found the doc, edited it in ${((Date.now() - t0) / 1000).toFixed(0)}s` : `doc NOT changed. route: ${route}. ${look.slice(0, 220)}` };
+          return { ms: Date.now() - t0, score: fixed ? 1 : 0, detail: fixed ? `routed to ${route}, changes shown in ${(panelMs / 1000).toFixed(0)}s, written after "accept" in ${((Date.now() - t0) / 1000).toFixed(0)}s total` : `doc NOT changed (panel ${panelMs < 0 ? "never showed changes" : `showed changes at ${(panelMs / 1000).toFixed(0)}s`}${accepted ? ", accept said" : ""}). route: ${route}. ${look.slice(0, 200)}` };
         });
       }
     }
