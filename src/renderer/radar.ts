@@ -53,6 +53,45 @@ function similar(a: string, b: string) {
   return both / Math.min(A.size, B.size) >= 0.75;
 }
 
+/** Same class, however it was written: "Org Behavior & Strategy" = "Organizational Behavior and Strategy". (pure) */
+export function sameCourse(a: string, b: string): boolean {
+  const words = (x: string) => norm(x.replace(/&/g, " and ")).split(" ").filter((w) => w && !/^(and|of|the|to|in|intro|introduction)$/.test(w));
+  const A = words(a);
+  const B = words(b);
+  if (!A.length || !B.length) return !A.length && !B.length;
+  if (A.join(" ") === B.join(" ")) return true;
+  const [short, long] = A.length <= B.length ? [A, B] : [B, A];
+  // every word of the shorter name starts a word of the longer one ("org" -> "organizational", "bio" -> "biology")
+  const pre = (w: string, l: string) => {
+    let i = 0;
+    while (i < w.length && i < l.length && w[i] === l[i]) i++;
+    return i >= Math.min(4, w.length, l.length) && i >= 3;
+  };
+  return short.every((w) => w.length >= 3 && long.some((l) => pre(w, l)));
+}
+/** One assignment seen twice (two sources wrote the class or title a bit differently)? (pure) */
+function sameItem(x: { course: string; title: string; dueAt: number | null }, y: { course: string; title: string; dueAt: number | null }) {
+  if (!similar(x.title, y.title)) return false;
+  if (sameCourse(x.course, y.course)) return true;
+  // the class written as a code on one side ("MANA 30253"): same title, due the very same minute
+  return x.dueAt != null && x.dueAt === y.dueAt && norm(x.title) === norm(y.title);
+}
+/** Fold copies of the same assignment into one (keeps the most recently seen version's wording). (pure) */
+export function dedupe(list: RadarItem[]): RadarItem[] {
+  const items = list.map((x) => ({ ...x, warned: { ...x.warned } }));
+  const out: RadarItem[] = [];
+  for (const x of [...items].sort((a, b) => b.lastSeen - a.lastSeen)) {
+    const twin = out.find((y) => sameItem(x, y));
+    if (!twin) out.push(x);
+    else {
+      twin.firstSeen = Math.min(twin.firstSeen, x.firstSeen);
+      twin.warned = { ...x.warned, ...twin.warned }; // never warn twice for one thing
+      if (twin.dueAt == null) twin.dueAt = x.dueAt;
+    }
+  }
+  return items.filter((x) => out.includes(x));
+}
+
 /** Fold one D2L scan into what Milo already knows. */
 export function mergeScan(r: Radar, scan: ScanItem[], now: number): Radar {
   const first = r.scans === 0;
@@ -61,7 +100,7 @@ export function mergeScan(r: Radar, scan: ScanItem[], now: number): Radar {
     if (!s || !s.title) continue;
     const dueAt = parseDue(s.due_iso);
     const id = keyOf(s.course, s.title);
-    const old = items.find((x) => x.id === id) ?? items.find((x) => norm(x.course) === norm(s.course) && similar(x.title, s.title));
+    const old = items.find((x) => x.id === id) ?? items.find((x) => sameItem(x, { course: s.course, title: s.title, dueAt }));
     if (!old) {
       items.push({
         id,
@@ -79,6 +118,8 @@ export function mergeScan(r: Radar, scan: ScanItem[], now: number): Radar {
     }
     old.lastSeen = now;
     old.title = s.title;
+    old.course = s.course || old.course; // the newest source's spelling of the class
+    old.id = keyOf(old.course, old.title);
     if (dueAt != null && old.dueAt != null && Math.abs(dueAt - old.dueAt) > 30 * 60e3) {
       old.prevDue = old.due;
       old.movedAt = now;
@@ -94,14 +135,14 @@ export function mergeScan(r: Radar, scan: ScanItem[], now: number): Radar {
     old.due = s.due || old.due;
   }
   // forget things more than a day past due, and things not seen for 2 weeks
-  const kept = items.filter((x) => (x.dueAt == null ? now - x.lastSeen < 14 * DAY : x.dueAt > now - DAY));
+  const kept = dedupe(items).filter((x) => (x.dueAt == null ? now - x.lastSeen < 14 * DAY : x.dueAt > now - DAY));
   return { items: kept, scans: r.scans + 1, lastScan: now };
 }
 
 /** What Milo should warn about right now (each item once per reason). Soonest first. */
 export function pendingAlerts(r: Radar, now: number): Alert[] {
   const out: Alert[] = [];
-  for (const x of r.items) {
+  for (const x of dedupe(r.items)) {
     if (x.dueAt != null && x.dueAt < now) continue; // past due: too late to warn
     const why: Warn[] = [];
     if (!x.warned.new && now - x.firstSeen < 3 * DAY) why.push("new");
@@ -143,7 +184,7 @@ export function markWarned(r: Radar, alerts: Alert[], now: number): Radar {
 
 /** Coming up, soonest first. range: days ahead (Infinity = everything). */
 export function upcoming(r: Radar, now: number, range = Infinity): RadarItem[] {
-  return r.items
+  return dedupe(r.items)
     .filter((x) => x.dueAt == null || (x.dueAt >= now - HOUR && daysUntil(x.dueAt, now) <= range))
     .sort((a, b) => (a.dueAt ?? Infinity) - (b.dueAt ?? Infinity));
 }

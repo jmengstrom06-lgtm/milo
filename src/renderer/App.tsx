@@ -16,7 +16,7 @@ import QuizPanel, { QuizHandle } from "./QuizPanel";
 import { BriefCard, BriefLoader, BriefState, SignInPanel } from "./Brief";
 import { parseAnswer, parseGoogle, parseGoogleMulti, parseRemember, spokenEmail } from "./decide";
 import { fastDecide, looksLikeBackground, parseExam, parseFinalWeight, parseForecast, parseGradeNow, parseScore, parseSyllabus, parseHomework, parsePlanVoice, parseRadar, stripFiller, firstOffer, parseOfferAnswer, type DecideState } from "./decide";
-import { alertLine, emptyRadar, markWarned, mergeScan, pendingAlerts, upcoming, whenText, type Radar, type RadarItem, type ScanItem, type Warn } from "./radar";
+import { alertLine, dedupe, emptyRadar, markWarned, mergeScan, pendingAlerts, upcoming, whenText, type Radar, type RadarItem, type ScanItem, type Warn } from "./radar";
 import RadarCard, { type RadarView } from "./RadarCard";
 import { backNudge, weekNudge, type Nudge } from "./nudges";
 import { checkupLine, type CheckItem } from "../main/checkup";
@@ -1942,7 +1942,7 @@ export default function App() {
   const [radar, setRadarState] = useState<Radar>(() => {
     try {
       const r = JSON.parse(localStorage.getItem("milo.radar") || "null");
-      return r && Array.isArray(r.items) ? r : emptyRadar();
+      return r && Array.isArray(r.items) ? { ...r, items: dedupe(r.items) } : emptyRadar();
     } catch {
       return emptyRadar();
     }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { alertLine, chipText, emptyRadar, markWarned, mergeScan, parseDue, pendingAlerts, upcoming, whenText, daysUntil } from "../src/renderer/radar";
+import { alertLine, sameCourse, chipText, emptyRadar, markWarned, mergeScan, parseDue, pendingAlerts, upcoming, whenText, daysUntil } from "../src/renderer/radar";
 
 const at = (y: number, mo: number, d: number, h = 9, mi = 0) => new Date(y, mo - 1, d, h, mi).getTime();
 const MON = at(2026, 11, 16, 9); // Monday 9am
@@ -80,4 +80,39 @@ describe("radar", () => {
     expect(chipText(at(2026, 11, 19, 12), MON)).toBe("3 days");
     expect(daysUntil(at(2026, 11, 17, 1), at(2026, 11, 16, 23))).toBe(1);
   });
+});
+
+describe("one assignment, never listed twice", () => {
+  const NOW = new Date(2026, 10, 27, 13, 0).getTime();
+  const due = { due: "Fri, Dec 4, 11:59 PM", due_iso: "2026-12-04T23:59" };
+  it("the class written two ways (Jake's Nov 27 log) = one item, with D2L's name", () => {
+    let r = mergeScan(emptyRadar(), [{ title: "Journaling/Research Assignment", course: "Org Behavior & Strategy", ...due }], NOW - 86400e3);
+    r = mergeScan(r, [{ title: "Journaling/Research Assignment", course: "Organizational Behavior and Strategy", ...due }], NOW);
+    const u = upcoming(r, NOW);
+    expect(u.length).toBe(1);
+    expect(u[0].course).toBe("Organizational Behavior and Strategy");
+  });
+  it("a list that already has the copy saved cleans itself up", () => {
+    const item = (course: string, lastSeen: number) => ({ id: course, title: "Journaling/Research Assignment", course, due: due.due, dueAt: parseDue(due.due_iso), kind: "assignment", firstSeen: 1, lastSeen, warned: {} });
+    expect(upcoming({ items: [item("Org Behavior & Strategy", 1), item("Organizational Behavior and Strategy", 2)], scans: 2, lastScan: 2 }, NOW).map((x) => x.course)).toEqual(["Organizational Behavior and Strategy"]);
+  });
+  it("the class as a code, same title, same minute = one", () => {
+    let r = mergeScan(emptyRadar(), [{ title: "Lab Report 4", course: "BIOL 10003", ...due }], NOW - 1000);
+    r = mergeScan(r, [{ title: "Lab Report 4", course: "Contemporary Issues in Biology", ...due }], NOW);
+    expect(upcoming(r, NOW).length).toBe(1);
+  });
+  it("different classes with the same assignment name stay two", () => {
+    const r = mergeScan(emptyRadar(), [
+      { title: "Homework 5", course: "Statistical Analysis", ...due },
+      { title: "Homework 5", course: "Understanding the Earth", ...due, due_iso: "2026-12-04T17:00" },
+    ], NOW);
+    expect(upcoming(r, NOW).length).toBe(2);
+  });
+  it.each([
+    ["Org Behavior & Strategy", "Organizational Behavior and Strategy", true],
+    ["Stats", "Statistical Analysis", true],
+    ["Bio", "Contemporary Issues in Biology", true],
+    ["Statistical Analysis", "Understanding the Earth", false],
+    ["American Writers", "Composition: Intro to Writing", false],
+  ])("sameCourse(%s, %s) = %s", (a, b, want) => expect(sameCourse(a, b)).toBe(want));
 });
