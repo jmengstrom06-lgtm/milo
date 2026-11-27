@@ -23,7 +23,7 @@ import { checkupLine, type CheckItem } from "../main/checkup";
 import { sweepCore, sweepSummary } from "../main/sweepCore";
 import { CLEAR_AREA, isSure, LOCKIN_START, PICK_AREA, pickSpoken } from "./exact";
 import AreaPicker, { AreaFlash } from "./AreaPicker";
-import { DiscussionCard, EditsCard, SourcesCard } from "./WritingCards";
+import { ClassesCard, DiscussionCard, EditsCard, SourcesCard } from "./WritingCards";
 import { PaperPanel, type PaperState } from "./PaperPanel";
 import Onboarding, { setupDone } from "./Onboarding";
 import ActivityPanel from "./ActivityPanel";
@@ -162,6 +162,7 @@ export default function App() {
   const [paperOff, setPaperOff] = useState<Set<number>>(new Set());
   const [sources, setSources] = useState<Extract<MiloCiteResult, { ok: true }> | null>(null);
   const [discussion, setDiscussion] = useState<Extract<MiloDraftResult, { ok: true }> | null>(null);
+  const [classes, setClasses] = useState<Extract<MiloClassesResult, { ok: true }> | null>(null);
   const [writingBusy, setWritingBusy] = useState(false);
   const writingOn = useRef(false);
   const droppedPath = useRef<string | null>(null);
@@ -1286,6 +1287,7 @@ export default function App() {
     setEdits(null);
     setSources(null);
     setDiscussion(null);
+    setClasses(null);
     hover(false);
   };
   const writingStart = (line: string) => {
@@ -1437,20 +1439,79 @@ export default function App() {
     setDiscussion({ ...r });
     if (change) return;
     const w = (r.draft.body.match(/\b[\w'’-]+\b/g) ?? []).length;
-    await say(`Here's your post for ${r.topic}: ${w} words${r.req.replies ? ` and ${r.draft.replies.length} replies to classmates` : ""}${r.voice ? ", in your own voice" : ""}. Change anything, then post it.`);
+    const n = r.draft.replies.length;
+    if (r.repliesOnly) await say(`Here ${n === 1 ? `is your reply to ${r.draft.replies[0]?.to.split(" ")[0] ?? "your classmate"}` : `are ${n} replies`} for ${r.topic}${r.voice ? ", in your own voice" : ""}. Change anything, then post.`);
+    else await say(`Here's your post for ${r.topic}: ${w} words${r.req.replies ? ` and ${n} replies to classmates` : ""}${r.voice ? ", in your own voice" : ""}. Change anything, then post it.`);
     setBubble(null);
   };
   const postDiscussion = async (d: MiloDraft) => {
     setWritingBusy(true);
     setBubble("Posting to D2L…");
-    const r = await window.milo.discussionPost({ subject: d.subject, body: d.body, replies: d.replies.map((x) => ({ parentId: x.parentId, to: x.to, body: x.body })) }).catch(() => ({ ok: false, text: "I couldn't post it." }) as { ok: boolean; posted?: number; text?: string });
+    const r = await window.milo.discussionPost({ subject: d.subject, body: d.body, replies: d.replies.map((x) => ({ parentId: x.parentId, to: x.to, body: x.body })) }).catch(() => ({ ok: false, text: "I couldn't post it." }) as { ok: boolean; posted?: number; text?: string; failed?: string[] });
     setWritingBusy(false);
     if (r.ok) {
       setDiscussion(null);
       setMood("celebrating");
       sfx.success();
-      await say(`Posted${(r.posted ?? 1) > 1 ? ` with ${(r.posted ?? 1) - 1} repl${(r.posted ?? 1) > 2 ? "ies" : "y"}` : ""}. Say undo if you want it back.`);
+      const p = r.posted ?? 1;
+      const what = d.body.trim() ? `Posted${p > 1 ? ` with ${p - 1} repl${p > 2 ? "ies" : "y"}` : ""}` : `Posted ${p === 1 ? "your reply" : `${p} replies`}`;
+      const miss = r.failed?.length ? ` The reply to ${r.failed[0].split(" ")[0]} didn't go through.` : "";
+      await say(`${what}.${miss} Say undo if you want it back.`);
     } else await say(r.text || "I couldn't post it.");
+    setBubble(null);
+  };
+  /** "What's my grade in stats", "did I turn in the lab", "when's my next quiz": one answer from real D2L data. */
+  const askClasses = async (text: string, spoken = true) => {
+    if (!portal) return void say("Connect your school's D2L first. Open Home base and add it.").then(() => setBubble(null));
+    hush();
+    setChatOpen(false);
+    closeWriting();
+    setMood("looking");
+    setBubble("Checking D2L…");
+    const r = await window.milo.classesAsk({ ask: text, portal }).catch(() => ({ ok: false as const, text: "I couldn't reach D2L just now." }));
+    if (!r.ok) {
+      setMood("idle");
+      await say(r.text);
+      setBubble(null);
+      if ("signin" in r && r.signin) void fixD2l();
+      return;
+    }
+    setMood("happy");
+    if (r.rows.length || r.url) setClasses(r);
+    if (spoken) setMessages((m) => [...m, { role: "assistant", content: r.answer }]);
+    // what it needs doing next
+    if (r.action.kind === "discussion") {
+      await say(r.answer);
+      return void startDiscussion(`${text} ${r.action.course}`.trim());
+    }
+    if (r.action.kind === "quiz_prep") {
+      await say(r.answer);
+      return void startQuizPrep(r.action.course, r.action.quiz);
+    }
+    await say(r.answer);
+    setBubble(null);
+  };
+  /** A practice quiz built from the D2L files the real quiz covers. */
+  const startQuizPrep = async (course: string, quiz: string) => {
+    if (!portal) return void startExam("quiz", course);
+    closeOthers();
+    setTool(null);
+    setQuiz(null);
+    hover(false);
+    setMood("thinking");
+    setBubble(`Finding what ${quiz || "your quiz"} covers…`);
+    const r = await window.milo.quizPrep({ portal, course, quiz }).catch(() => ({ ok: false as const, text: "I couldn't reach D2L just now." }));
+    setBubble(null);
+    if (!r.ok || !r.questions.length) {
+      setMood("idle");
+      await say(r.ok ? "I couldn't write that one. Try again?" : r.text);
+      return setBubble(null);
+    }
+    bb("quiz_prep_made", { course: r.course, quiz: r.quiz, questions: r.questions.length, files: r.used.length });
+    setRpSize("half");
+    setMood("happy");
+    setQuiz({ id: Date.now(), topic: r.topic, questions: r.questions, focus: `practice for ${r.quiz || "your quiz"}` });
+    await say(`Here's a practice quiz for ${r.quiz || r.course}${r.used.length ? `, from ${r.used.length === 1 ? `“${r.used[0]}”` : `${r.used.length} of your class files`}` : ""}. ${r.questions.length} questions.`);
     setBubble(null);
   };
   const startReading = async (text: string, path?: string) => {
@@ -3004,6 +3065,7 @@ export default function App() {
       return;
     }
     const gn = parseGradeNow(text);
+    if (gn && portal) return void askClasses(text); // real D2L data: the grade, plus what's behind it
     if (gn) {
       lastForecastCourse.current = gn.course;
       void window.milo.gradeNow(gn.course, portal).then((r) =>
@@ -3265,6 +3327,9 @@ export default function App() {
       case "discussion":
         void startDiscussion(intent.text);
         return;
+      case "classes":
+        void askClasses(intent.text);
+        return;
       case "reading":
         void startReading(intent.text);
         return;
@@ -3376,6 +3441,8 @@ export default function App() {
         return void (/\b(this|that) (page|article|site|website)\b|^cite this\b/i.test(text) ? startCitePage(text) : startEdit(text));
       case "discussion":
         return void startDiscussion(text);
+      case "classes":
+        return void askClasses(text, spoken);
       case "reading":
         return void startReading(text);
       case "undo":
@@ -4962,6 +5029,7 @@ export default function App() {
       )}
       {edits && <EditsCard r={edits} style={panelStyle} hover={hover} onClose={closeWriting} onUndone={(n) => void say(`Undid ${n === 1 ? "that one" : `${n} changes`}.`).then(() => setBubble(null))} />}
       {sources && <SourcesCard r={sources} style={panelStyle} hover={hover} onClose={closeWriting} />}
+      {classes && <ClassesCard r={classes} style={panelStyle} hover={hover} onClose={closeWriting} />}
       {discussion && (
         <DiscussionCard
           key={discussion.draft.body.slice(0, 40)}

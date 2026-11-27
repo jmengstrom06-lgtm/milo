@@ -91,7 +91,7 @@ export function syllabusScore(t: { Title: string; Url: string; path?: string }):
 }
 const AI_WORDS = /\b(artificial intelligence|generative|chatgpt|gen ?ai|large language|\bai\b (tools?|use|policy)|use of ai|ai-generated)/i;
 
-async function readTopic(portal: string, t: { Title: string; Url: string }): Promise<{ text: string; pdf?: string; title: string; ext: string } | null> {
+export async function readTopic(portal: string, t: { Title: string; Url: string }): Promise<{ text: string; pdf?: string; title: string; ext: string } | null> {
   const ext = (t.Url.match(/\.(\w+)(?:\?|$)/)?.[1] ?? "").toLowerCase();
   const b64 = await fileBase64(portal, t.Url).catch(() => null);
   if (!b64) return null;

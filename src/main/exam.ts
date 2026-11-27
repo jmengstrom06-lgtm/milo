@@ -47,16 +47,18 @@ const EXAM_TOOL = {
   },
 };
 
-export async function makeExam(course: string, kind: string, extra: string, count = 10) {
+export async function makeExam(course: string, kind: string, extra: string, count = 10, from?: { material?: string; docs?: string[]; className?: string }) {
   const m = classMaterials(course);
-  const material = m.text || "(No saved notes for this class yet: use what a typical course with this name covers at this point in the semester, and say so in the topic.)";
+  const mine = [from?.material, m.text].filter(Boolean).join("\n\n").slice(0, 60000);
+  const material = mine || (from?.docs?.length ? "(the attached course files)" : "(No saved notes for this class yet: use what a typical course with this name covers at this point in the semester, and say so in the topic.)");
+  const docs = (from?.docs ?? []).slice(0, 2).map((d) => ({ type: "document", source: { type: "base64", media_type: "application/pdf", data: d } }));
   return callTool<QuizData>(
     {
       max_tokens: 6000,
       system: `${persona()}\nWrite a practice ${kind || "exam"} for a college student. Make it feel like the real thing: the same kinds of questions a professor would put on a ${kind || "exam"}, at real difficulty, not easy recall. Build it from the class material given. ${count} questions.`,
       tools: [EXAM_TOOL],
       tool_choice: { type: "auto" },
-      messages: [{ role: "user", content: `Class: ${m.className}\nWhat's coming up: ${extra || "(unknown)"}\n\nClass material:\n${material}` }],
+      messages: [{ role: "user", content: [...docs, { type: "text", text: `Class: ${from?.className || m.className}\nWhat's coming up: ${extra || "(unknown)"}\n\nClass material:\n${material}` }] }],
     },
     EXAM_TOOL.name
   );

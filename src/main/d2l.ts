@@ -587,3 +587,9 @@ export async function assignmentsFor(portal: string, c: Course): Promise<DAssign
 }
 /** The link to an assignment attachment (the prompt PDF / Word file). */
 export const assignmentFileUrl = (portal: string, ou: number, folderId: number, fileId: number) => `${originOf(portal)}/d2l/api/le/${LE}/${ou}/dropbox/folders/${folderId}/attachments/${fileId}`;
+
+/** Read-only GET of any D2L data address (Chrome's sign-in first, then Milo's). For classData.ts. */
+export const d2lGet = <T>(portal: string, path: string) => api<T>(portal, path);
+export const D2L_LE = LE;
+export const d2lOrigin = (portal: string) => origin ?? originOf(portal);
+export { strip as d2lStrip };

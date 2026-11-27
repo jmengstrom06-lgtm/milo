@@ -35,6 +35,7 @@ export type Intent =
   | { kind: "cite"; text: string } // "find 5 sources for my paper", "add a works cited": real sources into their doc
   | { kind: "cite_page"; text: string } // "cite this in APA": the page open in Chrome
   | { kind: "discussion"; text: string } // "do my discussion post for bio": drafted from the real D2L prompt
+  | { kind: "classes"; text: string } // "did I turn in the lab", "what did I get on exam 2": answered from real D2L data
   | { kind: "reading"; text: string } // "read this chapter": notes, flashcards and a quiz
   | { kind: "fill" } // type the lesson's answer into the blank
   | { kind: "yes" }
@@ -120,6 +121,18 @@ export const ASK_PAPER = /^(?:what(?:'s| is| are)|how (?:many|long|good)|is|does
 export const CITE_PAPER =
   /\b(?:find|get|add|give me|look up|search for)\b[^.]{0,20}\b(?:sources|citations|references|articles|scholarly|research)\b[^.]{0,25}\b(?:for|to|in|on|into)\s+(?:my|this|the)\s+(?:[a-z]+\s+){0,2}(?:paper|essay|doc|document|report|draft|project)\b|^(?:cite|add citations to|add in.?text citations to)\s+(?:my|this|the)\s+(?:paper|essay|doc|draft|report)\b|^(?:add|make)\s+(?:a |the |my )?(?:works cited|references|reference list|bibliography)(?: page| list)?\b/;
 export const CITE_PAGE = /^(?:cite|make (?:me )?a citation for|give me (?:a |the )?citation for)\s+(?:this|this page|this article|this website|this site|that)\b/;
+/** A question about their own class data (grades, scores, feedback, quizzes, discussions, turn-ins). Not
+ *  "what do I need on the final" (exact-math forecaster), not "what's due" (the brief), not a question to solve. */
+export const CLASSES_Q =
+  /^(?:(?:hey |ok |okay )?milo,?\s*)?(?:did|have|has|when|when's|whens|what|what's|whats|how|how's|which|any|am|is|are|was|were|tell me|can you (?:tell me|see|look up|check)|do i have)\b/;
+export const CLASSES_ABOUT = /\b(?:grades?|graded|scores?|scored|feedback|comments?|quiz(?:zes)?|exams?|midterms?|tests?|discussions?|posts?|posted|replied|repl(?:y|ies)|assignments?|dropbox|turn(?:ed)? (?:it )?in|submit(?:ted)?|missing|attempts?|time limit|professor|prof|passing|failing|doing|behind|worst|lowest|best class|highest)\b/;
+export const isClassesQ = (t: string) =>
+  CLASSES_Q.test(t) &&
+  CLASSES_ABOUT.test(t) &&
+  /\b(?:my|i|i'm|im|me|mine)\b/.test(t) &&
+  !/\bwhat (?:do|would|will|should) i need\b|\bneed (?:to get|on)\b/.test(t) && // forecaster
+  !/^(?:(?:hey |ok |okay )?milo,?\s*)?what(?:'s| is)? due\b|^what do i have due\b/.test(t) && // the brief
+  !/\b(?:answer|solve|question \d+|this (?:quiz|test|question|problem|page)|quiz me|study for|practice)\b/.test(t);
 export const DISCUSSION = /\b(?:discussion|disc)\s+(?:post|posts|board|response|reply|replies|question|forum|assignment)s?\b|\b(?:reply|respond)\s+to\s+(?:my |two |three |a )?(?:classmates?|peers|the discussion)\b/;
 export const READING =
   /^(?:can you |could you |please |help me )?(?:read|summarize|study|go through|take notes on|make (?:me )?(?:notes|flashcards|a quiz) (?:on|from|for)|break down|outline|quiz me on)\s+(?:this|the|my)\s+(?:chapter|reading|readings|article|pdf|textbook|text|section|document|file|book chapter|case study|lecture slides|slides)\b|^(?:read|summarize) (?:this|it)$/;
@@ -188,6 +201,7 @@ function parseSingle(raw: string, ctx: Ctx): Intent {
     if (EDIT_PAPER.test(t) && !/\b(write|start)\b/.test(t.split(" ")[0])) return { kind: "edit_paper", text };
     if (EDIT_PAPER_TALK.test(t) && !/\b(?:undo|revert|reverse|back (?:to )?how it was|put (?:it|my \w+|the \w+) back)\b/.test(t) && !/\b(write|draft|start|outline)\s+(?:me\s+)?(?:a|an)\s+(?:\d+|one|two|three|four|five|short|long|new)?\s*(?:page\s+|word\s+)?(?:paper|essay|report)\b/.test(t) && !/\b(?:sources?|citations?|works cited|references|bibliography)\b/.test(t)) return { kind: "edit_paper", text };
     if (ASK_PAPER.test(t) && !/\b(?:due|grade|graded|deadline|submit)\b/.test(t)) return { kind: "edit_paper", text };
+    if (isClassesQ(t)) return { kind: "classes", text };
     if (DISCUSSION.test(t)) return { kind: "discussion", text };
     if (READING.test(t)) return { kind: "reading", text };
   }

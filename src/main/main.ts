@@ -51,10 +51,13 @@ import { feedUrl } from "./school";
 import { checkMath, isQuantitative, type MathVerdict } from "./mathcheck";
 import { askForecast, setFinalWeight } from "./grades";
 import { addScore, gradeNow, readSyllabus } from "./gradebook";
-import { calendarFeedUrl, subscribePageUrl, d2lCheck, keepSignedIn, courses as d2lCourses, dueSoon as d2lDue, gradeSheet as d2lSheet, matchCourse as d2lMatch, links as d2lLinks, SignInNeeded, courses, matchCourse, discussionTopics, topicPosts, myUserId, postToTopic, deletePost, topicUrl, fileBase64, type Course, type DTopic, type DPost } from "./d2l";
+import { d2lOrigin, calendarFeedUrl, subscribePageUrl, d2lCheck, keepSignedIn, courses as d2lCourses, dueSoon as d2lDue, gradeSheet as d2lSheet, matchCourse as d2lMatch, links as d2lLinks, SignInNeeded, courses, matchCourse, discussionTopics, topicPosts, myUserId, postToTopic, deletePost, topicUrl, fileBase64, type Course, type DTopic, type DPost } from "./d2l";
 import { editPaper, undoEdits, citePaper, removeBlock } from "./writing";
 import { docIdFrom } from "./docEdit";
-import { draftDiscussion, pickTopic, requirementsOf, toHtml, type Draft } from "./discussions";
+import { discussionPlan, draftDiscussion, pickTopic, requirementsOf, toHtml, type DiscPlan, type Draft } from "./discussions";
+import { forgetClasses, readClasses } from "./classData";
+import { answerClasses } from "./classesAsk";
+import { prepQuiz } from "./quizPrep";
 import { readThis, textOf } from "./reading";
 import { citeLine, styleOf } from "./citations";
 import { callTool } from "./brain";
@@ -830,7 +833,7 @@ ipcMain.handle("milo:cite-page", async (_e, ask: string) => {
 });
 
 // Discussion posts: drafted from the real prompt + classmates' posts, posted only on yes.
-type DiscCtx = { portal: string; course: Course; topic: DTopic; posts: DPost[]; me: number | null; voice: string[] };
+type DiscCtx = { portal: string; course: Course; topic: DTopic; posts: DPost[]; me: number | null; voice: string[]; plan: DiscPlan };
 let disc: DiscCtx | null = null;
 ipcMain.handle("milo:discussion-draft", async (_e, q: { portal: string; ask: string; change?: string; previous?: Draft; name?: string }) => {
   const portal = String(q?.portal ?? "");
@@ -862,16 +865,24 @@ ipcMain.handle("milo:discussion-draft", async (_e, q: { portal: string; ask: str
       if (!topic) return { ok: false, text: `I don't see an open discussion in ${course.short} right now.` };
       toOverlay("milo:writing-live", { stage: "reading", text: `Reading “${topic.name}” and your classmates' posts…` });
       const posts = await topicPosts(portal, course, topic).catch(() => [] as DPost[]);
-      disc = { portal, course, topic, posts, me, voice };
+      const plan = discussionPlan(String(q.ask ?? ""), topic.prompt, posts, me);
+      bb("discussion", "plan", { course: course.short, topic: topic.name.slice(0, 60), mode: plan.mode, replies: plan.replies, target: !!plan.target, named: !!plan.named, posted: plan.posted, repliedTo: plan.repliedTo.length });
+      if (plan.named && !plan.target) {
+        const names = [...new Set(posts.filter((p) => p.userId !== me && !p.parentId).map((p) => p.who.split(" ")[0]))].slice(0, 6);
+        return { ok: false, text: `I don't see a post from ${plan.named} in “${topic.name}”.${names.length ? ` People who posted: ${names.join(", ")}.` : " Nobody else has posted yet."}` };
+      }
+      if (plan.mode === "done") return { ok: false, done: true, text: `You're already done with “${topic.name}” in ${course.short}: you posted${plan.repliedTo.length ? ` and replied ${plan.repliedTo.length} time${plan.repliedTo.length > 1 ? "s" : ""}` : ""}${requirementsOf(topic.prompt).replies ? `, and it asks for ${requirementsOf(topic.prompt).replies}` : ""}.` };
+      if (plan.mode === "replies" && !posts.some((p) => p.userId !== me && !p.parentId && !plan.repliedTo.includes(p.id))) return { ok: false, text: `Nobody else has posted in “${topic.name}” yet${plan.repliedTo.length ? " that you haven't already replied to" : ""}, so there's nothing to reply to. Check back later.` };
+      disc = { portal, course, topic, posts, me, voice, plan };
     }
     const d = disc!;
     toOverlay("milo:writing-live", { stage: "writing", text: q.change ? "Rewriting it…" : "Writing your post…" });
-    const r = await draftDiscussion({ course: d.course.name, topic: d.topic, posts: d.posts, me: d.me, voice: d.voice, ask: String(q.ask ?? ""), name: q.name, change: q.change, previous: q.previous });
+    const r = await draftDiscussion({ course: d.course.name, topic: d.topic, posts: d.posts, me: d.me, voice: d.voice, ask: String(q.ask ?? ""), name: q.name, change: q.change, previous: q.previous, plan: d.plan });
     if ("error" in r) return { ok: false, text: "I couldn't write that one. Try again." };
-    const req = requirementsOf(d.topic.prompt);
-    const already = d.me ? d.posts.some((p) => p.userId === d.me && !p.parentId) : false;
+    const req = { ...requirementsOf(d.topic.prompt), replies: d.plan.replies, ...(d.plan.mode === "replies" ? { minWords: 0 } : {}) };
+    const already = d.plan.posted;
     track("discussion_draft", { replies: r.replies.length, words: r.body.split(/\s+/).length, minWords: req.minWords, voice: d.voice.length, change: !!q.change });
-    return { ok: true, draft: r, course: d.course.short, topic: d.topic.name, prompt: d.topic.prompt.slice(0, 600), due: d.topic.due ?? d.topic.end, req, already, url: topicUrl(d.portal, d.course.id, d.topic.topicId), voice: d.voice.length > 0 };
+    return { ok: true, draft: r, course: d.course.short, topic: d.topic.name, prompt: d.topic.prompt.slice(0, 600), due: d.topic.due ?? d.topic.end, req, already, repliesOnly: d.plan.mode === "replies", url: topicUrl(d.portal, d.course.id, d.topic.topicId), voice: d.voice.length > 0 };
   } catch (e) {
     if (e instanceof SignInNeeded) return { ok: false, signin: true, text: "Your D2L sign-in ran out. Sign in to D2L in Chrome and ask me again." };
     return { ok: false, text: "I couldn't open the discussion. Try again." };
@@ -881,28 +892,47 @@ ipcMain.handle("milo:discussion-post", async (_e, q: { subject: string; body: st
   const d = disc;
   if (!d) return { ok: false, text: "Ask me to draft it again first." };
   const posted: number[] = [];
-  const main = await postToTopic(d.portal, d.course.id, d.topic, { subject: String(q.subject), html: toHtml(String(q.body)) });
-  if (!main) {
-    // couldn't post from here: open the topic in Chrome with the post ready to paste
-    clipboard.writeText(String(q.body));
+  const body = String(q.body ?? "").trim();
+  const replies = (q.replies ?? []).filter((x) => String(x.body ?? "").trim()).slice(0, 5);
+  if (!body && !replies.length) return { ok: false, text: "There's nothing written to post yet." };
+  const handOff = (text: string) => {
+    // couldn't post from here: open the topic in Chrome with the text ready to paste
+    clipboard.writeText(text);
     void ext("new_tab", { url: topicUrl(d.portal, d.course.id, d.topic.topicId) }, 15000).catch(() => shell.openExternal(topicUrl(d.portal, d.course.id, d.topic.topicId)));
-    return { ok: false, pasted: true, text: "I opened the discussion and copied your post. Click “Start a new thread”, paste it (⌘V) and post." };
+  };
+  if (body) {
+    const main = await postToTopic(d.portal, d.course.id, d.topic, { subject: String(q.subject), html: toHtml(body) });
+    if (!main) {
+      handOff(body);
+      return { ok: false, pasted: true, text: "I opened the discussion and copied your post. Click “Start a new thread”, paste it (⌘V) and post." };
+    }
+    posted.push(main.postId);
   }
-  posted.push(main.postId);
-  for (const rp of (q.replies ?? []).slice(0, 5)) {
-    const r = await postToTopic(d.portal, d.course.id, d.topic, { subject: `RE: ${String(q.subject).slice(0, 140)}`, html: toHtml(rp.body), parentId: rp.parentId });
+  const failed: string[] = [];
+  for (const rp of replies) {
+    const r = await postToTopic(d.portal, d.course.id, d.topic, { subject: `RE: ${String(q.subject || d.topic.name).slice(0, 140)}`, html: toHtml(rp.body), parentId: rp.parentId });
     if (r) posted.push(r.postId);
+    else failed.push(rp.to);
   }
+  if (!posted.length) {
+    handOff(replies.map((x) => `Reply to ${x.to}:\n${x.body}`).join("\n\n"));
+    return { ok: false, pasted: true, text: "I opened the discussion and copied your replies. Click Reply under each classmate's post and paste." };
+  }
+  // check it really landed: read the topic back and find each post
+  forgetClasses();
+  const back = await topicPosts(d.portal, d.course, d.topic).catch(() => null);
+  const seen = back ? posted.filter((id) => back.some((p) => p.id === id)).length : -1;
+  bb("discussion", "verify", { posted: posted.length, seen, failed: failed.length });
   did({
     kind: "web",
     title: `Posted in ${d.course.short}: “${d.topic.name}”${posted.length > 1 ? ` + ${posted.length - 1} repl${posted.length > 2 ? "ies" : "y"}` : ""}`,
     detail: String(q.body).slice(0, 400),
     link: topicUrl(d.portal, d.course.id, d.topic.topicId),
     undo: { type: "discussion_delete", data: { portal: d.portal, ou: d.course.id, forumId: d.topic.forumId, topicId: d.topic.topicId, ids: posted } },
-    proof: { level: "confirmed", how: `D2L saved ${posted.length} post${posted.length > 1 ? "s" : ""} and gave each an ID.` },
+    proof: seen === posted.length ? { level: "confirmed", how: `Read the topic back from D2L: all ${posted.length} post${posted.length > 1 ? "s are" : " is"} there.` } : { level: "checked", how: `D2L saved ${posted.length} post${posted.length > 1 ? "s" : ""}${seen >= 0 ? `, ${seen} showed up when I read it back` : ""}.` },
   });
-  track("discussion_post", { posts: posted.length });
-  return { ok: true, posted: posted.length, url: topicUrl(d.portal, d.course.id, d.topic.topicId) };
+  track("discussion_post", { posts: posted.length, verified: seen === posted.length });
+  return { ok: true, posted: posted.length, verified: seen === posted.length, failed, url: topicUrl(d.portal, d.course.id, d.topic.topicId) };
 });
 activity.onUndo("discussion_delete", async (d) => {
   for (const id of (d.ids as number[]) ?? []) await deletePost(String(d.portal), Number(d.ou), { forumId: Number(d.forumId), topicId: Number(d.topicId) }, Number(id));
@@ -1090,12 +1120,78 @@ async function fetchFeed(url: string) {
 }
 ipcMain.handle("milo:feed-fetch", (_e, url: string) => fetchFeed(String(url ?? "")));
 // Grade forecaster: "what do I need on the final for a B in stats?"
-ipcMain.handle("milo:forecast", (_e, q: { course: string; letter: string; exam?: string; portal?: string; fresh?: boolean }) =>
-  askForecast(q, {
-    doTask: (t) => doTask(t),
-    pageText: async () => (bridgeConnected() ? ((await ext("snapshot", {}, 8000).catch(() => null)) as { text?: string } | null)?.text ?? null : null),
-  })
-);
+const forecastDeps = {
+  doTask: (t: string) => doTask(t),
+  pageText: async () => (bridgeConnected() ? ((await ext("snapshot", {}, 8000).catch(() => null)) as { text?: string } | null)?.text ?? null : null),
+};
+ipcMain.handle("milo:forecast", (_e, q: { course: string; letter: string; exam?: string; portal?: string; fresh?: boolean }) => askForecast(q, forecastDeps));
+
+// "Ask anything about my classes": one answer over the real D2L data (grades, feedback, quizzes, discussions,
+// assignments), then whatever it needs doing: the exact "what do I need" math, or opening the page.
+const openInChrome = (url: string) => void ext("new_tab", { url }, 15000).catch(() => shell.openExternal(url));
+ipcMain.handle("milo:classes-ask", async (_e, q: { ask: string; portal: string; fresh?: boolean }) => {
+  const portal = String(q?.portal ?? "");
+  const ask = String(q?.ask ?? "").trim();
+  if (!portal) return { ok: false, text: "Connect your school's D2L first, then ask me about your classes." };
+  const t0 = Date.now();
+  try {
+    let snap = await readClasses(portal, ask, { fresh: !!q.fresh });
+    let r = await answerClasses(ask, snap);
+    if (r.ok && r.data.needMore && !snap.all) {
+      snap = await readClasses(portal, "all classes", {});
+      r = await answerClasses(ask, snap);
+    }
+    if (!r.ok) return { ok: false, text: r.text || "I couldn't read that. Try again." };
+    const a = r.data;
+    const list = snap.classes.map((c) => c.course);
+    const named = "course" in a.action ? a.action.course : a.course;
+    const course = (named && matchCourse(named, list)) || (a.course && matchCourse(a.course, list)) || (list.length === 1 ? list[0] : null);
+    let answer = a.answer;
+    let url: string | undefined;
+    if (a.action.kind === "forecast") {
+      const f = await askForecast({ course: course?.short ?? a.action.course, letter: a.action.letter, exam: a.action.exam, portal }, forecastDeps);
+      answer = f.text;
+    } else if (a.action.kind === "open") {
+      if (course) {
+        url = d2lLinks(d2lOrigin(portal), course.id)[a.action.page];
+        openInChrome(url);
+      } else answer = `${answer} Which class should I open?`.trim();
+    }
+    bb("classes", "answer", { ms: Date.now() - t0, classes: snap.classes.length, all: snap.all, action: a.action.kind, rows: a.rows.length, course: course?.short ?? null });
+    track("classes_ask", { action: a.action.kind, all: snap.all, ms: Date.now() - t0 });
+    return { ok: true, answer, rows: a.rows, course: course?.short ?? a.course, action: a.action, url };
+  } catch (e) {
+    if (e instanceof SignInNeeded) return { ok: false, signin: true, text: "Your D2L sign-in ran out. Sign in to D2L in Chrome and ask me again." };
+    bb("classes", "failed", { error: (e as Error).message.slice(0, 120) });
+    return { ok: false, text: "I couldn't reach D2L just now. Try again in a second." };
+  }
+});
+// "Help me study for my bio quiz": a practice quiz from the files that quiz covers (the real one is never touched)
+ipcMain.handle("milo:quiz-prep", async (_e, q: { portal: string; course?: string; quiz?: string }) => {
+  const portal = String(q?.portal ?? "");
+  if (!portal) return { ok: false, text: "Connect your school's D2L first." };
+  try {
+    const want = `${q.course ?? ""} ${q.quiz ?? ""}`.trim();
+    const snap = await readClasses(portal, want || "all classes");
+    const now = Date.now();
+    const upcoming = snap.classes.flatMap((c) => c.quizzes.filter((x) => Date.parse(x.due ?? x.end ?? "") > now).map((x) => ({ c, x }))).sort((a, b) => Date.parse(a.x.due ?? a.x.end!) - Date.parse(b.x.due ?? b.x.end!));
+    const words = String(q.quiz ?? "").toLowerCase().split(/\s+/).filter((w) => w.length > 1 && !/^(quiz|the|my|next|for|in)$/.test(w));
+    const inClass = (c: { course: Course }) => !q.course || matchCourse(String(q.course), [c.course]);
+    const byName = words.length ? snap.classes.filter(inClass).flatMap((c) => c.quizzes.map((x) => ({ c, x }))).find(({ x }) => words.every((w) => x.name.toLowerCase().includes(w))) : null;
+    const hit = byName ?? upcoming.find(({ c }) => inClass(c)) ?? null;
+    const course = hit?.c.course ?? (q.course ? matchCourse(String(q.course), snap.classes.map((c) => c.course)) : null);
+    if (!course) return { ok: false, text: q.course ? `I couldn't find ${q.course} in D2L.` : "Which class is the quiz for?" };
+    const quiz = hit?.x ?? (q.quiz ? { name: String(q.quiz), about: "", minutes: null, due: null } : null);
+    const { r, used } = await prepQuiz(portal, course, quiz, () => {});
+    if (!r.ok) return { ok: false, text: r.text };
+    const questions = (r.data.questions ?? []).filter((x) => x?.q && Array.isArray(x.choices) && x.choices.length === 4);
+    track("quiz_prep", { files: used.length, questions: questions.length, found: !!hit });
+    return { ok: true, topic: r.data.topic, questions, course: course.short, quiz: quiz?.name ?? "", used };
+  } catch (e) {
+    if (e instanceof SignInNeeded) return { ok: false, signin: true, text: "Your D2L sign-in ran out. Sign in to D2L in Chrome and ask me again." };
+    return { ok: false, text: "I couldn't reach D2L just now. Try again in a second." };
+  }
+});
 ipcMain.handle("milo:final-weight", (_e, course: string, weight: number) => setFinalWeight(String(course), Number(weight)));
 // Milo's own gradebook (for classes where D2L doesn't post grades)
 ipcMain.handle("milo:grade-score", (_e, q: { course: string; name: string; earned: number; possible?: number }) => addScore(String(q.course), String(q.name), Number(q.earned), Number(q.possible) || 100));

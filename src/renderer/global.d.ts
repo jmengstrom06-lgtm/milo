@@ -27,9 +27,11 @@ declare global {
     | { ok: false; text: string; connect?: boolean; docs?: { id: string; title: string }[] };
   type MiloSource = { kind: "article" | "web"; title: string; authors: string[]; year?: number; date?: string; container?: string; site?: string; url: string; why: string };
   type MiloCiteResult = { ok: true; style: "MLA" | "APA"; sources: MiloSource[]; placed: number; addedList: boolean; applied: MiloEdit[]; docId: string } | { ok: false; text: string; connect?: boolean };
+  type MiloClassAction = { kind: "none" } | { kind: "forecast"; course: string; letter: string; exam: string } | { kind: "open"; course: string; page: string } | { kind: "discussion"; course: string; topic: string } | { kind: "quiz_prep"; course: string; quiz: string };
+  type MiloClassesResult = { ok: true; answer: string; rows: { label: string; value: string; note?: string }[]; course: string; action: MiloClassAction; url?: string } | { ok: false; text: string; signin?: boolean };
   type MiloDraft = { subject: string; body: string; replies: { parentId: number; to: string; excerpt: string; body: string }[]; checklist: string[] };
   type MiloDraftResult =
-    | { ok: true; draft: MiloDraft; course: string; topic: string; prompt: string; due: string | null; req: { minWords: number; replies: number }; already: boolean; url: string; voice: boolean }
+    | { ok: true; draft: MiloDraft; course: string; topic: string; prompt: string; due: string | null; req: { minWords: number; replies: number }; already: boolean; repliesOnly?: boolean; url: string; voice: boolean }
     | { ok: false; text: string; signin?: boolean };
   type MiloReadResult =
     | { ok: true; title: string; course: string; noteId: string; studyId: string | null; pages: number; terms: number; cards: number; alerts: number; quiz: { q: string; choices: string[]; correct: number; why: string }[]; summary: string }
@@ -71,7 +73,7 @@ declare global {
     box?: MiloBox | null;
   };
   type MiloRoute = {
-    kind: "chat" | "look" | "task" | "research" | "move" | "close" | "open_result" | "screen_question" | "kit" | "in_app" | "kit_menu" | "hold" | "drop" | "sweep" | "build" | "quiz" | "brief" | "watch" | "checkwork" | "lockin" | "ask" | "edit_paper" | "cite" | "discussion" | "reading" | "undo";
+    kind: "chat" | "look" | "task" | "research" | "move" | "close" | "open_result" | "screen_question" | "kit" | "in_app" | "kit_menu" | "hold" | "drop" | "sweep" | "build" | "quiz" | "brief" | "watch" | "checkwork" | "lockin" | "ask" | "edit_paper" | "cite" | "discussion" | "reading" | "undo" | "classes";
     choices?: { label: string; say: string }[];
     minutes?: number;
     mode?: MiloMode;
@@ -276,7 +278,7 @@ declare global {
       paperCite: (ask: string) => Promise<MiloCiteResult>;
       citePage: (ask: string) => Promise<{ ok: true; line: string; style: "MLA" | "APA" } | { ok: false; text: string }>;
       discussionDraft: (q: { portal: string; ask: string; change?: string; previous?: MiloDraft; name?: string }) => Promise<MiloDraftResult>;
-      discussionPost: (q: { subject: string; body: string; replies: { parentId: number; to: string; body: string }[] }) => Promise<{ ok: boolean; posted?: number; url?: string; pasted?: boolean; text?: string }>;
+      discussionPost: (q: { subject: string; body: string; replies: { parentId: number; to: string; body: string }[] }) => Promise<{ ok: boolean; posted?: number; url?: string; pasted?: boolean; text?: string; verified?: boolean; failed?: string[] }>;
       readThis: (q: { path?: string; ask: string; portal?: string }) => Promise<MiloReadResult>;
       onWritingLive: (fn: (p: { stage: string; text: string; i?: number; n?: number }) => void) => () => void;
       onPaperProgress: (fn: (p: { stage: string; text: string; url?: string; step?: number; of?: number }) => void) => () => void;
@@ -285,6 +287,8 @@ declare global {
       d2lDue: (portal: string) => Promise<{ ok: true; items: { title: string; course: string; due: string; due_iso?: string; kind?: string }[] } | { ok: false; signin: boolean; text: string }>;
       syllabus: (course: string) => Promise<{ ok: boolean; text: string }>;
       exam: (q: { course: string; kind?: string; extra?: string }) => Promise<{ ok: true; topic: string; questions: { q: string; choices: string[]; correct: number; explain: string }[] } | { ok: false; text: string }>;
+      classesAsk: (q: { ask: string; portal: string; fresh?: boolean }) => Promise<MiloClassesResult>;
+      quizPrep: (q: { portal: string; course?: string; quiz?: string }) => Promise<{ ok: true; topic: string; questions: { q: string; choices: string[]; correct: number; explain: string }[]; course: string; quiz: string; used: string[] } | { ok: false; text: string; signin?: boolean }>;
       google: {
         status: () => Promise<{ ready: boolean; connected: boolean; email: string | null }>;
         connect: () => Promise<{ ok: boolean; text: string }>;
