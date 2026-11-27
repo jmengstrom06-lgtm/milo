@@ -18,6 +18,7 @@ import { parseAnswer, parseGoogle, parseGoogleMulti, parseRemember, spokenEmail 
 import { fastDecide, looksLikeBackground, parseExam, parseFinalWeight, parseForecast, parseGradeNow, parseScore, parseSyllabus, parseHomework, parsePlanVoice, parseRadar, stripFiller, firstOffer, parseOfferAnswer, type DecideState } from "./decide";
 import { alertLine, dedupe, emptyRadar, markWarned, mergeScan, pendingAlerts, upcoming, whenText, type Radar, type RadarItem, type ScanItem, type Warn } from "./radar";
 import RadarCard, { type RadarView } from "./RadarCard";
+import { fitBubble, rectOf, type Rect } from "./bubbleFit";
 import { backNudge, weekNudge, type Nudge } from "./nudges";
 import { checkupLine, type CheckItem } from "../main/checkup";
 import { sweepCore, sweepSummary } from "../main/sweepCore";
@@ -4396,6 +4397,18 @@ export default function App() {
       const L = ringLayout({ x: pos.x + MILO_W / 2, y: pos.y + MILO_H / 2 }, W, H);
       return bubbleNearRing(L, { x: pos.x, y: pos.y, w: MILO_W, h: MILO_H }, W, H, short(bubble ?? heard ?? live ?? "…"));
     }
+    // A card is open beside him (radar, game plan, research, writing): the bubble goes where it hides none of it.
+    const cards: Rect[] = [];
+    const addCard = (st: React.CSSProperties, h: number) => {
+      const r = rectOf(st, W, H, h);
+      if (r) cards.push(r);
+    };
+    if (!working) {
+      if (radarView) addCard(rdStyle, Math.min(H - 32, 150 + Math.max(1, radarView.rows.length) * 64));
+      if (gp && !gpMini) addCard(gpStyle, Math.min(H - 32, 190 + (gp.plan.steps.length ?? 4) * 46));
+      if (researchQ || paper || edits || sources || discussion || classes) addCard(rpStyle, H);
+    }
+    if (cards.length) return fitBubble({ x: pos.x, y: pos.y, w: MILO_W, h: MILO_H }, cards, short(bubble ?? heard ?? live ?? "…"), W, H, MARGIN, maxW);
     if (pos.y > 170) {
       return { left: clamp(pos.x + MILO_W / 2 - maxW / 2, MARGIN, W - maxW - MARGIN), bottom: H - pos.y + 4, maxWidth: maxW };
     }
