@@ -67,9 +67,9 @@ export async function answerClasses(ask: string, snap: Snapshot, now = Date.now(
     {
       model: models.smart(),
       max_tokens: 1500,
-      system: `${persona()}\n${RULES}${snap.all ? "" : `\nOnly ${snap.classes.map((c) => c.course.short).join(", ")} was read. If the question is about a different class (or needs all of them), set need_more.`}`,
+      system: `${persona()}\n${RULES}\nAlways answer by calling classes_answer.${snap.all ? "" : `\nOnly ${snap.classes.map((c) => c.course.short).join(", ")} was read. If the question is about a different class (or needs all of them), set need_more.`}`,
       tools: [TOOL],
-      tool_choice: { type: "tool", name: TOOL.name },
+      tool_choice: { type: "auto" },
       messages: [{ role: "user", content: `D2L data:\n${snapshotText(snap, now)}\n\nThe student asked: "${ask}"` }],
     },
     TOOL.name
