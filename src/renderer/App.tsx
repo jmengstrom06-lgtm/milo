@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Milo, { Character, CHARACTERS, Mood } from "./Milo";
 import Notebook, { NotebookHandle } from "./Notebook";
 import { Ears, EarState } from "./ears";
-import { Intent, isBareGo, parse, soundsUnfinished, stripGo, stripWake, FILL_IN, SHOW_ONLY } from "./commands";
+import { splitPasted, WRITING_WORK, WRITING_VERB, Intent, isBareGo, parse, soundsUnfinished, stripGo, stripWake, FILL_IN, SHOW_ONLY } from "./commands";
 import { Bubble, Confetti, Highlight } from "./Effects";
 import * as tts from "./voice";
 import ResearchPanel, { PanelSize } from "./ResearchPanel";
@@ -24,6 +24,7 @@ import { sweepCore, sweepSummary } from "../main/sweepCore";
 import { CLEAR_AREA, isSure, LOCKIN_START, PICK_AREA, pickSpoken } from "./exact";
 import AreaPicker, { AreaFlash } from "./AreaPicker";
 import { DiscussionCard, EditsCard, SourcesCard } from "./WritingCards";
+import { PaperPanel, type PaperState } from "./PaperPanel";
 import Onboarding, { setupDone } from "./Onboarding";
 import ActivityPanel from "./ActivityPanel";
 import FeedbackPanel from "./FeedbackPanel";
@@ -155,6 +156,10 @@ export default function App() {
   const [chatMore, setChatMore] = useState(false);
   // writing help on their own work: the cards Milo shows after editing, citing, or drafting a discussion post
   const [edits, setEdits] = useState<Extract<MiloEditResult, { ok: true }> | null>(null);
+  const [paper, setPaper] = useState<PaperState | null>(null);
+  const paperRef = useRef<PaperState | null>(null);
+  paperRef.current = paper;
+  const [paperOff, setPaperOff] = useState<Set<number>>(new Set());
   const [sources, setSources] = useState<Extract<MiloCiteResult, { ok: true }> | null>(null);
   const [discussion, setDiscussion] = useState<Extract<MiloDraftResult, { ok: true }> | null>(null);
   const [writingBusy, setWritingBusy] = useState(false);
@@ -998,6 +1003,12 @@ export default function App() {
   );
   /** Do a computer task: a long, multi-part one becomes a job (planned, checked, finished); a quick one just runs. */
   const work = async (task: string, spoken: boolean) => {
+    // writing on a document is the doc agent's job, never screen clicks
+    const low = task.toLowerCase();
+    if (WRITING_WORK.test(low) && WRITING_VERB.test(low) && !/\b(open|go to|close|share|download|print|email|send|submit|upload|rename)\b/.test(low.split(/[.!?]/)[0])) {
+      bb("route_instant", { text: task.slice(0, 160), kind: "writing_not_screen" });
+      return void startEdit(task);
+    }
     if (!(await window.milo.jobIs(task).catch(() => false))) return runTask(task, spoken);
     bb("route_job", { task: task.slice(0, 200) });
     hush();
@@ -1247,7 +1258,18 @@ export default function App() {
     () =>
       window.milo.onWritingLive((p) => {
         if (!writingOn.current) return;
+        if (paperRef.current?.phase === "reading") setPaper((x) => (x && x.phase === "reading" ? { ...x, status: p.text } : x));
         setBubble(p.n ? `${p.i}/${p.n} · ${p.text}` : p.text);
+      }),
+    []
+  );
+  // the paper panel opens the moment the paper is read (the changes arrive a few seconds later)
+  useEffect(
+    () =>
+      window.milo.onPaperOpen((p) => {
+        if (!writingOn.current) return;
+        setPaperOff(new Set());
+        setPaper({ phase: "reading", title: p.title, rows: p.rows, source: p.source === "text" ? "text" : "gdoc", status: "Reading your paper…" });
       }),
     []
   );
@@ -1271,37 +1293,90 @@ export default function App() {
     setWritingBusy(false);
   };
   const editAsk = useRef("");
-  const startEdit = async (text: string, docId?: string) => {
-    if (!docId && (await heldBack("write", text))) return;
+  /** Any paper work: an open Google Doc, pasted text, or a file. The paper panel shows the result; nothing is
+   *  written until they accept. */
+  const paperRun = useRef(0);
+  const runPaper = async (get: () => Promise<MiloPaperResult>, onPick?: (docs: { id: string; title: string }[]) => void) => {
     writingStart("Opening your paper…");
-    const r = await window.milo.paperEdit(text, docId).catch(() => ({ ok: false as const, text: "Something went wrong. Try again." }));
+    const run = ++paperRun.current;
+    const r = await get().catch(() => ({ ok: false as const, text: "Something went wrong. Try again." }));
     writingEnd();
+    if (run !== paperRun.current) return; // they closed it (or asked again) while he was working
     if (!r.ok) {
+      setPaper(null);
       setMood("idle");
-      if ("docs" in r && r.docs?.length) {
-        // several docs open: one tap picks it
-        editAsk.current = text;
-        setOffer({ seen: "Which paper?", options: r.docs.map((d) => ({ label: d.title.slice(0, 40) || "Untitled doc", say: `__editdoc:${d.id}` })) });
-      }
+      if ("docs" in r && r.docs?.length) onPick?.(r.docs);
       await say(r.text);
       return setBubble(null);
     }
-    if (!r.applied.length) {
-      // a question about the doc (or nothing it could do): just say it
+    if (!r.view) {
+      // a question about the paper (or nothing to change): just say it
+      setPaper(null);
       setMood("idle");
       await say([r.answer || r.summary, r.cant ? `I can't do this part here: ${r.cant}` : ""].filter(Boolean).join(" "));
       return setBubble(null);
     }
+    const v = r.view;
+    setPaperOff(new Set());
+    setPaper({ phase: "review", title: v.title, source: v.source, rows: v.rows, view: v });
     setBubble(null);
     setMood("happy");
     sfx.success();
-    setEdits(r);
-    const gist = (r.summary || "Done.").split(/(?<=[.!?])\s+/)[0]; // one sentence out loud; the card has every change
-    const d = r.wordsAfter - r.wordsBefore;
-    const left = r.missing ? ` I couldn't finish everything: ${r.missing}.` : r.cant ? ` One part I can't do here: ${r.cant}.` : "";
-    await say(`${gist}${left} ${r.applied.length} change${r.applied.length === 1 ? "" : "s"}${d && Math.abs(d) >= 10 ? `, ${Math.abs(d)} words ${d < 0 ? "shorter" : "longer"}` : ""}. Tap any one to see it or undo it.`);
+    const gist = (v.summary || "Done.").split(/(?<=[.!?])\s+/)[0];
+    const left = v.missing ? ` I couldn't finish everything: ${v.missing}.` : v.cant ? ` One part I can't do here: ${v.cant}.` : "";
+    const next = v.source === "gdoc" ? "Say accept, or tap any change to keep your original." : "Tap any change to keep your original, then save it as a Google Doc or a Word file.";
+    await say(`${gist}${left} ${next}`);
     setBubble(null);
   };
+  const startEdit = async (text: string, docId?: string) => {
+    if (!docId && (await heldBack("write", text))) return;
+    // a whole paper pasted in (Home base, or the chat): work on that text
+    const pasted = splitPasted(text);
+    if (pasted) return void runPaper(() => window.milo.paperEditText(pasted.ask, pasted.body, pasted.title));
+    return void runPaper(
+      () => window.milo.paperEdit(text, docId),
+      (docs) => {
+        editAsk.current = text;
+        setOffer({ seen: "Which paper?", options: docs.map((d) => ({ label: d.title.slice(0, 40) || "Untitled doc", say: `__editdoc:${d.id}` })) });
+      }
+    );
+  };
+  const startEditFile = (file: string, ask = "edit my paper") => void runPaper(() => window.milo.paperEditFile(file, ask));
+  const paperAccept = async () => {
+    const pp = paperRef.current;
+    if (!pp?.view || pp.phase !== "review") return;
+    if (pp.source === "text") return void paperExport("google");
+    setPaper({ ...pp, phase: "saving" });
+    const r = await window.milo.paperApply(pp.view.id, [...paperOff]).catch(() => ({ ok: false as const, text: "Google wouldn't take the changes. Try again." }));
+    if (!r.ok) {
+      setPaper({ ...pp, phase: "review" });
+      await say(r.text);
+      return setBubble(null);
+    }
+    setPaper(null);
+    sfx.success();
+    setMood("celebrating");
+    await say(`Done. ${r.n} change${r.n === 1 ? " is" : "s are"} in your doc${r.missed ? ` (${r.missed} spot${r.missed === 1 ? "" : "s"} had changed, so I left ${r.missed === 1 ? "it" : "them"})` : ""}. Say undo to take it all back.`);
+    setBubble(null);
+  };
+  const paperExport = async (to: "google" | "word" | "copy") => {
+    const pp = paperRef.current;
+    if (!pp?.view) return;
+    setPaper({ ...pp, phase: "saving" });
+    const r = await window.milo.paperExport(pp.view.id, [...paperOff], to).catch(() => ({ ok: false, text: "I couldn't save it. Try again." }));
+    if (r.ok) setPaper(null);
+    else setPaper({ ...pp, phase: "review" });
+    if (r.ok) sfx.success();
+    await say(r.text);
+    setBubble(null);
+  };
+  const paperToggle = (groups: number[]) =>
+    setPaperOff((cur) => {
+      const n = new Set(cur);
+      const allOff = groups.every((g) => n.has(g));
+      for (const g of groups) allOff ? n.delete(g) : n.add(g);
+      return n;
+    });
   const startCite = async (text: string) => {
     writingStart("Reading your paper…");
     const r = await window.milo.paperCite(text).catch(() => ({ ok: false as const, text: "Something went wrong. Try again." }));
@@ -1525,6 +1600,13 @@ export default function App() {
       if (p) void startReading(o.say === "__readfile_quiz" ? "make notes and a quiz" : "make notes", p);
       return;
     }
+    if (o.say === "__editfile") {
+      chipsRef.current = null;
+      setOffer(null);
+      const p = droppedPath.current;
+      if (p) startEditFile(p);
+      return;
+    }
     if (o.say === "__openfile") {
       chipsRef.current = null;
       setOffer(null);
@@ -1558,11 +1640,12 @@ export default function App() {
       setOffer({
         seen: file.name,
         options: [
+          ...(/\.(docx?|rtf|odt|txt|md)$/i.test(file.name) ? [{ label: "Edit this paper", say: "__editfile" }] : []),
           { label: "Notes + quiz", say: "__readfile_quiz" },
           { label: "Explain it", say: "__openfile" },
         ],
       });
-      say("Want notes and a quiz from this, or should I open it and explain it?").then(() => setBubble(null));
+      say(/\.(docx?|rtf|odt|txt|md)$/i.test(file.name) ? "Want me to edit it, make notes and a quiz, or explain it? You can also just tell me what to do with it." : "Want notes and a quiz from this, or should I open it and explain it?").then(() => setBubble(null));
       return;
     }
     if (file) {
@@ -2720,6 +2803,21 @@ export default function App() {
     // Filler ("uh", "cool", "okay") never decides anything. Curly quotes from speech-to-text become plain ones.
     const text = stripFiller(raw.replace(/[’‘]/g, "'").replace(/[“”]/g, '"'));
     lastAsk.current = text;
+    // the paper panel is waiting: "accept" / "keep it" writes it, "cancel" closes it
+    if (paperRef.current?.phase === "review") {
+      const a = text.trim().toLowerCase().replace(/^(?:hey |ok |okay )?milo[,.!]?\s*/, "");
+      if (/^(?:yes|yeah|yep|sure|ok(?:ay)?|accept|keep (?:it|them|all|those)|apply|do it|looks good|go ahead|perfect|great|save (?:it|that)|put (?:it|them) in|that'?s good)\b/.test(a) && a.split(/\s+/).length <= 8) {
+        bb("route_instant", { text, kind: "paper_accept" });
+        return void paperAccept();
+      }
+      if (/^(?:no|nope|cancel|never ?mind|close(?: it| that| this)?|don'?t|forget it|stop)\b/.test(a) && a.split(/\s+/).length <= 6) {
+        bb("route_instant", { text, kind: "paper_cancel" });
+        setPaper(null);
+        return void say("Okay, I left your paper as it was.").then(() => setBubble(null));
+      }
+      if (/^(?:save|export)\b.*\bword\b/.test(a)) return void paperExport("word");
+      if (/^(?:save|export|make)\b.*\bgoogle\b/.test(a)) return void paperExport("google");
+    }
     // Right after a worksheet: "you missed 7 and 8", "number 4 is wrong", "you didn't put my name" = go back over it
     if (Date.now() - sweepDoneAt.current < 15 * 60e3 && /\b(didn'?t|did not|missed|forgot|skipped|wrong|incorrect|look (back|over)|go back|fix|redo|again)\b/i.test(text) && /\b(number|question|name|answer|blank|\d+|those|them|it)\b/i.test(text)) {
       bb("route_instant", { text, kind: "sweep_redo" });
@@ -4830,6 +4928,23 @@ export default function App() {
         }}
       />
 
+      {paper && (
+        <PaperPanel
+          p={paper}
+          rejected={paperOff}
+          style={rpStyle}
+          hover={hover}
+          onToggle={paperToggle}
+          onAccept={() => void paperAccept()}
+          onExport={(to) => void paperExport(to)}
+          onClose={() => {
+            paperRun.current++;
+            setPaper(null);
+            setBubble(null);
+            setMood("idle");
+          }}
+        />
+      )}
       {edits && <EditsCard r={edits} style={panelStyle} hover={hover} onClose={closeWriting} onUndone={(n) => void say(`Undid ${n === 1 ? "that one" : `${n} changes`}.`).then(() => setBubble(null))} />}
       {sources && <SourcesCard r={sources} style={panelStyle} hover={hover} onClose={closeWriting} />}
       {discussion && (

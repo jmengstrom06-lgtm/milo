@@ -23,7 +23,8 @@ import { closeFlux, fluxAvailable, forceEndTurn, onFlux, openFlux, sendAudio } f
 import { macSpeak } from "./macvoice";
 import { bridgeConnected, call as ext, registerNativeHost, startBridge } from "./bridge";
 import { findDoc } from "./findDoc";
-import { docWork } from "./docWork";
+import { firstLook, propose, preview, applyToDoc, exportText, type Source as PaperSource } from "./paperFlow";
+import { SimDoc } from "./docSim";
 import { undoChanges, type Change, type DocIO } from "./docAgent";
 import { runWebTask } from "./webagent";
 import { registerKit } from "./kitipc";
@@ -36,7 +37,7 @@ import { isJob, lastJob, resumable, resumeJob, startJob, type JobDeps } from "./
 import { getProfile, setProfile, type Profile } from "./profile";
 import { usageToday, spentToday } from "./usage";
 import { awayWatch } from "./away";
-import { docsBatch, docsFull, calendarAdd, calendarBusy, calendarDelete, calendarUpcoming, docsCreate, GoogleNotConnected, googleConnect, googleDisconnect, googleStatus, gmailDeleteDraft, gmailDraft, gmailSendDraft, gmailUnread, hasGmail, refreshGoogleConfig } from "./google";
+import { docsBatch, docsFull, docsNew, calendarAdd, calendarBusy, calendarDelete, calendarUpcoming, docsCreate, GoogleNotConnected, googleConnect, googleDisconnect, googleStatus, gmailDeleteDraft, gmailDraft, gmailSendDraft, gmailUnread, hasGmail, refreshGoogleConfig } from "./google";
 import { activity, did, registerActivity, metrics } from "./activityLog";
 import { writePaper } from "./paper";
 import { homeWin, openHome, toHome } from "./home";
@@ -53,7 +54,7 @@ import { calendarFeedUrl, subscribePageUrl, d2lCheck, keepSignedIn, courses as d
 import { editPaper, undoEdits, citePaper, removeBlock } from "./writing";
 import { docIdFrom } from "./docEdit";
 import { draftDiscussion, pickTopic, requirementsOf, toHtml, type Draft } from "./discussions";
-import { readThis } from "./reading";
+import { readThis, textOf } from "./reading";
 import { citeLine, styleOf } from "./citations";
 import { callTool } from "./brain";
 import { models } from "./gateway";
@@ -664,40 +665,80 @@ async function openDoc(said = "", picked?: string): Promise<{ id: string; title:
 }
 const NO_DOC = "I don't see a Google Doc open in Chrome or Safari. Open your paper in Google Docs, or copy its link, then ask me again. (A Word file: open it in Google Docs first.)";
 let writingBusy = false;
-ipcMain.handle("milo:paper-edit", async (_e, ask: string, picked?: string) => {
-  if (!googleStatus().connected) return { ok: false, connect: true, text: "Connect Google first so I can edit your doc. Say “connect Google.”" };
+/** "Fix my paper": read it, do the work on a copy, show it in the paper panel. Nothing is written until they accept. */
+async function paperPropose(ask: string, read: () => Promise<{ title: string; content: import("./docEdit").DocEl[] }>, source: PaperSource) {
   if (writingBusy) return { ok: false, text: "I'm still working on the last one. One sec." };
-  const found = await openDoc(String(ask ?? ""), typeof picked === "string" ? picked : undefined);
-  if (!found) return { ok: false, text: NO_DOC };
-  if ("ask" in found) return { ok: false, text: found.ask, docs: found.docs };
-  const doc = found;
   writingBusy = true;
   try {
     const clip = clipboard.readText().trim();
     const rubric = /\brubric\b/i.test(String(ask)) && looksLikeRubric(clip) ? clip : "";
-    toOverlay("milo:writing-live", { stage: "reading", text: `Reading “${doc.title}”…` });
-    const r = await docWork(docIO(doc.id), String(ask ?? ""), {
-      rubric,
-      status: (t) => toOverlay("milo:writing-live", { stage: "reading", text: t }),
-      live: (c, i, n) => c && toOverlay("milo:writing-live", { stage: "editing", text: `${c.why}`, i: i + 1, n }),
-    });
-    track("paper_edit", { ok: r.ok, n: r.ok ? r.applied.length : 0, rubric: !!rubric, answer: r.ok && !!r.answer, missing: r.ok && !!r.missing });
-    if (!r.ok) return r;
-    if (!r.applied.length) return { ...r, docId: doc.id, rubric: !!rubric };
-    const actId = did({
-      kind: "doc",
-      title: `Worked on “${r.title}”: ${r.applied.length} change${r.applied.length === 1 ? "" : "s"}`,
-      detail: r.applied.slice(0, 12).map((a) => `• ${a.why}`).join("\n"),
-      link: `https://docs.google.com/document/d/${doc.id}/edit`,
-      undo: { type: "doc_edits", data: { docId: doc.id, edits: r.applied } },
-      proof: { level: "confirmed", how: `Google Docs accepted ${r.applied.length} edits.` },
-    });
-    return { ...r, docId: doc.id, actId, rubric: !!rubric };
+    // the panel opens right away with the paper; the changes arrive when they're ready
+    const first = await read();
+    toOverlay("milo:paper-open", { title: first.title, rows: firstLook(first.content), source: source.type });
+    const r = await propose(async () => first, String(ask ?? ""), source, { rubric, status: (t) => toOverlay("milo:writing-live", { stage: "reading", text: t }) });
+    track("paper_edit", { ok: r.ok, n: r.ok && r.view ? r.view.groups.length : 0, rubric: !!rubric, source: source.type, answer: r.ok && !!r.answer });
+    return r;
   } catch (e) {
     const m = (e as Error).message;
-    return { ok: false, text: e instanceof GoogleNotConnected ? "Connect Google again, then ask me." : /403|404/.test(m) ? "I can't open that doc with your Google account. Make sure it's yours (or shared with you to edit)." : "Something went wrong editing the doc. Try again." };
+    return { ok: false, text: e instanceof GoogleNotConnected ? "Connect Google again, then ask me." : /403|404/.test(m) ? "I can't open that doc with your Google account. Make sure it's yours (or shared with you to edit)." : "Something went wrong reading the paper. Try again." };
   } finally {
     writingBusy = false;
+  }
+}
+ipcMain.handle("milo:paper-edit", async (_e, ask: string, picked?: string) => {
+  if (!googleStatus().connected) return { ok: false, connect: true, text: "Connect Google first so I can work on your doc. Say “connect Google.”" };
+  const found = await openDoc(String(ask ?? ""), typeof picked === "string" ? picked : undefined);
+  if (!found) return { ok: false, text: NO_DOC };
+  if ("ask" in found) return { ok: false, text: found.ask, docs: found.docs };
+  return paperPropose(String(ask ?? ""), () => docsFull(found.id), { type: "gdoc", docId: found.id });
+});
+/** A pasted paper or a Word/text file: same panel; it comes back out as a Google Doc, a Word file or copied. */
+ipcMain.handle("milo:paper-edit-text", async (_e, ask: string, text: string, title?: string) => {
+  const body = String(text ?? "");
+  if (body.trim().split(/\s+/).length < 30) return { ok: false, text: "Paste the whole paper (or drop the file on me) and I'll work on it." };
+  const sim = SimDoc.fromText(body);
+  return paperPropose(String(ask ?? ""), async () => ({ title: String(title || "Your paper"), content: sim.content() }), { type: "text" });
+});
+ipcMain.handle("milo:paper-edit-file", async (_e, file: string, ask: string) => {
+  const f = String(file ?? "");
+  if (!/\.(docx?|rtf|odt|txt|md|html?)$/i.test(f) || !fs.existsSync(f)) return { ok: false, text: "I can work on Word, text and RTF files. For a Google Doc, just open it." };
+  let text = "";
+  try {
+    text = /\.(txt|md)$/i.test(f) ? fs.readFileSync(f, "utf8") : await textOf(f);
+  } catch {
+    return { ok: false, text: "I couldn't open that file." };
+  }
+  const sim = SimDoc.fromText(text);
+  return paperPropose(String(ask || "edit my paper"), async () => ({ title: path.basename(f), content: sim.content() }), { type: "text", file: f });
+});
+/** Tapping a change off/on: the paper with only the accepted ones. */
+ipcMain.handle("milo:paper-preview", async (_e, id: string, rejected: number[]) => preview(String(id), Array.isArray(rejected) ? rejected.map(Number) : []));
+/** Accept: write the accepted changes to the Google Doc (one undo takes it all back). */
+ipcMain.handle("milo:paper-apply", async (_e, id: string, rejected: number[]) => {
+  try {
+    const r = await applyToDoc(String(id), Array.isArray(rejected) ? rejected.map(Number) : [], docIO);
+    if (!r) return { ok: false, text: "That one expired. Ask me again." };
+    if (!r.ok) return { ok: false, text: "Your doc changed since, so I couldn't place those changes. Ask me again and I'll redo it." };
+    const actId = did({
+      kind: "doc",
+      title: `Worked on “${r.title}”: ${r.done.length} change${r.done.length === 1 ? "" : "s"}`,
+      detail: [...new Set(r.done.map((a) => a.why).filter(Boolean))].slice(0, 12).map((w) => `• ${w}`).join("\n"),
+      link: `https://docs.google.com/document/d/${r.docId}/edit`,
+      undo: { type: "doc_edits", data: { docId: r.docId, edits: r.done } },
+      proof: { level: "confirmed", how: `Google Docs accepted ${r.done.length} changes.` },
+    });
+    return { ok: true, n: r.done.length, missed: r.missed, actId };
+  } catch (e) {
+    return { ok: false, text: /403/.test((e as Error).message) ? "I can only read that doc, not edit it. Ask the owner for edit access, or make a copy." : "Google wouldn't take the changes. Try again in a second." };
+  }
+});
+/** A pasted paper or a Word file, finished: a new Google Doc, a Word file, or copied. */
+ipcMain.handle("milo:paper-export", async (_e, id: string, rejected: number[], to: "google" | "word" | "copy") => {
+  try {
+    if (to === "google" && !googleStatus().connected) return { ok: false, text: "Connect Google first, or pick Word or Copy." };
+    return await exportText(String(id), Array.isArray(rejected) ? rejected.map(Number) : [], to === "word" || to === "copy" ? to : "google", { create: (t) => docsNew(t), io: docIO });
+  } catch (e) {
+    return { ok: false, text: `I couldn't save it: ${(e as Error).message.slice(0, 80)}` };
   }
 });
 /** Undo some of the edits (the card's per-edit undo) or all of them. */

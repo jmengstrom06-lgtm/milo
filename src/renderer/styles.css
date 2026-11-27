@@ -2074,3 +2074,34 @@ a.wc__fine:hover { color: #c4b5fd; }
 .wc__tweak button:disabled { opacity: .5; cursor: default; }
 
 .wc__warn { color: #fbbf24; }
+
+/* ---- the paper panel: your paper with Milo's changes, like tracked changes ---- */
+.pp { width: 460px; max-height: 640px; }
+.pp__paper { flex: 1; min-height: 120px; overflow-y: auto; margin: 8px 10px 4px; padding: 14px 16px; background: #faf9f7; color: #1f1d24; border-radius: 10px; font: 13px/1.6 Georgia, "Times New Roman", serif; scrollbar-width: thin; scrollbar-color: #cfcbd6 transparent; position: relative; }
+.pp__paper.is-reading::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, rgba(139,92,246,.10) 50%, transparent 70%); background-size: 220% 100%; animation: pp-scan 1.4s linear infinite; pointer-events: none; border-radius: 10px; }
+@keyframes pp-scan { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+.pp__row { position: relative; margin: 0 0 8px; padding: 1px 22px 1px 4px; border-radius: 5px; white-space: pre-wrap; word-break: break-word; }
+.pp__row--changed, .pp__row--added, .pp__row--removed, .pp__row--restyled { cursor: pointer; animation: pp-in .35s ease-out both; }
+@keyframes pp-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.pp__row--changed:hover, .pp__row--restyled:hover { background: rgba(139,92,246,.07); }
+.pp__row--added { background: rgba(34,197,94,.12); box-shadow: inset 3px 0 0 #22c55e; padding-left: 9px; }
+.pp__row--added:hover { background: rgba(34,197,94,.18); }
+.pp__row--removed { color: #b91c1c; text-decoration: line-through; text-decoration-color: rgba(185,28,28,.55); background: rgba(239,68,68,.06); }
+.pp__row.is-off { opacity: .55; }
+.pp__row--added.is-off { text-decoration: line-through; background: transparent; box-shadow: none; }
+.pp__row--removed.is-off { color: inherit; text-decoration: none; background: transparent; opacity: 1; }
+.pp__row del { color: #b91c1c; text-decoration: line-through; text-decoration-color: rgba(185,28,28,.6); background: rgba(239,68,68,.08); }
+.pp__row ins { color: #15803d; text-decoration: none; background: rgba(34,197,94,.14); border-radius: 3px; }
+.pp__st--title { font-size: 17px; font-weight: 700; text-align: center; }
+.pp__st--heading_1 { font-size: 15.5px; font-weight: 700; }
+.pp__st--heading_2 { font-size: 14.5px; font-weight: 700; }
+.pp__st--heading_3, .pp__st--subtitle { font-size: 13.5px; font-weight: 700; color: #3f3b48; }
+.pp__al--center { text-align: center; }
+.pp__al--end { text-align: right; }
+.pp__al--justified { text-align: justify; }
+.pp__b { font-weight: 700; }
+.pp__tags { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 6px; vertical-align: middle; }
+.pp__tags i { font: 600 10px/1.6 "Plus Jakarta Sans", -apple-system, sans-serif; font-style: normal; color: #6d28d9; background: rgba(139,92,246,.12); padding: 0 6px; border-radius: 999px; }
+.pp__mark { position: absolute; right: 4px; top: 2px; font: 700 11px/1 "Plus Jakarta Sans", sans-serif; color: #16a34a; }
+.pp__row.is-off .pp__mark { color: #8b8b93; }
+.pp__count { color: #8b8b93; font-size: 11.5px; }

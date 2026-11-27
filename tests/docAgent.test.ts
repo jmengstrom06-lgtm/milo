@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { applyPlan, undoChanges, type Plan, type Op } from "../src/main/docAgent";
-import { SimDoc } from "./docSim";
+import { SimDoc } from "../src/main/docSim";
 
 const PAPER: (string | [string, string])[] = [
   ["Why Sleep Matters", "TITLE"],
@@ -187,5 +187,52 @@ describe("formatting, and nothing ever lost", () => {
     const u = await undoChanges(d.io(), r.changes);
     expect(u.missed).toBe(0);
     expect(d.full()).toEqual(before);
+  });
+});
+
+import { redoChanges } from "../src/main/docAgent";
+describe("preview on a copy, then write to the real doc: identical result", () => {
+  const styledDoc = () => {
+    const d = new SimDoc(PAPER);
+    d.apply([
+      { updateParagraphStyle: { range: { startIndex: 1, endIndex: 19 }, paragraphStyle: { alignment: "CENTER" }, fields: "alignment" } },
+      { updateTextStyle: { range: { startIndex: 1, endIndex: 18 }, textStyle: { bold: true }, fields: "bold" } },
+    ]);
+    return d;
+  };
+  const PLANS: Op[][] = [
+    [{ op: "insert", after: 5, paragraphs: [{ text: "My Thoughts", style: "HEADING_1" }, { text: "I think sleep is underrated." }] }],
+    [{ op: "replace_text", para: 2, find: "Alot", replace: "A lot" }, { op: "rewrite_paragraph", para: 4, text: "Second, a lack of sleep affects a student's mood." }, { op: "move", para: 5, after: 1 }, { op: "delete", para: 3 }, { op: "set_style", para: 1, style: "HEADING_1" }],
+    [{ op: "format", target: "all", format: { lineSpacing: 200, font: "Times New Roman", size: 12, firstLineIndent: 36 } }, { op: "format", para: 1, format: { align: "START", bold: false } }],
+    [{ op: "insert", after: 5, paragraphs: [{ text: "Works Cited", align: "CENTER" }, { text: "Smith, Ann. Sleep. 2020.", hanging: true }] }, { op: "replace_text", para: 3, find: "learn.", replace: "learn (Smith)." }],
+    [{ op: "delete", para: 5 }, { op: "insert", after: 0, paragraphs: [{ text: "Jake Engstrom" }, { text: "Professor Hayes" }] }, { op: "move", para: 1, after: 4 }],
+  ];
+  PLANS.forEach((ops, i) =>
+    it(`plan ${i + 1}`, async () => {
+      const a = styledDoc();
+      const r = await applyPlan(a.io(), plan(ops));
+      const b = styledDoc();
+      const before = b.full();
+      const w = await redoChanges(b.io(), r.changes);
+      expect(w.missed).toEqual([]);
+      expect(b.full()).toEqual(a.full());
+      await undoChanges(b.io(), w.done);
+      expect(b.full()).toEqual(before);
+    })
+  );
+  it("rejecting one change still writes the rest", async () => {
+    const a = styledDoc();
+    const r = await applyPlan(a.io(), plan([{ op: "replace_text", para: 2, find: "Alot", replace: "A lot" }, { op: "insert", after: 5, paragraphs: [{ text: "Extra." }] }, { op: "set_style", para: 3, style: "HEADING_2" }]));
+    const b = styledDoc();
+    const keep = r.changes.filter((c) => c.group !== r.changes[0].group);
+    const w = await redoChanges(b.io(), keep);
+    expect(w.missed).toEqual([]);
+    expect(b.paras().map((p) => p[0])).toContain("Extra.");
+    expect(b.paras()[1][0]).toContain("Alot");
+    expect(b.paras()[2][1]).toBe("HEADING_2");
+  });
+  it("a copy of a real doc matches it", () => {
+    const a = styledDoc();
+    expect(SimDoc.fromContent(a.content()).full()).toEqual(a.full());
   });
 });
