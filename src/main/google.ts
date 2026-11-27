@@ -319,8 +319,17 @@ export async function docsText(id: string): Promise<string> {
 }
 /** A whole doc: title, body structure (for exact in-place edits) and revision. */
 export async function docsFull(id: string): Promise<{ title: string; content: import("./docEdit").DocEl[]; revisionId?: string }> {
-  const d = await g<{ title?: string; revisionId?: string; body?: { content?: import("./docEdit").DocEl[] } }>(`https://docs.googleapis.com/v1/documents/${id}`);
-  return { title: d.title ?? "", content: d.body?.content ?? [], revisionId: d.revisionId };
+  type L = Record<string, { listProperties?: { nestingLevels?: { glyphType?: string; glyphSymbol?: string }[] } }>;
+  const d = await g<{ title?: string; revisionId?: string; body?: { content?: import("./docEdit").DocEl[] }; lists?: L }>(`https://docs.googleapis.com/v1/documents/${id}`);
+  const content = d.body?.content ?? [];
+  // is each list paragraph a bullet or a number? (Docs keeps that on the list, not the paragraph)
+  for (const el of content) {
+    const b = el.paragraph?.bullet;
+    if (!b?.listId) continue;
+    const lvl = d.lists?.[b.listId]?.listProperties?.nestingLevels?.[b.nestingLevel ?? 0];
+    b.kind = lvl?.glyphType && lvl.glyphType !== "GLYPH_TYPE_UNSPECIFIED" && lvl.glyphType !== "NONE" ? "numbered" : "bullet";
+  }
+  return { title: d.title ?? "", content, revisionId: d.revisionId };
 }
 /** Apply Docs edits (insert text, styles) in one go. */
 export async function docsBatch(id: string, requests: unknown[]) {

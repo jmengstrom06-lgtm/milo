@@ -8,7 +8,7 @@ import type { DocEl } from "./docEdit";
 
 type TS = Record<string, unknown>;
 type PS = Record<string, unknown>;
-type Ch = { c: string; ts: TS; ps?: PS };
+type Ch = { c: string; ts: TS; ps?: PS; bullet?: string }; // bullet: "bullet" | "numbered" on a paragraph's line break
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x));
 
 export class SimDoc {
@@ -25,7 +25,8 @@ export class SimDoc {
           const t = (r.textRun?.content ?? "").replace(/\n/g, "");
           for (const c of t) d.chars.push({ c, ts: clone(r.textRun?.textStyle ?? {}) });
         }
-        d.chars.push({ c: "\n", ts: {}, ps });
+        const b = (el.paragraph as { bullet?: { kind?: string } }).bullet;
+        d.chars.push({ c: "\n", ts: {}, ps, ...(b ? { bullet: b.kind === "numbered" ? "numbered" : "bullet" } : {}) });
       } else if (el.table) {
         for (const c of "[table: Milo can't edit tables yet]") d.chars.push({ c, ts: {} });
         d.chars.push({ c: "\n", ts: {}, ps: { namedStyleType: "NORMAL_TEXT" } });
@@ -57,8 +58,9 @@ export class SimDoc {
         const pos = r.insertText.location.index - 1;
         if (pos < 0 || pos > this.chars.length - 1) throw new Error(`insert index ${pos + 1} out of range`);
         const ps = clone(this.chars[this.paraEnd(pos)].ps ?? {});
+        const bullet = this.chars[this.paraEnd(pos)].bullet; // splitting a list item makes another list item (like Docs)
         const ts = clone(pos > 0 && this.chars[pos - 1].c !== "\n" ? this.chars[pos - 1].ts : this.chars[pos].ts ?? {}); // inherits the style around it
-        const add: Ch[] = [...r.insertText.text].map((c: string) => (c === "\n" ? { c, ts: clone(ts), ps: clone(ps) } : { c, ts: clone(ts) }));
+        const add: Ch[] = [...r.insertText.text].map((c: string) => (c === "\n" ? { c, ts: clone(ts), ps: clone(ps), ...(bullet ? { bullet } : {}) } : { c, ts: clone(ts) }));
         this.chars.splice(pos, 0, ...add);
       } else if (r.deleteContentRange) {
         const s = r.deleteContentRange.range.startIndex - 1;
@@ -79,6 +81,20 @@ export class SimDoc {
               if (v === undefined) delete ps[f];
               else ps[f] = clone(v);
             }
+            if (k >= e - 1) break;
+          }
+        }
+      } else if (r.createParagraphBullets || r.deleteParagraphBullets) {
+        const q = r.createParagraphBullets ?? r.deleteParagraphBullets;
+        const s = q.range.startIndex - 1;
+        const e = q.range.endIndex - 1;
+        const kind = r.createParagraphBullets ? (String(q.bulletPreset).startsWith("NUMBERED") ? "numbered" : "bullet") : undefined;
+        let i = s;
+        while (i > 0 && this.chars[i - 1].c !== "\n") i--;
+        for (let k = i; k < this.chars.length; k++) {
+          if (this.chars[k].c === "\n") {
+            if (kind) this.chars[k].bullet = kind;
+            else delete this.chars[k].bullet;
             if (k >= e - 1) break;
           }
         }
@@ -103,13 +119,14 @@ export class SimDoc {
     return this.full().map((p) => [p.text, String(p.ps.namedStyleType ?? "NORMAL_TEXT")]);
   }
   /** Everything: text, paragraph style, and text-style runs (for exact-undo checks). */
-  full(): { text: string; ps: PS; runs: { text: string; ts: TS }[] }[] {
-    const out: { text: string; ps: PS; runs: { text: string; ts: TS }[] }[] = [];
-    let cur: { text: string; ps: PS; runs: { text: string; ts: TS }[] } = { text: "", ps: {}, runs: [] };
+  full(): { text: string; ps: PS; runs: { text: string; ts: TS }[]; bullet?: string }[] {
+    const out: { text: string; ps: PS; runs: { text: string; ts: TS }[]; bullet?: string }[] = [];
+    let cur: { text: string; ps: PS; runs: { text: string; ts: TS }[]; bullet?: string } = { text: "", ps: {}, runs: [] };
     for (const ch of this.chars) {
       if (ch.c === "\n") {
         cur.ps = clone(ch.ps ?? {});
         if (!cur.ps.namedStyleType) cur.ps.namedStyleType = "NORMAL_TEXT";
+        if (ch.bullet) cur.bullet = ch.bullet;
         out.push(cur);
         cur = { text: "", ps: {}, runs: [] };
         continue;
@@ -134,7 +151,7 @@ export class SimDoc {
       if (elements.length) elements[elements.length - 1].textRun.content += "\n";
       else elements.push({ startIndex: idx, textRun: { content: "\n", textStyle: {} } });
       idx += 1;
-      return { startIndex: start, endIndex: idx, paragraph: { elements, paragraphStyle: p.ps } } as DocEl;
+      return { startIndex: start, endIndex: idx, paragraph: { elements, paragraphStyle: p.ps, ...(p.bullet ? { bullet: { listId: p.bullet, kind: p.bullet } } : {}) } } as DocEl;
     });
   }
   io() {

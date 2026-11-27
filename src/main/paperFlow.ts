@@ -34,6 +34,7 @@ export type PaperView = {
   wordsAfter: number;
   requirements: Req[];
   assignment: string;
+  answer: string;
 };
 type Req = { req: string; met: boolean; note?: string };
 
@@ -96,6 +97,7 @@ export async function propose(
       wordsAfter: r.wordsAfter,
       requirements: r.requirements,
       assignment: r.assignment,
+      answer: r.answer,
     },
   };
 }
@@ -160,9 +162,12 @@ export function toHtml(doc: SimDoc, title: string): string {
           return s ? `<span style="${s}">${h}</span>` : h;
         })
         .join("");
+      const li = (p as { bullet?: string }).bullet;
+      if (li) return `<${li === "numbered" ? "ol" : "ul"}><li${pStyle ? ` style="${pStyle}"` : ""}>${runs || "&nbsp;"}</li></${li === "numbered" ? "ol" : "ul"}>`;
       return `<${tag}${pStyle ? ` style="${pStyle}"` : ""}>${runs || "&nbsp;"}</${tag}>`;
     })
-    .join("\n");
+    .join("\n")
+    .replace(/<\/(ul|ol)>\n<\1>/g, "\n"); // consecutive items = one list
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title></head><body>\n${body}\n</body></html>`;
 }
 

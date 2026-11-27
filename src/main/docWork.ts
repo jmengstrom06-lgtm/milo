@@ -41,6 +41,7 @@ const PLAN_TOOL = {
                   align: { type: "string", enum: ["START", "CENTER", "END", "JUSTIFIED"] },
                   bold: { type: "boolean" },
                   hanging: { type: "boolean", description: "Hanging indent (Works Cited / References entries)." },
+                  list: { type: "string", enum: ["bullet", "numbered", "none"], description: "Make this new paragraph a list item. Consecutive items with the same kind form one list." },
                 },
                 required: ["text"],
               },
@@ -61,6 +62,7 @@ const PLAN_TOOL = {
                 firstLineIndent: { type: "number", description: "points; 36 = half an inch" },
                 hanging: { type: "boolean" },
                 noSpacing: { type: "boolean", description: "remove extra space above/below paragraphs" },
+                list: { type: "string", enum: ["bullet", "numbered", "none"], description: "turn paragraphs into a bulleted or numbered list, or back into normal paragraphs" },
               },
             },
             why: { type: "string", description: "A few words the student sees: why this change." },
@@ -103,6 +105,7 @@ Today is ${new Date().toLocaleDateString("en-US", { weekday: "long", month: "lon
 You work on a college student's own Google Doc while they watch. Do EXACTLY what they asked, all of it, and nothing they didn't ask for.
 - Read the request literally. "Add a section with your thoughts" = insert new paragraphs (don't also fix grammar). "Fix the grammar" = only grammar. "Edit it" or "make it better" = a real edit of grammar, clarity, flow and wording. A question = answer it with no actions.
 - Pick the right action: replace_text for words and phrases; rewrite_paragraph for a heavier rewrite of one paragraph; insert to add anything new (sections, a conclusion, a heading, a header line); delete; move to reorder; set_style for headings and titles; format for bold/italic/underline, font, size, alignment, line spacing and indents (target "all" for the whole paper).
+- Lists: each list item is its own paragraph. To make a list, insert paragraphs with list "bullet"/"numbered", or format existing ones (one format action per paragraph, or several in a row). To turn a list back into prose, format with list "none". Papers rarely use lists unless asked.
 - MLA format = Times New Roman 12, double spaced (200), no extra paragraph spacing, half-inch first-line indents on body paragraphs, a left-aligned header block (name, professor, class, date), the title centered and not bold. APA 7 = double spaced, 12 pt, a bold centered title, and a References list.
 - "My intro" = the first body paragraph after the title; "my conclusion" = the last body paragraph (unless the paper labels its sections otherwise). "The second paragraph" counts body paragraphs, not the header or title.
 - "After the paper" / "at the end" = after the last paragraph. "Before the conclusion" = after the paragraph before the conclusion. A header block (name, professor, class, date) is not the paper's start.

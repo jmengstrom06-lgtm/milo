@@ -18,9 +18,9 @@ declare global {
   };
   type MiloPrefs = { notifyAway: boolean; quiet: boolean; quietFrom: number; quietTo: number; noRecord: string[]; okRecord: string[]; autofill: boolean; preflight: boolean };
   type MiloEdit = { find: string; replace: string; why: string; kind?: string; op?: "replace" | "insert" | "delete" | "style"; anchor?: string; styles?: string[]; style?: string; oldStyle?: string };
-  type MiloPaperRow = { kind: "same" | "changed" | "added" | "removed" | "restyled"; text: string; segs?: { t: string; op: "=" | "+" | "-" }[]; style: string; align?: string; bold?: boolean; tags: string[]; groups: number[] };
+  type MiloPaperRow = { kind: "same" | "changed" | "added" | "removed" | "restyled"; text: string; segs?: { t: string; op: "=" | "+" | "-" }[]; style: string; align?: string; bold?: boolean; bullet?: string; tags: string[]; groups: number[] };
   type MiloReq = { req: string; met: boolean; note?: string };
-  type MiloPaperView = { id: string; title: string; source: "gdoc" | "text"; file?: string; summary: string; cant: string; missing: string; notes: string[]; rows: MiloPaperRow[]; groups: { id: number; why: string; kind: string }[]; wordsBefore: number; wordsAfter: number; requirements: MiloReq[]; assignment: string };
+  type MiloPaperView = { id: string; title: string; source: "gdoc" | "text"; file?: string; summary: string; cant: string; missing: string; notes: string[]; rows: MiloPaperRow[]; groups: { id: number; why: string; kind: string }[]; wordsBefore: number; wordsAfter: number; requirements: MiloReq[]; assignment: string; answer: string };
   type MiloPaperResult = { ok: true; view: MiloPaperView | null; answer: string; summary: string; cant: string; requirements: MiloReq[]; assignment: string } | { ok: false; text: string; connect?: boolean; docs?: { id: string; title: string }[] };
   type MiloEditResult =
     | { ok: true; title: string; summary: string; applied: MiloEdit[]; skipped: number; notes: string[]; wordsBefore: number; wordsAfter: number; docId: string; rubric: boolean; answer?: string; cant?: string; missing?: string }
