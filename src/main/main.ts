@@ -58,6 +58,7 @@ import { discussionPlan, draftDiscussion, pickTopic, requirementsOf, toHtml, typ
 import { forgetClasses, readClasses } from "./classData";
 import { answerClasses } from "./classesAsk";
 import { prepQuiz } from "./quizPrep";
+import { openAssignment } from "./assignmentOpen";
 import { readThis, textOf } from "./reading";
 import { citeLine, styleOf } from "./citations";
 import { callTool } from "./brain";
@@ -1119,6 +1120,32 @@ async function fetchFeed(url: string) {
   }
 }
 ipcMain.handle("milo:feed-fetch", (_e, url: string) => fetchFeed(String(url ?? "")));
+// Start an assignment: found and read in D2L's data (no clicking through Chrome), then shown to the student.
+ipcMain.handle("milo:assignment-open", async (_e, q: { portal: string; title: string; course: string; show?: boolean }) => {
+  try {
+    const a = await openAssignment(String(q.portal), { title: String(q.title ?? ""), course: String(q.course ?? "") });
+    if (!a) return { ok: false, text: `I couldn't find “${q.title}” in your D2L.` };
+    if (q.show) openInChrome(a.url);
+    return { ok: true, kind: a.kind, name: a.name, course: a.course.short, due: a.due, url: a.url, text: a.text };
+  } catch (e) {
+    if (e instanceof SignInNeeded) return { ok: false, signin: true, text: "Your D2L sign-in ran out. Sign in to D2L in Chrome and try again." };
+    return { ok: false, text: "I couldn't reach D2L just now." };
+  }
+});
+/** Where Chrome is right now: "d2l" (signed in, on the class site), "signin" (a login page), or "other". */
+ipcMain.handle("milo:chrome-d2l-state", async (_e, portal: string) => {
+  const tab = await activeTab("Google Chrome").catch(() => ({ url: "", title: "" }));
+  const host = (() => {
+    try {
+      return new URL(/^https?:/.test(portal) ? portal : `https://${portal}`).host;
+    } catch {
+      return "";
+    }
+  })();
+  if (/okta|login|signin|sign-in|sso|saml|microsoftonline|shibboleth|cas\//i.test(tab.url)) return { state: "signin", url: tab.url };
+  if (host && tab.url.includes(host) && /\/d2l\//.test(tab.url)) return { state: "d2l", url: tab.url };
+  return { state: "other", url: tab.url };
+});
 // Grade forecaster: "what do I need on the final for a B in stats?"
 const forecastDeps = {
   doTask: (t: string) => doTask(t),
@@ -1128,7 +1155,11 @@ ipcMain.handle("milo:forecast", (_e, q: { course: string; letter: string; exam?:
 
 // "Ask anything about my classes": one answer over the real D2L data (grades, feedback, quizzes, discussions,
 // assignments), then whatever it needs doing: the exact "what do I need" math, or opening the page.
-const openInChrome = (url: string) => void ext("new_tab", { url }, 15000).catch(() => shell.openExternal(url));
+// In Chrome specifically (that's where Milo works), even if his extension isn't connected yet
+const openInChrome = (url: string) =>
+  void (bridgeConnected() ? ext("new_tab", { url }, 15000) : Promise.reject(new Error("no bridge"))).catch(() =>
+    process.platform === "darwin" ? execFile("open", ["-a", "Google Chrome", url], (err) => err && void shell.openExternal(url)) : void shell.openExternal(url)
+  );
 ipcMain.handle("milo:classes-ask", async (_e, q: { ask: string; portal: string; fresh?: boolean }) => {
   const portal = String(q?.portal ?? "");
   const ask = String(q?.ask ?? "").trim();
@@ -2031,7 +2062,13 @@ ipcMain.handle("milo:screen-ask", async (_e, question: string) => {
   return askScreen(q, { jpeg, pageText: page?.canvasHeavy ? undefined : page?.text, url: page?.url, title: page?.title });
 });
 // "Start my homework": read the assignment that's open (page text + screenshot) and make a game plan.
-ipcMain.handle("milo:gameplan", async (_e, hint: string) => {
+ipcMain.handle("milo:gameplan", async (_e, hint: string, brief?: { text: string; url: string; title: string }) => {
+  // read straight from D2L (Start on an assignment): no screen needed
+  if (brief?.text) {
+    const r = await makeGamePlan({ hint: String(hint ?? "").slice(0, 300), pageText: brief.text, url: brief.url, title: brief.title });
+    if (r.ok) bb("homework", "plan", { found: r.data.found, title: r.data.title, steps: r.data.steps.length, minutes: r.data.total_minutes, from: "d2l" });
+    return r;
+  }
   const front = await frontApp().catch(() => "");
   let page: { text?: string; url?: string; title?: string; canvasHeavy?: boolean } | null = null;
   if (bridgeConnected() && /Google Chrome/i.test(front)) page = await ext("snapshot", { max: 30 }, 8000).catch(() => null);

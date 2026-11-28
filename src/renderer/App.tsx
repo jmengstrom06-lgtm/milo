@@ -1161,7 +1161,26 @@ export default function App() {
       const words = [hw.target, cls?.name, cls?.code].filter(Boolean).map((w) => String(w).toLowerCase());
       const item = preset ?? items.find((it) => !words.length || words.some((w) => `${it.course} ${it.title}`.toLowerCase().includes(w)));
       const course = item?.course || cls?.name || hw.target;
-      if (item || course) {
+      // The fast, sure way: read the assignment straight from D2L and open its page for them. Clicking through
+      // Chrome is only the fallback (it stalls on sign-in pages and slow loads).
+      let opened = false;
+      if (item) {
+        setMood("looking");
+        setBubble(`Opening ${item.title}…`);
+        const a = await window.milo.assignmentOpen({ portal, title: item.title, course: item.course, show: true }).catch(() => null);
+        if (id !== hwRun.current) return;
+        if (a?.ok) {
+          bb("homework_direct", { kind: a.kind, course: a.course });
+          setBubble("Reading the assignment…");
+          const r = await window.milo.gameplan(text, { text: a.text, url: a.url, title: a.name });
+          if (id !== hwRun.current) return;
+          if (r.ok && r.data.found) return void showGamePlan(r.data, preset ?? item);
+          // couldn't plan from D2L's text alone: read the page that's opening in Chrome instead
+          opened = true;
+          await new Promise((ok) => setTimeout(ok, 2500));
+        }
+      }
+      if (!opened && (item || course)) {
         setMood("happy");
         await say(item ? `Let's go. Opening ${item.title}.` : `Let's go. Finding your ${course} homework.`);
         if (id !== hwRun.current) return;
@@ -1196,6 +1215,12 @@ export default function App() {
       setBubble(null);
       return;
     }
+    await showGamePlan(r.data, preset);
+  };
+  /** Show the game plan and say the first step. */
+  const showGamePlan = async (data: GamePlan, preset?: { title: string; course: string; due: string }) => {
+    setBubble(null);
+    const r = { data };
     const key = planKey(r.data);
     const old = loadPlans().find((x) => x.key === key && x.plan.steps.length === r.data.steps.length);
     const sp: SavedPlan = { key, plan: r.data, done: old?.done ?? [], at: Date.now() };
@@ -1832,11 +1857,44 @@ export default function App() {
   const startHomeworkRef = useRef(startHomework);
   startHomeworkRef.current = startHomework;
   const doItForMeRef = useRef<(item: { title: string; course: string; due: string }) => Promise<void>>(async () => {});
-  const teachFirstRef = useRef<(item: { title: string; course: string; due: string }) => void>(() => {});
+  const teachFirstRef = useRef<(item: { title: string; course: string; due: string }) => Promise<void>>(async () => {});
   /** Teach the material behind an assignment first (a short lesson + practice), then they can do it. */
-  const teachFirst = (item: { title: string; course: string; due: string }) => {
+  const teachFirst = async (item: { title: string; course: string; due: string }) => {
     bb("assign_teach", { course: item.course });
-    openKit("study", `teach me what I need to know for "${item.title}"${item.course ? ` in ${item.course}` : ""}`);
+    let about = "";
+    if (portal) {
+      setBubble(`Reading ${item.title}…`);
+      const a = await window.milo.assignmentOpen({ portal, title: item.title, course: item.course }).catch(() => null);
+      if (a?.ok) about = `\nWhat the assignment asks:\n${a.text.slice(0, 1500)}`;
+      setBubble(null);
+    }
+    openKit("study", `teach me what I need to know for "${item.title}"${item.course ? ` in ${item.course}` : ""}${about}`);
+  };
+  /** Milo works in the student's Chrome, so Chrome has to be signed in to D2L. If a sign-in page is up, wait for
+   *  them (up to 5 minutes) instead of giving up. */
+  const chromeOnD2l = async (run: number): Promise<boolean> => {
+    let told = false;
+    const t0 = Date.now();
+    while (Date.now() - t0 < 5 * 60e3) {
+      await new Promise((ok) => setTimeout(ok, 2000));
+      if (run !== hwRun.current) return false;
+      const st = await window.milo.chromeD2lState(portal).catch(() => ({ state: "other" as const, url: "" }));
+      if (st.state === "d2l") {
+        if (told) void say("You're in. Starting now.");
+        return true;
+      }
+      if (st.state === "signin" && !told) {
+        told = true;
+        bb("chrome_signin_wait", {});
+        setMood("idle");
+        setBubble("Sign in to D2L in Chrome. I'll start the second you're in.");
+        void say("Sign in to D2L in Chrome. I'll start the second you're in.");
+      }
+      if (st.state === "other" && !told && Date.now() - t0 > 20e3) return true; // can't tell (another window in front): just go
+    }
+    await say("I'll be here. Say “do it for me” again once you're signed in.");
+    setBubble(null);
+    return false;
   };
   /** Any assignment, three clear ways: Milo does it, Milo helps them do it, or Milo teaches it first.
    *  Buttons on screen, and they can just say it. They always turn it in themselves. */
@@ -1849,7 +1907,7 @@ export default function App() {
       options: [
         { label: "Do it for me", say: "", run: () => ((offerRef.current = null), void doItForMe(item)) },
         { label: "Help me do it", say: "", run: () => ((offerRef.current = null), void startHomework(`${item.title} ${item.course}`.trim(), true, { target: "", here: false }, item)) },
-        { label: "Teach me first", say: "", run: () => ((offerRef.current = null), teachFirst(item)) },
+        { label: "Teach me first", say: "", run: () => ((offerRef.current = null), void teachFirst(item)) },
       ],
     });
     if (spoken) void say(`${item.title}: want me to do it, help you do it, or teach it first?`).then(() => setBubble(null));
@@ -1876,7 +1934,7 @@ export default function App() {
       say("No problem. Say “start my homework” whenever you're ready.").then(() => setBubble(null));
     } else if (a === "teach") {
       setOffer(null);
-      teachFirst(o.item);
+      void teachFirst(o.item);
     } else if (a === "together") {
       setOffer(null);
       void startHomework(`${o.item.title} ${o.item.course}`.trim(), true, { target: "", here: false }, o.item);
@@ -1889,11 +1947,22 @@ export default function App() {
   /** Milo works through the assignment as a job and stops before turning it in: graded work is always the
    *  student's click (the job engine and the browser both hold that button, even if they say "and submit it"). */
   const doItForMe = async (item: { title: string; course: string; due: string }) => {
+    const run = ++hwRun.current;
     closePlan();
     setMood("happy");
     await say("On it. I'll work through it and leave it open for you to check and turn in yourself.");
+    let where = portal ? `In Chrome, go to ${portal}, open my ${item.course} course, open the assignment "${item.title}", and complete it.` : `Complete my assignment "${item.title}"${item.course ? ` for ${item.course}` : ""} on screen.`;
+    if (portal) {
+      // straight to the assignment's own page, with what it asks already read from D2L
+      setBubble(`Opening ${item.title}…`);
+      const a = await window.milo.assignmentOpen({ portal, title: item.title, course: item.course, show: true }).catch(() => null);
+      if (run !== hwRun.current) return;
+      if (a?.ok) {
+        if (!(await chromeOnD2l(run))) return;
+        where = `In Chrome, the ${a.kind} "${a.name}" for ${a.course} is open (${a.url}). Complete it there.\nWhat it asks (read from D2L):\n${a.text.slice(0, 3000)}`;
+      }
+    }
     setBubble("Planning it out…");
-    const where = portal ? `In Chrome, go to ${portal}, open my ${item.course} course, open the assignment "${item.title}", and complete it.` : `Complete my assignment "${item.title}"${item.course ? ` for ${item.course}` : ""} on screen.`;
     const goal = `${where} Stop before submitting: the student turns it in.`;
     bb("offer_do", { goal });
     void window.milo.jobStart(goal, { approved: false });
@@ -3630,7 +3699,7 @@ export default function App() {
       window.milo.home.onAction((a) => {
         homeQuietUntil.current = Date.now() + 120e3;
         if (a.kind === "together") void startHomeworkRef.current(`${a.item.title} ${a.item.course}`.trim(), false, { target: "", here: false }, a.item);
-        else if (a.kind === "teach") teachFirstRef.current(a.item);
+        else if (a.kind === "teach") void teachFirstRef.current(a.item);
         else void doItForMeRef.current(a.item);
       }),
     []

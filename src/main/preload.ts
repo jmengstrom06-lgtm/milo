@@ -64,7 +64,9 @@ contextBridge.exposeInMainWorld("milo", {
   macSay: (text: string) => ipcRenderer.invoke("milo:mac-say", text),
   bridgeStatus: () => ipcRenderer.invoke("milo:bridge-status"),
   screenAsk: (q: string) => ipcRenderer.invoke("milo:screen-ask", q),
-  gameplan: (hint: string) => ipcRenderer.invoke("milo:gameplan", hint),
+  gameplan: (hint: string, brief?: { text: string; url: string; title: string }) => ipcRenderer.invoke("milo:gameplan", hint, brief),
+  assignmentOpen: (q: { portal: string; title: string; course: string; show?: boolean }) => ipcRenderer.invoke("milo:assignment-open", q),
+  chromeD2lState: (portal: string) => ipcRenderer.invoke("milo:chrome-d2l-state", portal),
   onFlag: (fn: () => void) => {
     const l = () => fn();
     ipcRenderer.on("milo:flag", l);
