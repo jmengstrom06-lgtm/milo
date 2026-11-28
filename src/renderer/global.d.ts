@@ -220,7 +220,7 @@ declare global {
       home: {
         open: () => Promise<void>;
         route: (text: string) => void;
-        action: (a: { kind: "together" | "do" | "do_submit"; item: { title: string; course: string; due: string } }) => void;
+        action: (a: { kind: "together" | "do" | "do_submit" | "teach"; item: { title: string; course: string; due: string } }) => void;
         talk: () => void;
         grades: (portal: string, fresh?: boolean) => Promise<{ name: string; grade: number | null }[]>;
         onEcho: (fn: (e: { kind: string; payload: unknown }) => void) => () => void;

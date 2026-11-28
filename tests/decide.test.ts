@@ -205,3 +205,16 @@ describe("final-grade question, course before the exam", () => {
     expect(pf2("what do I need on the Statistical Analysis final to get an A?")).toEqual({ exam: "final", letter: "A", course: "Statistical Analysis" }));
   it("'on my stats midterm for a B'", () => expect(pf2("what do i need on my stats midterm for a B")).toEqual({ exam: "midterm", letter: "B", course: "stats" }));
 });
+
+describe("the three ways to start an assignment", () => {
+  it.each([
+    ["do it for me", "do"],
+    ["just do the whole thing", "do"],
+    ["help me", "together"],
+    ["yeah let's do it together", "together"],
+    ["teach me first", "teach"],
+    ["can you explain it first", "teach"],
+    ["i don't understand this", "teach"],
+    ["not now", "no"],
+  ])("%s -> %s", (said, want) => expect(parseOfferAnswer(said)).toBe(want));
+});
