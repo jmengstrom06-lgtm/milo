@@ -137,7 +137,7 @@ export default function App() {
   speakingRef.current = speaking;
   const [bubble, setBubble] = useState<string | null>(null);
   // "Handle this": what Milo saw + 2-3 things he can do, as tappable chips by the frog
-  const [offer, setOffer] = useState<{ seen: string; options: { label: string; say: string }[] } | null>(null);
+  const [offer, setOffer] = useState<{ seen: string; options: { label: string; say: string; run?: () => void }[] } | null>(null);
   const chipsRef = useRef<typeof offer>(null);
   const lastAsk = useRef("");
   const sweepDoneAt = useRef(0); // when the last worksheet finished (so "you missed 7" goes back over it) // the student's newest request, word for word (the worksheet sweep reads it for "put Jake for the name") // the buttons on screen right now (cleared the instant one is picked)
@@ -1210,7 +1210,7 @@ export default function App() {
     } catch {
       /* ignore */
     }
-    const canDo = told ? "" : " And if you're ever short on time, just say “do it for me” and I'll do the whole thing myself.";
+    const canDo = told ? "" : " Anytime, say “do it for me” and I'll do the whole thing, or “teach me” and I'll explain it first.";
     await say(old?.done.length ? `Welcome back. ${stepLine(sp, nextStep(sp))}` : `${r.data.say}${canDo}`);
     setBubble(null);
     const item = preset ?? { title: r.data.title, course: r.data.course, due: r.data.due };
@@ -1639,7 +1639,13 @@ export default function App() {
     bb("offer_shown", { n: r.options.length });
     say(`${r.seen ? `${r.seen} ` : ""}Want me to ${r.options[0].label.toLowerCase()}?`).then(() => setBubble(null));
   };
-  const pickOffer = (o: { label: string; say: string }) => {
+  const pickOffer = (o: { label: string; say: string; run?: () => void }) => {
+    if (o.run) {
+      setOffer(null);
+      hover(false);
+      bb("offer_pick", { label: o.label });
+      return o.run();
+    }
     // "Which one?" buttons: remember that part of the screen, then do what they asked
     const area = o.say.match(/^__area:(\d+):(.*)$/s);
     if (area) {
@@ -1826,22 +1832,40 @@ export default function App() {
   const startHomeworkRef = useRef(startHomework);
   startHomeworkRef.current = startHomework;
   const doItForMeRef = useRef<(item: { title: string; course: string; due: string }) => Promise<void>>(async () => {});
-  /** "Want to start on X?" Work through it together (default), or Milo does it himself. */
-  const offerStart = async (item: { title: string; course: string; due: string }) => {
+  const teachFirstRef = useRef<(item: { title: string; course: string; due: string }) => void>(() => {});
+  /** Teach the material behind an assignment first (a short lesson + practice), then they can do it. */
+  const teachFirst = (item: { title: string; course: string; due: string }) => {
+    bb("assign_teach", { course: item.course });
+    openKit("study", `teach me what I need to know for "${item.title}"${item.course ? ` in ${item.course}` : ""}`);
+  };
+  /** Any assignment, three clear ways: Milo does it, Milo helps them do it, or Milo teaches it first.
+   *  Buttons on screen, and they can just say it. They always turn it in themselves. */
+  const chooseHow = (item: { title: string; course: string; due: string }, spoken = true) => {
     setMood("happy");
-    bb("offer_start", { course: item.course });
-    await say(
-      `Want to start ${item.title}? I'll work through it with you, or if you're short on time, I can do it myself. Together?`
-    );
+    bb("assign_choose", { course: item.course });
     offerRef.current = { item, at: Date.now(), mode: "full" };
-    waitForAnswer("say yes, or “do it for me”");
+    setOffer({
+      seen: `${item.title}${item.course ? ` · ${item.course}` : ""}`,
+      options: [
+        { label: "Do it for me", say: "", run: () => ((offerRef.current = null), void doItForMe(item)) },
+        { label: "Help me do it", say: "", run: () => ((offerRef.current = null), void startHomework(`${item.title} ${item.course}`.trim(), true, { target: "", here: false }, item)) },
+        { label: "Teach me first", say: "", run: () => ((offerRef.current = null), teachFirst(item)) },
+      ],
+    });
+    if (spoken) void say(`${item.title}: want me to do it, help you do it, or teach it first?`).then(() => setBubble(null));
+  };
+  /** "Want to start on X?" The same three ways. */
+  const offerStart = async (item: { title: string; course: string; due: string }) => {
+    bb("offer_start", { course: item.course });
+    chooseHow(item);
+    waitForAnswer("“do it”, “help me”, or “teach me”");
   };
   /** Their answer to the offer. Returns true if it was one. */
   const offerAnswer = (text: string): boolean => {
     const o = offerRef.current;
     if (!o || Date.now() - o.at > (o.mode === "full" ? 90e3 : 120e3)) return false;
     const a = parseOfferAnswer(text);
-    if (!a || (o.mode === "do_only" && a !== "do" && a !== "do_submit")) {
+    if (!a || (o.mode === "do_only" && a !== "do" && a !== "do_submit" && a !== "teach")) {
       if (o.mode === "full") offerRef.current = null; // they said something else: drop the offer, do what they said
       return false;
     }
@@ -1850,9 +1874,14 @@ export default function App() {
     bb("offer_answer", { answer: a, mode: o.mode });
     if (a === "no") {
       say("No problem. Say “start my homework” whenever you're ready.").then(() => setBubble(null));
+    } else if (a === "teach") {
+      setOffer(null);
+      teachFirst(o.item);
     } else if (a === "together") {
+      setOffer(null);
       void startHomework(`${o.item.title} ${o.item.course}`.trim(), true, { target: "", here: false }, o.item);
     } else {
+      setOffer(null);
       void doItForMe(o.item);
     }
     return true;
@@ -1870,6 +1899,7 @@ export default function App() {
     void window.milo.jobStart(goal, { approved: false });
   };
   doItForMeRef.current = doItForMe;
+  teachFirstRef.current = teachFirst;
   const resumeHomework = async (text: string) => {
     const sp = findPlan(text);
     if (!sp) {
@@ -2100,7 +2130,7 @@ export default function App() {
     setRadarView(null);
     if (!item) return askRadar(Infinity);
     bb("radar_start", { title: item.title, course: item.course });
-    void startHomework(`start my ${item.course} homework`, false, { target: item.course, here: false }, { title: item.title, course: item.course, due: item.due });
+    chooseHow({ title: item.title, course: item.course, due: item.due });
   };
   // Background scans: shortly after startup if the last one is old, then every 3 hours. Warnings checked every minute.
   useEffect(() => {
@@ -3600,6 +3630,7 @@ export default function App() {
       window.milo.home.onAction((a) => {
         homeQuietUntil.current = Date.now() + 120e3;
         if (a.kind === "together") void startHomeworkRef.current(`${a.item.title} ${a.item.course}`.trim(), false, { target: "", here: false }, a.item);
+        else if (a.kind === "teach") teachFirstRef.current(a.item);
         else void doItForMeRef.current(a.item);
       }),
     []

@@ -345,10 +345,11 @@ export function firstOffer<T extends { title: string; due_iso?: string; urgent?:
   return [...live].sort((a, b) => (Number(!!b.urgent) - Number(!!a.urgent)) || ((isNaN(t(a)) ? Infinity : t(a)) - (isNaN(t(b)) ? Infinity : t(b))))[0];
 }
 /** Their answer to the offer. "together" = work through it with Milo; "do" = Milo does it himself. (pure) */
-export function parseOfferAnswer(raw: string): "together" | "do" | "do_submit" | "no" | null {
+export function parseOfferAnswer(raw: string): "together" | "do" | "do_submit" | "teach" | "no" | null {
   const t = stripFiller(raw).toLowerCase().replace(/[.!?,]+/g, " ").replace(/\s+/g, " ").trim(); // keep "for me" / "just": they matter here
   // "do it and turn it in": he does it AND submits, no second yes needed (they just gave it)
   if (/\b(submit|turn (it|this|that) in|hand (it|this) in|turn in)\b/.test(t) && !/\b(don'?t|do not|not|never|without)\b.{0,20}\b(submit|turn|hand)/.test(t)) return "do_submit";
+  if (/\b(teach (me|it)|explain (it|this|that)|learn (it|this)|show me how|walk me through the (material|concepts?)|i don'?t (get|understand) (it|this))\b/.test(t)) return "teach";
   if (/^(no|nope|nah|not (now|yet|right now|today)|later|maybe later|never ?mind|i'?m good|no thanks?|not now thanks?)\b/.test(t)) return "no";
   if (/\b(do it (for me|yourself|all|by yourself)|you do it|do the whole (thing|assignment)|just do it|you (can )?(do|handle|take care of) it|do it (all )?(on your own|alone)|(by|for) yourself|do (it|this|that) for me|^(just )?do it (but|without)\b|finish it for me|complete it (for me)?|i'?m (slammed|swamped|out of time))\b/.test(t)) return "do";
   if (/^(yes|yeah|yep|yup|sure|ok(ay)?|let'?s (do it|go|start)|together|help me|work through it|with me|go( ahead)?|start|sounds good|please|do it with me)\b/.test(t)) return "together";

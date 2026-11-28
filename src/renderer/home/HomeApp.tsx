@@ -526,12 +526,12 @@ export default function HomeApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const startNext = (kind: "together" | "do") => {
+  const startNext = (kind: "together" | "do" | "teach") => {
     if (!next) return;
     setView("chat");
     setChatId(null);
     chatIdRef.current = null;
-    appendToChat({ role: "user", text: kind === "together" ? `Start ${next.title} with me` : `Do ${next.title} for me`, at: Date.now() });
+    appendToChat({ role: "user", text: kind === "together" ? `Help me do ${next.title}` : kind === "teach" ? `Teach me what I need for ${next.title}` : `Do ${next.title} for me`, at: Date.now() });
     setSteps([]);
     M.home.action({ kind, item: { title: next.title, course: next.course, due: next.due } });
   };
@@ -944,13 +944,16 @@ export default function HomeApp() {
                           </span>
                           <span>Due {next.due}</span>
                         </div>
-                        <p>Work through it together, or I can do the whole thing. I always ask before anything gets turned in.</p>
+                        <p>I can do it for you, help you do it, or teach it first. You always turn it in yourself.</p>
                         <div className="hb-row">
-                          <button className="hb-primary" onClick={() => startNext("together")}>
-                            Start together
-                          </button>
-                          <button className="hb-ghost" onClick={() => startNext("do")}>
+                          <button className="hb-primary" onClick={() => startNext("do")}>
                             Do it for me
+                          </button>
+                          <button className="hb-ghost" onClick={() => startNext("together")}>
+                            Help me do it
+                          </button>
+                          <button className="hb-ghost" onClick={() => startNext("teach")}>
+                            Teach me first
                           </button>
                         </div>
                       </div>
