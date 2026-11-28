@@ -30,7 +30,7 @@ const PICK = {
 const withTimeout = <T>(p: Promise<T>, ms: number, fallback: T) => Promise.race([p, new Promise<T>((r) => setTimeout(() => r(fallback), ms))]);
 
 /** The prompt file attached to the assignment, as text (Word/text read here; a PDF summarized by the AI). */
-async function attachmentText(portal: string, a: DAssignment): Promise<string> {
+export async function attachmentText(portal: string, a: DAssignment): Promise<string> {
   const f = a.attachments.find((x) => /\.(docx?|pdf|txt|rtf)$/i.test(x.name) && (!x.size || x.size < 8e6));
   if (!f) return "";
   const b64 = await fileBase64(portal, assignmentFileUrl(portal, a.course.id, a.id, f.fileId), 8e6).catch(() => null);

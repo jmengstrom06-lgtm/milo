@@ -185,7 +185,9 @@ declare global {
       saveClip: (wav: ArrayBuffer, note?: string) => void;
       bridgeStatus: () => Promise<boolean>;
       screenAsk: (q: string) => Promise<{ ok: boolean; text: string }>;
-      gameplan: (hint: string) => Promise<{ ok: true; data: GamePlan } | { ok: false; text: string }>;
+      gameplan: (hint: string, brief?: { text: string; url: string; title: string }) => Promise<{ ok: true; data: GamePlan } | { ok: false; text: string }>;
+      assignmentOpen: (q: { portal: string; title: string; course: string; show?: boolean }) => Promise<{ ok: true; kind: "assignment" | "quiz" | "discussion"; name: string; course: string; due: string | null; url: string; text: string } | { ok: false; text: string; signin?: boolean }>;
+      chromeD2lState: (portal: string) => Promise<{ state: "d2l" | "signin" | "other"; url: string }>;
       macSay: (text: string) => Promise<{ ok: true; audio: string } | { ok: false; text: string }>;
       onFlag: (fn: () => void) => () => void;
       setClickable: (clickable: boolean) => void;

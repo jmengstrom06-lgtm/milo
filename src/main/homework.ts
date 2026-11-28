@@ -50,7 +50,7 @@ const PLAN_TOOL = {
 
 export async function makeGamePlan(src: { hint: string; jpeg?: string; pageText?: string; url?: string; title?: string }) {
   const system = `${persona()}
-The student wants to START an assignment and is probably procrastinating. Read the assignment on their screen and build a game plan.
+The student wants to START an assignment and is probably procrastinating. Read the assignment (from D2L directly, or on their screen) and build a game plan.
 Rules:
 - 3 to 7 steps, in the order they should do them. Base every step on what's actually there: real question numbers, parts, word counts, files to submit.
 - Step 1 must be tiny and under 5 minutes (read the prompt, open the dataset, write one sentence, do question 1 only). Starting is the hard part.
