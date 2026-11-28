@@ -10,6 +10,7 @@ import { log as bb } from "./blackbox";
 import { callTool, persona } from "./brain";
 import { models } from "./gateway";
 import { failRecipe, verifyRecipe } from "./recipes";
+import { TURN_IN_LINE, turnInStep } from "./commit";
 import { budget, readMeter, startMeter, stopMeter } from "./usage";
 import { profileText } from "./profile";
 
@@ -310,6 +311,15 @@ async function runJob(j: Job, deps: JobDeps): Promise<Job> {
         if (step.status === "done" || step.status === "skipped") continue;
         // judge the step's real action: its first sentence, minus side notes in parentheses ("Save (or the submit button)")
         const action = step.do.split(/(?<=[.!?])\s|\n/)[0].replace(/\([^)]*\)/g, " ");
+        // turning in graded work is the student's click, always (an earlier "and turn it in" doesn't change that)
+        if (turnInStep(action, j.goal)) {
+          for (const s of j.steps.slice(i)) s.status = "skipped";
+          j.status = "done";
+          j.summary = TURN_IN_LINE;
+          save(j, deps);
+          bb("job", "graded_turn_in_left", { step: i + 1 });
+          return j;
+        }
         if (!j.approved && FINAL.test(action)) {
           j.status = "needs_you";
           j.question = `Everything's ready. Next I'd ${step.do.split("\n")[0].replace(/^./, (c) => c.toLowerCase())}. Want me to go ahead?`;

@@ -59,19 +59,21 @@ function start(): ChildProcessWithoutNullStreams | null {
     }
   });
   p.stderr.on("data", (d) => bb("hands", "native_stderr", { text: String(d).slice(0, 300) }));
-  p.on("exit", (code) => {
+  p.on("exit", (code, signal) => {
     proc = null;
+    const during = pending.size; // requests that were waiting when it stopped (a real crash mid-task)
     for (const [id, w] of pending) {
       clearTimeout(w.timer);
       w.resolve(null);
       pending.delete(id);
     }
+    if (quitting) return void bb("hands", "native_stopped", { why: "milo quit", ranS: Math.round((Date.now() - startedAt) / 1000) }); // normal shutdown, not a crash
     // Only a helper that dies again right away is broken. One that ran a while and then quit (macOS reclaims
     // idle processes) just starts fresh on the next request, however many times that happens.
     const ranMs = Date.now() - startedAt;
     if (ranMs > 60e3) crashes = 0;
     if (++crashes >= 3) broken = true;
-    bb("hands", "native_exit", { code, crashes, ranS: Math.round(ranMs / 1000) });
+    bb("hands", "native_exit", { code, signal, crashes, ranS: Math.round(ranMs / 1000), during });
   });
   p.on("error", (e) => {
     broken = true;
@@ -80,6 +82,14 @@ function start(): ChildProcessWithoutNullStreams | null {
   proc = p;
   bb("hands", "native_started", { bin });
   return p;
+}
+
+// Milo quitting stops the helper too: that's not a crash
+let quitting = false;
+try {
+  app.on("before-quit", () => (quitting = true));
+} catch {
+  /* tests */
 }
 
 /** Send one request to the helper. Resolves null if the helper isn't available (caller falls back). */

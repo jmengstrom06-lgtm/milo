@@ -6,6 +6,7 @@ import { webActions, WebAction } from "./brain";
 import { log as bb } from "./blackbox";
 import { activateApp, quitApp } from "./hands";
 import { detectBlocker } from "./blockers";
+import { TURN_IN_LINE, turnsInGradedWork } from "./commit";
 import { APPROVED, describeEl, fill, findEl, needsYes, recipeFor, RISKY, RStep, saveRecipe } from "./recipes";
 
 type El = {
@@ -129,6 +130,11 @@ export async function runWebTask(
       }
       lastSig = sig;
       const el = a.id ? snap.elements.find((e) => e.id === a.id) : undefined;
+      // Graded work: never turned in by Milo, even with a yes. The student clicks that button.
+      if (a.action === "click" && el && turnsInGradedWork(el.label, snap.url)) {
+        bb("web", "graded_turn_in_held", { label: el.label.slice(0, 40), url: snap.url.slice(0, 80) });
+        return { status: "ask", text: TURN_IN_LINE };
+      }
       // Hard stop before anything that can't be taken back (Save on a calendar, Send, Submit, Buy...).
       const commit = a.action === "click" && el && !APPROVED.test(task) ? needsYes(el.label, snap.url) : null;
       if (commit) {
