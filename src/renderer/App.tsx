@@ -1036,11 +1036,10 @@ export default function App() {
       void window.milo.jobStop();
       return true;
     }
-    // he finished but didn't turn it in: "submit it" / "turn it in" does just that
+    // "submit it" / "turn it in" after he finished: graded work is always the student's click
     if (j?.status === "done" && Date.now() - j.updatedAt < 60 * 60e3 && /^(submit|turn (it|this|that) in|hand (it|this) in|go ahead and (submit|turn it in))\b/.test(t)) {
-      setBubble("Turning it in…");
-      bb("submit_after", {});
-      void window.milo.jobStart(`Submit / turn in the work you just finished (it's open on screen). It was: ${j.goal.replace(/ The last step is submitting.*$/, "")}`, { approved: true });
+      bb("submit_after", { declined: true });
+      say("That one's yours to click. It's open and ready: look it over, then hit Submit. I never turn in graded work.").then(() => setBubble(null));
       return true;
     }
     if (j?.status === "needs_you" && /^(yes|yeah|yep|sure|go ahead|do it|ok(ay)?|submit( it)?|turn (it|this) in|hand it in|send it|approved?)\b/.test(t)) {
@@ -1826,7 +1825,7 @@ export default function App() {
   }, [lecture]);
   const startHomeworkRef = useRef(startHomework);
   startHomeworkRef.current = startHomework;
-  const doItForMeRef = useRef<(item: { title: string; course: string; due: string }, submit?: boolean) => Promise<void>>(async () => {});
+  const doItForMeRef = useRef<(item: { title: string; course: string; due: string }) => Promise<void>>(async () => {});
   /** "Want to start on X?" Work through it together (default), or Milo does it himself. */
   const offerStart = async (item: { title: string; course: string; due: string }) => {
     setMood("happy");
@@ -1854,22 +1853,21 @@ export default function App() {
     } else if (a === "together") {
       void startHomework(`${o.item.title} ${o.item.course}`.trim(), true, { target: "", here: false }, o.item);
     } else {
-      void doItForMe(o.item, a === "do_submit");
+      void doItForMe(o.item);
     }
     return true;
   };
-  /** Milo does the assignment himself as a job. The job engine never submits without the student's yes. */
-  // submit=false: he does it, then asks "want me to turn it in?" (the job engine pauses at the submit button).
-  // submit=true: the student said "and turn it in", so that yes is already given.
-  const doItForMe = async (item: { title: string; course: string; due: string }, submit = false) => {
+  /** Milo works through the assignment as a job and stops before turning it in: graded work is always the
+   *  student's click (the job engine and the browser both hold that button, even if they say "and submit it"). */
+  const doItForMe = async (item: { title: string; course: string; due: string }) => {
     closePlan();
     setMood("happy");
-    await say(submit ? "On it. I'll do it and turn it in when it's done." : "On it. I'll do the whole thing, then check with you before I turn it in.");
+    await say("On it. I'll work through it and leave it open for you to check and turn in yourself.");
     setBubble("Planning it out…");
     const where = portal ? `In Chrome, go to ${portal}, open my ${item.course} course, open the assignment "${item.title}", and complete it.` : `Complete my assignment "${item.title}"${item.course ? ` for ${item.course}` : ""} on screen.`;
-    const goal = `${where} The last step is submitting / turning it in.`;
-    bb("offer_do", { submit, approved: submit, goal });
-    void window.milo.jobStart(goal, { approved: submit });
+    const goal = `${where} Stop before submitting: the student turns it in.`;
+    bb("offer_do", { goal });
+    void window.milo.jobStart(goal, { approved: false });
   };
   doItForMeRef.current = doItForMe;
   const resumeHomework = async (text: string) => {
@@ -3602,7 +3600,7 @@ export default function App() {
       window.milo.home.onAction((a) => {
         homeQuietUntil.current = Date.now() + 120e3;
         if (a.kind === "together") void startHomeworkRef.current(`${a.item.title} ${a.item.course}`.trim(), false, { target: "", here: false }, a.item);
-        else void doItForMeRef.current(a.item, a.kind === "do_submit");
+        else void doItForMeRef.current(a.item);
       }),
     []
   );

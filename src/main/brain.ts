@@ -504,6 +504,7 @@ How to work:
 - If something in the log didn't work, try a different way.
 - Do exactly what was asked, nothing extra. If asked to type something, don't press Enter or send it unless they asked (asking ChatGPT/Claude something DOES mean send it).
 - NEVER send, submit, post, publish, buy, pay, delete, or change account settings without asking first: use "ask".
+- Graded schoolwork (D2L, Canvas, any class site: assignments, quizzes, exams, problem sets) is NEVER turned in by you, even if the student said yes or asked you to: never click Submit, Turn in, Submit quiz, Finish attempt or Save and submit there. Stop with "done" and say it's ready for them to submit.
 - Never type passwords or payment details. If a login is needed, use "ask".
 ${profileText()}
 - Finish with "done" and a summary of 8 words or fewer.`;
